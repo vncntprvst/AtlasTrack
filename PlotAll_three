@@ -1,0 +1,250 @@
+# for converting roi_table.mat to txt. In Matlab: writetable(roi_table{1,1})
+# for connecting tables. In Matlab
+# a = JHMAS1{1,1};
+# b = JHMAS2{1,1};
+# c = MAS2{1,1};
+# MAS_GRP = [a;b;c];
+# writetable(MAS_GRP)
+
+using CSV, DataFrames
+# convert txt file to csv
+cd("/Users/jun/Documents/Project/Orofacial premotor circuits in the adult - RV tracing and Manipulation/Counting and quantification/roi_tables/WP_MAS_Geni_all")
+
+wp007 = CSV.read("roi_table_007retro_wp4_20200408.txt");
+mas016 = CSV.read("016_mas2.txt");
+genio4 = CSV.read("024retro_genio4.txt");
+
+# roi_table = CSV.read(".txt");
+# CSV.write("", roi_table); # save csv file for later use
+
+file_name = [:wp007 :mas016 :genio4];
+# file_name = [:whisker :genio :mas]; # add roi_tables to be converted
+
+#-------------------------------------------------------------------------------
+# convert the coordinates in the tables to Allen CCF coordinates
+
+for i = 1:length(file_name);
+    eval(file_name[i]).AP_location = -(eval(file_name[i]).AP_location*100);
+    eval(file_name[i]).ML_location = eval(file_name[i]).ML_location*100;
+    eval(file_name[i]).DV_location = eval(file_name[i]).DV_location*100;
+end
+
+#-------------------------------------------------------------------------------
+# find rostral and caudal end
+
+nucleus = "IRN"
+
+rostral = [];
+caudal = [];
+for i = 1:length(file_name);
+max = maximum(eval(file_name[i]).AP_location);
+min = minimum(eval(file_name[i]).AP_location);
+push!(caudal, max);
+push!(rostral, min);
+end
+
+rostral_end = convert(Int64, floor(maximum(rostral))) + 540; # AP corrdinate of Bregma in Allen CCF is 540
+caudal_end = convert(Int64, floor(minimum(caudal))) + 540;
+
+
+#-------------------------------------------------------------------------------
+# brain outlines
+using NPZ
+atlas = npzread("/Users/jun/Documents/MATLAB/Allen/annotation_volume_10um_by_index.npy");
+
+# coronal outline
+NumberOfMerge = convert(Int64, floor(caudal_end - rostral_end));
+
+AP,DV,ML = size(atlas)
+coronal = Array{Float16, 3}(undef, DV, ML, NumberOfMerge);
+using Images
+for i =1:NumberOfMerge
+    coronal[:,:,i] = canny(ifelse.(convert(Array{Float16}, atlas[floor(rostral_end) + i,:,:]) .<=1, 0, 1),(0.01,0.0));
+end
+coronal_merge = sum(coronal, dims = 3);
+coronal_merge = convert(Array{Float64,2},coronal_merge[:,:,1]);
+
+# test visualization
+# fig, ax = plt.subplots(1,1, figsize=(10,10))
+# ax.imshow(coronal_merge[:,:,1], extent =[-570, 570, 800, 0] ,cmap="binary", zorder = 0); #
+# plt.axis("equal");
+
+# horizontal outline
+NumberOfMerge = 100 # arbitrary value.
+AP,DV,ML = size(atlas)
+horizontal = Array{Float16, 3}(undef, AP, ML, NumberOfMerge);
+using Images
+for i =1:NumberOfMerge
+    horizontal[:,:,i] = canny(ifelse.(convert(Array{Float16}, atlas[:,550 + i,:])
+     .<=1, 0, 1),(0.01,0.0));
+     # atlas[:, x + i,:]) x = arbitary value. find a value that gives a good outline
+end
+
+horizontal_merge = sum(horizontal, dims = 3);
+horizontal_merge = convert(Array{Float64,2}, horizontal_merge[:,:,1]);
+horizontal_merge = horizontal_merge[840:1320,:,:]; # crop in arbitary AP range
+
+# test visualization
+# fig, ax = plt.subplots(1,1, figsize=(10,5))
+# ax.imshow(horizontal_merge[:,:,1], extent =[-570, 570, 780, 310] ,cmap="binary", zorder = 0);
+# plt.axis("equal");
+# ax.set(ylim=(780, 300))
+
+#-------------------------------------------------------------------------------
+using PyCall, PyPlot
+sns = pyimport("seaborn")
+pygui(true)
+plt.style.use("gadfly") # plot with Gadfly style
+
+# coronal
+# scatter plot
+c = ["#00BCFD" "#D3C93A" "#FF62A4"]
+cmap = ["PuRd" "Wistia" "Blues"] # PuRd
+i = 1
+j = 1
+k = 1
+while i <= length(file_name);
+        # scatter plot
+        close()
+        fig, ax = plt.subplots(1,1, figsize=(10,10))
+        ax.imshow(coronal_merge[:,:,1], extent =[-570, 570, 800, 0] ,cmap="binary", zorder = 0); #
+        plt.axis("equal");
+
+        ax.scatter(eval(file_name[i]).ML_location,
+        eval(file_name[i]).DV_location,
+        c = c[i],  s =0.5, zorder = 1)
+
+        ax.grid()
+        ax.xaxis.set_major_formatter(plt.NullFormatter())
+        ax.yaxis.set_major_formatter(plt.NullFormatter())
+
+        savefig(string((file_name[i]), "_"  ,nucleus,  "_coronal.png"), dpi = 600, format = "png")
+
+        # density plot
+        close()
+        fig, ax = plt.subplots(1,1, figsize=(10,10))
+        ax.imshow(coronal_merge[:,:,1], extent =[-570, 570, 800, 0] ,cmap="binary", zorder = 0); #
+        plt.axis("equal");
+
+        ax = sns.kdeplot(eval(file_name[i]).ML_location,
+        eval(file_name[i]).DV_location,
+        cmap = cmap[i], n_levels =4, bw = 12, linewidths = 0.8, zorder = 1)
+
+        ax.grid()
+        ax.xaxis.set_major_formatter(plt.NullFormatter())
+        ax.yaxis.set_major_formatter(plt.NullFormatter())
+
+        savefig(string((file_name[i]), "_"  ,nucleus,  "_coronal_density.png"), dpi = 600, format = "png")
+        global i = i + 1
+
+    if i == length(file_name) + 1;
+        close()
+        fig, ax = plt.subplots(1,1, figsize=(10,10))
+        ax.imshow(coronal_merge[:,:,1], extent =[-570, 570, 800, 0] ,cmap="binary", zorder = 0); #
+        plt.axis("equal");
+        while j <= length(file_name)
+            ax.scatter(eval(file_name[j]).ML_location,
+            eval(file_name[j]).DV_location,
+            c = c[j],  s =0.5, zorder = 1)
+            global j = j + 1
+        if j == length(file_name) + 1
+
+            ax.grid()
+            ax.xaxis.set_major_formatter(plt.NullFormatter())
+            ax.yaxis.set_major_formatter(plt.NullFormatter())
+
+            savefig(string("merge", "_", nucleus, "_coronal.png"), dpi = 600, format = "png")
+            close()
+            fig, ax = plt.subplots(1,1, figsize=(10,10))
+            ax.imshow(coronal_merge[:,:,1], extent =[-570, 570, 800, 0] ,cmap="binary", zorder = 0); #
+            plt.axis("equal");
+            while k <= length(file_name)
+                # density plot
+                ax = sns.kdeplot(eval(file_name[k]).ML_location,
+                eval(file_name[k]).DV_location,
+                cmap = cmap[k], n_levels =4, bw = 12, linewidths = 0.8, zorder = 1)
+                global k = k + 1
+                if k == length(file_name) + 1
+
+                    ax.grid()
+                    ax.xaxis.set_major_formatter(plt.NullFormatter())
+                    ax.yaxis.set_major_formatter(plt.NullFormatter())
+
+                    savefig(string("merge", "_"  ,nucleus,  "_coronal_density.png"), dpi = 600, format = "png")
+                    close()
+end
+end
+end
+end
+end
+end
+#-------------------------------------------------------------------------------
+# horizontal
+c = ["#00BCFD" "#D3C93A" "#FF62A4"]
+i = 1
+j = 1
+while i <= length(file_name);
+        close()
+        fig, ax = plt.subplots(1,1, figsize=(10,5))
+        ax.imshow(horizontal_merge[:,:,1], extent =[-570, 570, 780, 310] ,cmap="binary", zorder = 0);
+        plt.axis("equal");
+        ax.set(ylim=(780, 300))
+
+        ax.scatter(eval(file_name[i]).ML_location,
+        eval(file_name[i]).AP_location,
+        c = c[i],  s =0.5, zorder = 1)
+
+        ax.grid()
+        ax.xaxis.set_major_formatter(plt.NullFormatter())
+        ax.yaxis.set_major_formatter(plt.NullFormatter())
+
+        savefig(string((file_name[i]), "_"  ,nucleus,  "_horizontal.png"), dpi = 600, format = "png")
+        global i = i + 1
+
+    if i == length(file_name) + 1;
+        close()
+        fig, ax = plt.subplots(1,1, figsize=(10,5))
+        ax.imshow(horizontal_merge[:,:,1], extent =[-570, 570, 780, 310] ,cmap="binary", zorder = 0); #
+        plt.axis("equal");
+        while j <= length(file_name)
+            ax.scatter(eval(file_name[j]).ML_location,
+            eval(file_name[j]).AP_location,
+            c = c[j],  s =0.5, zorder = 1)
+
+            ax.grid()
+            ax.xaxis.set_major_formatter(plt.NullFormatter())
+            ax.yaxis.set_major_formatter(plt.NullFormatter())
+
+            savefig(string("merge", "_", nucleus, "_horizontal.png"), dpi = 600, format = "png")
+            global j = j + 1
+end
+end
+end
+
+
+
+
+i = 1
+j = 1
+k = 1
+while i <= 4
+    println(i)
+    global i = i + 1
+    if i == 5
+        while j <= 5
+            println(j*10)
+    global j = j + 1
+
+    if j == 6
+        println("hello")
+        while k <= 5
+            println(k*1200)
+            global k = k + 1
+            if k == 6
+                println("hello hello")
+end
+end
+end
+end
+end
+end
