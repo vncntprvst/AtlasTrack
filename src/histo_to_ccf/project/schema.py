@@ -84,6 +84,13 @@ class RegistrationResult(BaseModel):
     residual: float | None = None
 
 
+class ChannelLevels(BaseModel):
+    """Per-channel intensity levels for display normalisation (0–1 scale)."""
+
+    low: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    high: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0])
+
+
 class Section(BaseModel):
     """One brain section extracted from a slide image."""
 
@@ -94,6 +101,9 @@ class Section(BaseModel):
     plane: PlaneParams | None = None
     # Filled by M3 pipeline; absent for M1 manual-mode sections.
     registration: RegistrationResult | None = None
+    flip_h: bool = False
+    flip_v: bool = False
+    levels: ChannelLevels | None = None
 
 
 class Slide(BaseModel):
@@ -101,6 +111,9 @@ class Slide(BaseModel):
 
     image_path: str
     sections: list[Section] = []
+    flip_h: bool = False
+    flip_v: bool = False
+    levels: ChannelLevels | None = None
 
 
 class AtlasRef(BaseModel):

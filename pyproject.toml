@@ -123,3 +123,6 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+markers = [
+    "qt: marks tests that require a Qt display (deselect with -m 'not qt')",
+]
