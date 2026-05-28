@@ -56,3 +56,6 @@ deps/src/
 docs/build/
 docs/site/
 Manifest.toml
+
+# Example data
+example data/
