@@ -63,11 +63,22 @@ def register_one_cmd(
         ),
     ] = False,
     output_json: Annotated[
-        Path, typer.Option(help="Where to write the project JSON.")
-    ] = Path("./out.histo2ccf.json"),
+        Path | None,
+        typer.Option(
+            help=(
+                "Where to write the project JSON. Defaults to "
+                "<image_dir>/<image_stem>.histo2ccf.json."
+            ),
+        ),
+    ] = None,
     output_pkl: Annotated[
         Path | None,
-        typer.Option(help="Optional HERBS-compatible pkl output (probe trajectory)."),
+        typer.Option(
+            help=(
+                "Optional HERBS-compatible pkl output. Pass a path, or 'auto' to "
+                "write <image_dir>/<image_stem>.pkl."
+            ),
+        ),
     ] = None,
     n_pkl_samples: Annotated[
         int, typer.Option(help="Samples along the tip→entry line in the pkl.")
@@ -137,13 +148,18 @@ def register_one_cmd(
     register_project(project, predictor)
 
     shank = project.probes[0].shanks[0]
-    typer.echo(f"tip   CCF (AP, ML, DV) µm: {shank.tip_ccf_um}")
-    typer.echo(f"entry CCF (AP, ML, DV) µm: {shank.entry_ccf_um}")
+    typer.echo(f"tip   CCF (AP, ML, DV) um: {shank.tip_ccf_um}")
+    typer.echo(f"entry CCF (AP, ML, DV) um: {shank.entry_ccf_um}")
 
+    image_path = Path(image)
+    if output_json is None:
+        output_json = image_path.with_suffix(".histo2ccf.json")
     save_project(project, output_json)
     typer.echo(f"wrote project -> {output_json}")
 
     if output_pkl is not None:
+        if str(output_pkl).lower() == "auto":
+            output_pkl = image_path.with_suffix(".pkl")
         if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
             raise typer.Exit(code=2)
         ccf = np.linspace(
