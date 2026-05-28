@@ -1,4 +1,14 @@
-"""Command-line interface. `histo2ccf` is the entry point."""
+"""histo2ccf — guided histology→atlas registration with probe trajectory mapping.
+
+Typical workflow
+----------------
+1. ``histo2ccf gui``           — launch the interactive napari GUI.
+2. ``histo2ccf split image.tif`` — detect sections in a composite slide.
+3. ``histo2ccf register-one …`` — headless single-section registration.
+4. ``histo2ccf register project.json`` — run the full M3 pipeline on a project.
+
+Run ``histo2ccf <command> --help`` for per-command options.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +17,12 @@ from typing import Annotated
 import typer
 from loguru import logger
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    help=__doc__,
+    rich_markup_mode=None,
+)
 
 
 def _parse_xy(s: str, name: str) -> tuple[float, float]:
@@ -29,8 +44,16 @@ def _parse_bbox(s: str) -> tuple[int, int, int, int]:
 
 
 @app.command()
+def version() -> None:
+    """Print the installed package version and exit."""
+    from histo_to_ccf import __version__
+
+    typer.echo(f"histo2ccf {__version__}")
+
+
+@app.command()
 def gui() -> None:
-    """Launch the napari-based GUI (milestone M4 — not yet implemented)."""
+    """Launch the interactive napari GUI."""
     from histo_to_ccf.gui.app import launch
 
     launch()

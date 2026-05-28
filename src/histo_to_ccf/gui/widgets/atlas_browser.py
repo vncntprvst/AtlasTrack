@@ -38,13 +38,17 @@ class AtlasBrowserWidget(QWidget):
         self,
         state: WorkflowState,
         viewer: "napari.Viewer",
+        settings=None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._state = state
         self._viewer = viewer
+        self._settings = settings
         self._atlas_layer: "napari.layers.Image | None" = None
         self._build_ui()
+        if settings is not None:
+            self._apply_settings(settings)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -157,12 +161,34 @@ class AtlasBrowserWidget(QWidget):
 
     def _on_atlas_loaded(self, atlas) -> None:
         self._state.atlas = atlas
-        self._state.project.atlas.name = self._current_atlas_id()
+        atlas_id = self._current_atlas_id()
+        self._state.project.atlas.name = atlas_id
         ap_max = atlas.reference.shape[0] * atlas.resolution[0]
         self._ap_spin.setRange(0.0, float(ap_max))
         self._atlas_status.setText(
             f"Loaded {atlas.atlas_name}  {atlas.resolution[0]:.0f} µm"
         )
+        if self._settings is not None:
+            self._settings.last_atlas_id = atlas_id
+
+    def _apply_settings(self, settings) -> None:
+        """Pre-select the combo box to match the last-used atlas."""
+        atlas_id = settings.last_atlas_id
+        for i, (_, aid) in enumerate(_QUICK_PICKS):
+            if aid == atlas_id:
+                self._atlas_combo.setCurrentIndex(i)
+                return
+        # Not in quick-picks → select Custom and fill free-text field.
+        last_idx = len(_QUICK_PICKS) - 1
+        self._atlas_combo.setCurrentIndex(last_idx)
+        self._custom_id.setText(atlas_id)
+        self._custom_id.setVisible(True)
+
+    def collect_settings(self, settings) -> None:
+        """Write the current atlas selection back into settings."""
+        atlas_id = self._current_atlas_id()
+        if atlas_id:
+            settings.last_atlas_id = atlas_id
 
     def _preview_slice(self) -> None:
         atlas = self._state.atlas
