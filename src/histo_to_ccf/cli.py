@@ -36,6 +36,79 @@ def gui() -> None:
     launch()
 
 
+@app.command()
+def split(
+    image: Annotated[Path, typer.Option(help="Path to a composite slide image.")],
+    min_area_px: Annotated[
+        int, typer.Option(help="Drop components below this area.")
+    ] = 5000,
+    closing_radius_px: Annotated[
+        int,
+        typer.Option(
+            help=(
+                "Morphological closing radius; bridges anatomical gaps within "
+                "a section (cerebellum/brainstem). 0 disables."
+            ),
+        ),
+    ] = 0,
+    expected_count: Annotated[
+        int,
+        typer.Option(
+            help="If > 0, keep only the N largest passing components.",
+        ),
+    ] = 0,
+    output_json: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Sidecar JSON listing detected sections. Defaults to "
+                "<image_dir>/<image_stem>.sections.json."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Detect sections in a composite slide and write a sidecar JSON of bboxes."""
+    import json
+
+    from histo_to_ccf.io.image import load_image
+    from histo_to_ccf.sectioning.ordering import order_sections
+    from histo_to_ccf.sectioning.split import detect_sections
+
+    img = load_image(image)
+    sections = detect_sections(
+        img,
+        min_area_px=min_area_px,
+        closing_radius_px=closing_radius_px,
+        expected_count=expected_count if expected_count > 0 else None,
+    )
+    ordered = order_sections(sections)
+    h, w = img.shape[:2]
+
+    sidecar = {
+        "image_path": str(image),
+        "image_size_px": [int(w), int(h)],
+        "sections": [
+            {
+                "index": o.ap_order,
+                "row": o.row,
+                "col": o.col,
+                "ap_order": o.ap_order,
+                "bbox_px": list(o.section.bbox_px),
+                "centroid_px": list(o.section.centroid_px),
+                "area_px": o.section.area_px,
+                "aspect_ratio": round(o.section.aspect_ratio, 3),
+            }
+            for o in ordered
+        ],
+    }
+
+    image_path = Path(image)
+    if output_json is None:
+        output_json = image_path.with_suffix(".sections.json")
+    output_json.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+    typer.echo(f"detected {len(ordered)} section(s) -> {output_json}")
+
+
 @app.command("register-one")
 def register_one_cmd(
     image: Annotated[Path, typer.Option(help="Path to the slide image (TIFF/PNG).")],
