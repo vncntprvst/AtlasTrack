@@ -1,75 +1,237 @@
 """Orchestrate the per-section registration pipeline.
 
-For M1 this is intentionally minimal: it takes a Project, a PlanePredictor, and
-fills each shank's tip/entry CCF coordinates by composing the per-section
-:class:`SectionTransform`. There is no B-spline refinement yet.
+Two execution paths:
+
+- **Manual (M1)**: every section has ``Section.plane`` populated by the user
+  (midline + dorsal-surface anchors + AP). The pipeline fills shank
+  coordinates by running a :class:`ManualSectionTransform`.
+
+- **Registered (M3)**: every section gets an oblique atlas plane and an
+  optional 2D B-spline refinement. The pipeline:
+
+    1. Resolves an :class:`Anchoring` (either from PlaneParams or from a
+       :class:`PlanePredictor`).
+    2. Resamples the atlas reference at that plane.
+    3. Runs :func:`refine_with_bspline` against the section image.
+    4. Writes the SimpleITK transform to a sidecar file.
+    5. Stores the resulting :class:`RegistrationResult` on the Section.
+    6. Re-projects every shank's tip/entry pixel through the composed
+       transform into CCF µm.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
 from loguru import logger
 
-from histo_to_ccf.project.schema import Project, Section, Shank
+from histo_to_ccf.atlas.planes import (
+    Anchoring,
+    anchoring_from_plane_params,
+    resample_atlas_at_plane,
+)
+from histo_to_ccf.io.ccf_coords import atlas_resolution_um
+from histo_to_ccf.project.schema import Project, RegistrationResult, Section, Shank
+from histo_to_ccf.registration.bspline import refine_with_bspline
 from histo_to_ccf.registration.predictor import PlanePredictor
-from histo_to_ccf.registration.transforms import SectionTransform
+from histo_to_ccf.registration.transforms import (
+    ManualSectionTransform,
+    RegisteredSectionTransform,
+    build_registered_transform,
+)
+
+if TYPE_CHECKING:
+    from brainglobe_atlasapi import BrainGlobeAtlas
 
 
-def _section_transform_for(section: Section, predictor: PlanePredictor) -> SectionTransform:
-    if section.plane is None:
-        # The predictor would normally see the cropped section image here.
-        # For M1 the ManualPredictor ignores the image, so we pass None safely.
-        plane = predictor.predict(None, section_index=section.index)  # type: ignore[arg-type]
-    else:
-        plane = section.plane
-    return SectionTransform(plane=plane)
+# ── Manual (M1) pipeline ──────────────────────────────────────────────────────
 
 
 def register_project(project: Project, predictor: PlanePredictor) -> Project:
-    """Fill in tip/entry CCF coordinates for every shank in every probe.
-
-    Mutates and returns the project in place.
-    """
-    # Build a transform per (slide_idx, section_idx).
-    transforms: dict[tuple[int, int], SectionTransform] = {}
+    """Manual-mode (M1) pipeline. Mutates and returns ``project``."""
+    transforms: dict[tuple[int, int], ManualSectionTransform] = {}
     for slide_idx, slide in enumerate(project.slides):
         for section in slide.sections:
-            transforms[(slide_idx, section.index)] = _section_transform_for(
+            transforms[(slide_idx, section.index)] = _manual_transform_for(
                 section, predictor
             )
-
     for probe in project.probes:
         for shank in probe.shanks:
-            _apply_to_shank(shank, project, transforms)
+            _apply_to_shank_manual(shank, project, transforms)
     return project
 
 
-def _apply_to_shank(
+def _manual_transform_for(
+    section: Section, predictor: PlanePredictor
+) -> ManualSectionTransform:
+    if section.plane is None:
+        plane = predictor.predict(None, section_index=section.index)  # type: ignore[arg-type]
+    else:
+        plane = section.plane
+    return ManualSectionTransform(plane=plane)
+
+
+def _apply_to_shank_manual(
     shank: Shank,
     project: Project,
-    transforms: dict[tuple[int, int], SectionTransform],
+    transforms: dict[tuple[int, int], ManualSectionTransform],
 ) -> None:
     if shank.tip_px is not None and shank.tip_section_idx is not None:
-        tx = _lookup_transform(project, shank.tip_section_idx, transforms)
-        if tx is None:
-            logger.warning("no transform for tip section idx {}", shank.tip_section_idx)
-        else:
+        tx = _lookup_manual(project, shank.tip_section_idx, transforms)
+        if tx is not None:
             shank.tip_ccf_um = tx.apply(shank.tip_px.x_px, shank.tip_px.y_px)
-
     if shank.entry_px is not None and shank.entry_section_idx is not None:
-        tx = _lookup_transform(project, shank.entry_section_idx, transforms)
-        if tx is None:
-            logger.warning("no transform for entry section idx {}", shank.entry_section_idx)
-        else:
+        tx = _lookup_manual(project, shank.entry_section_idx, transforms)
+        if tx is not None:
             shank.entry_ccf_um = tx.apply(shank.entry_px.x_px, shank.entry_px.y_px)
 
 
-def _lookup_transform(
+def _lookup_manual(
     project: Project,
     section_idx: int,
-    transforms: dict[tuple[int, int], SectionTransform],
-) -> SectionTransform | None:
-    """Find a transform by section index, scanning slides in order."""
+    transforms: dict[tuple[int, int], ManualSectionTransform],
+) -> ManualSectionTransform | None:
     for slide_idx, slide in enumerate(project.slides):
         for section in slide.sections:
             if section.index == section_idx:
                 return transforms.get((slide_idx, section.index))
     return None
+
+
+# ── Registered (M3) pipeline ──────────────────────────────────────────────────
+
+
+def register_section_image(
+    section_image: np.ndarray,
+    atlas: "BrainGlobeAtlas",
+    *,
+    anchoring: Anchoring,
+    bspline_grid: tuple[int, int] = (8, 8),
+    max_iterations: int = 100,
+) -> tuple[RegistrationResult, "object"]:
+    """Run the M3 registration on one section.
+
+    Returns the persistable :class:`RegistrationResult` plus the in-memory
+    SimpleITK transform (caller writes it to a sidecar if desired).
+    """
+    h, w = section_image.shape[:2]
+    out_shape = (int(h), int(w))
+    reference, _annot = resample_atlas_at_plane(atlas, anchoring, out_shape)
+
+    moving = section_image
+    if moving.ndim == 3:
+        # Use luminance for registration; preserves brain outline.
+        moving = moving[..., :3].astype(np.float32).mean(axis=-1)
+
+    result = refine_with_bspline(
+        reference,
+        moving.astype(np.float32),
+        grid_size=bspline_grid,
+        max_iterations=max_iterations,
+    )
+
+    reg = RegistrationResult(
+        anchoring=list(anchoring.as_tuple()),
+        output_size_px=(out_shape[0], out_shape[1]),
+        bspline_transform_path=None,
+        residual=result.residual_rms,
+    )
+    return reg, result.transform
+
+
+def register_project_with_atlas(
+    project: Project,
+    atlas: "BrainGlobeAtlas",
+    *,
+    section_images: dict[int, np.ndarray],
+    transforms_dir: Path,
+    bspline_grid: tuple[int, int] = (8, 8),
+    max_iterations: int = 100,
+) -> Project:
+    """Drive the full M3 pipeline across every section in ``project``.
+
+    ``section_images`` maps section index → preprocessed section image array
+    (grayscale or RGB). ``transforms_dir`` is where .tfm sidecars get written
+    (relative paths stored in the project).
+    """
+    transforms_dir = Path(transforms_dir)
+    transforms_dir.mkdir(parents=True, exist_ok=True)
+    res_um = atlas_resolution_um(atlas)
+
+    registered: dict[tuple[int, int], RegisteredSectionTransform] = {}
+    for slide_idx, slide in enumerate(project.slides):
+        for section in slide.sections:
+            img = section_images.get(section.index)
+            if img is None or section.plane is None:
+                logger.warning(
+                    "skipping section {} (missing image or plane)", section.index
+                )
+                continue
+            anchoring = anchoring_from_plane_params(atlas, section.plane)
+            reg, sitk_transform = register_section_image(
+                img,
+                atlas,
+                anchoring=anchoring,
+                bspline_grid=bspline_grid,
+                max_iterations=max_iterations,
+            )
+
+            import SimpleITK as sitk
+
+            tfm_path = transforms_dir / f"section_{section.index:03d}.h5"
+            sitk.WriteTransform(sitk_transform, str(tfm_path))
+            reg.bspline_transform_path = str(tfm_path.relative_to(transforms_dir.parent))
+            section.registration = reg
+
+            registered[(slide_idx, section.index)] = RegisteredSectionTransform(
+                anchoring=anchoring,
+                output_size_px=reg.output_size_px,
+                bspline=sitk_transform,
+                atlas_resolution_um=res_um,
+            )
+
+    for probe in project.probes:
+        for shank in probe.shanks:
+            _apply_to_shank_registered(shank, project, registered)
+    return project
+
+
+def _apply_to_shank_registered(
+    shank: Shank,
+    project: Project,
+    transforms: dict[tuple[int, int], RegisteredSectionTransform],
+) -> None:
+    def lookup(section_idx: int) -> RegisteredSectionTransform | None:
+        for slide_idx, slide in enumerate(project.slides):
+            for section in slide.sections:
+                if section.index == section_idx:
+                    return transforms.get((slide_idx, section.index))
+        return None
+
+    if shank.tip_px is not None and shank.tip_section_idx is not None:
+        tx = lookup(shank.tip_section_idx)
+        if tx is not None:
+            shank.tip_ccf_um = tx.apply(shank.tip_px.x_px, shank.tip_px.y_px)
+    if shank.entry_px is not None and shank.entry_section_idx is not None:
+        tx = lookup(shank.entry_section_idx)
+        if tx is not None:
+            shank.entry_ccf_um = tx.apply(shank.entry_px.x_px, shank.entry_px.y_px)
+
+
+def reload_registered_transforms(
+    project: Project,
+    atlas: "BrainGlobeAtlas",
+    *,
+    project_dir: Path | None = None,
+) -> dict[tuple[int, int], RegisteredSectionTransform]:
+    """Rebuild RegisteredSectionTransforms from persisted RegistrationResult."""
+    out: dict[tuple[int, int], RegisteredSectionTransform] = {}
+    for slide_idx, slide in enumerate(project.slides):
+        for section in slide.sections:
+            if section.registration is None:
+                continue
+            out[(slide_idx, section.index)] = build_registered_transform(
+                section.registration, atlas, project_dir=project_dir
+            )
+    return out

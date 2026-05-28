@@ -244,5 +244,105 @@ def register_one_cmd(
         typer.echo(f"wrote HERBS pkl -> {output_pkl}")
 
 
+@app.command("register")
+def register_cmd(
+    project_json: Annotated[
+        Path, typer.Argument(help="Path to the project JSON produced by register-one or the GUI.")
+    ],
+    atlas: Annotated[
+        str, typer.Option(help="BrainGlobe atlas id (e.g. 'allen_mouse_25um').")
+    ] = "allen_mouse_25um",
+    bspline_grid: Annotated[
+        str, typer.Option(help="B-spline control-point grid as 'NxM' (e.g. '8x8').")
+    ] = "8x8",
+    max_iterations: Annotated[
+        int, typer.Option(help="Max LBFGSB iterations per section.")
+    ] = 100,
+    transforms_dir: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Directory for .tfm sidecar files. "
+                "Defaults to <project_dir>/transforms/."
+            )
+        ),
+    ] = None,
+    output_json: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Where to write the updated project JSON. "
+                "Defaults to overwriting the input file."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Run the M3 atlas-registration pipeline on every section in a project.
+
+    For each section that has a PlaneParams, resamples the atlas at that plane,
+    refines the alignment with a 2D B-spline, and stores a RegistrationResult.
+    The updated project JSON is written (overwriting by default).
+    """
+    import numpy as np
+
+    from brainglobe_atlasapi import BrainGlobeAtlas
+
+    from histo_to_ccf.io.image import crop, load_image
+    from histo_to_ccf.project.io import load_project, save_project
+    from histo_to_ccf.registration.pipeline import register_project_with_atlas
+
+    # Parse grid
+    try:
+        gn, gm = bspline_grid.lower().split("x")
+        grid = (int(gn), int(gm))
+    except Exception as e:
+        raise typer.BadParameter(f"--bspline-grid expects 'NxM' (got {bspline_grid!r})") from e
+
+    project = load_project(project_json)
+    project_dir = project_json.parent
+
+    logger.info("loading atlas {}", atlas)
+    bg_atlas = BrainGlobeAtlas(atlas)
+
+    if transforms_dir is None:
+        transforms_dir = project_dir / "transforms"
+
+    # Build section_images mapping: section_index -> cropped grayscale array.
+    section_images: dict[int, np.ndarray] = {}
+    for slide in project.slides:
+        slide_img = load_image(slide.image_path)
+        for section in slide.sections:
+            x0, y0, x1, y1 = section.bbox_px
+            crop_img = crop(slide_img, (x0, y0, x1, y1))
+            if crop_img.ndim == 3:
+                crop_img = crop_img[..., :3].astype(np.float32).mean(axis=-1)
+            section_images[section.index] = crop_img.astype(np.float32)
+
+    logger.info(
+        "registering {} section(s) with atlas={} grid={}",
+        len(section_images), atlas, grid,
+    )
+    register_project_with_atlas(
+        project,
+        bg_atlas,
+        section_images=section_images,
+        transforms_dir=transforms_dir,
+        bspline_grid=grid,
+        max_iterations=max_iterations,
+    )
+
+    registered_count = sum(
+        1
+        for slide in project.slides
+        for section in slide.sections
+        if section.registration is not None
+    )
+    typer.echo(f"registered {registered_count} section(s)")
+
+    out_path = output_json or project_json
+    save_project(project, out_path)
+    typer.echo(f"wrote project -> {out_path}")
+
+
 if __name__ == "__main__":
     app()

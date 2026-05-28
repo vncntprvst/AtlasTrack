@@ -68,6 +68,22 @@ class PlaneParams(BaseModel):
     image_right_is_anatomical_right: bool = True
 
 
+class RegistrationResult(BaseModel):
+    """Per-section registration outputs from the M3 pipeline.
+
+    ``anchoring`` is the QuickNII 9-vector defining the atlas plane.
+    ``bspline_transform_path`` points to a SimpleITK ``.tfm`` (project-relative).
+    ``residual`` is the final optimizer metric (lower = better).
+    ``output_size_px`` is ``(height, width)`` of the resampled atlas slice the
+    B-spline transform is defined against.
+    """
+
+    anchoring: list[float] = Field(min_length=9, max_length=9)
+    output_size_px: tuple[int, int]
+    bspline_transform_path: str | None = None
+    residual: float | None = None
+
+
 class Section(BaseModel):
     """One brain section extracted from a slide image."""
 
@@ -76,8 +92,8 @@ class Section(BaseModel):
     bbox_px: tuple[int, int, int, int]  # (x0, y0, x1, y1) in slide coords
     ap_order: int = 0
     plane: PlaneParams | None = None
-    # Path (project-relative) to a serialized B-spline displacement field, or None.
-    bspline_displacement_path: str | None = None
+    # Filled by M3 pipeline; absent for M1 manual-mode sections.
+    registration: RegistrationResult | None = None
 
 
 class Slide(BaseModel):
