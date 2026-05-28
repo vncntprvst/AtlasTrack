@@ -22,6 +22,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
     from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
     from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
     from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
     from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
 
@@ -70,7 +71,15 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     atlas_layout.addWidget(ordering)
     tabs.addTab(tab_atlas, "Atlas")
 
-    # -- Tab 4: Save ---------------------------------------------------------
+    # -- Tab 4: Register + Results -------------------------------------------
+    tab_register = QWidget()
+    reg_layout = QVBoxLayout(tab_register)
+    reg_layout.setContentsMargins(2, 2, 2, 2)
+    register_panel = RegisterPanelWidget(state, viewer)
+    reg_layout.addWidget(register_panel)
+    tabs.addTab(tab_register, "Register")
+
+    # -- Tab 5: Save ---------------------------------------------------------
     tab_save = QWidget()
     save_layout = QVBoxLayout(tab_save)
     save_layout.setContentsMargins(2, 2, 2, 2)
