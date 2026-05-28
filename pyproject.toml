@@ -1,0 +1,125 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "histo-to-ccf"
+version = "0.0.1"
+description = "Guided registration of histological brain sections to a reference atlas (Allen CCF), with probe trajectory mapping in 3D."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+authors = [
+    { name = "Wang Lab" },
+]
+keywords = ["neuroscience", "histology", "registration", "allen-ccf", "neuropixels", "napari"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-image>=0.22",
+    "tifffile>=2024.1.30",
+    "imagecodecs>=2024.1.1",
+    "SimpleITK>=2.3",
+    "brainglobe-atlasapi>=2.0.6",
+    "plotly>=5.19",
+    "pydantic>=2.5,<3",
+    "pydantic-settings>=2.1",
+    "typer>=0.12",
+    "loguru>=0.7",
+    "napari[all]>=0.4.19",
+    "magicgui>=0.8",
+    "qtpy>=2.4",
+]
+
+[project.optional-dependencies]
+deepslice = [
+    # DeepSlice pulls TensorFlow; keep it gated behind an extra so the base install stays light.
+    "DeepSlice>=1.2.7",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.3",
+    "hypothesis>=6.98",
+    "pooch>=1.8",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "import-linter>=2.0",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+histo2ccf = "histo_to_ccf.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/wanglab-neuro/Histo_to_CCF"
+Issues = "https://github.com/wanglab-neuro/Histo_to_CCF/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/histo_to_ccf"]
+
+# --- Ruff ---------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src"]
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",      # pyflakes / pycodestyle
+    "I",                 # isort
+    "UP",                # pyupgrade
+    "B",                 # bugbear
+    "SIM",               # simplify
+    "RUF",
+]
+ignore = [
+    "E501",  # line length is enforced by formatter
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# --- mypy ---------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/histo_to_ccf"]
+exclude = ["legacy/"]
+strict = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "brainglobe_atlasapi.*",
+    "DeepSlice.*",
+    "SimpleITK.*",
+    "tifffile.*",
+    "imagecodecs.*",
+    "napari.*",
+    "magicgui.*",
+    "qtpy.*",
+    "plotly.*",
+]
+ignore_missing_imports = true
+
+# --- pytest -------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
