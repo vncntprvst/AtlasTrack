@@ -99,6 +99,9 @@ class RegisterPanelWidget(QWidget):
         herbs_btn = QPushButton("Export HERBS pkl…")
         herbs_btn.clicked.connect(self._export_herbs)
         herbs_layout.addWidget(herbs_btn)
+        ch_btn = QPushButton("Export per-channel CSV…")
+        ch_btn.clicked.connect(self._export_channel_csv)
+        herbs_layout.addWidget(ch_btn)
         layout.addWidget(herbs_box)
 
         layout.addStretch()
@@ -241,3 +244,17 @@ class RegisterPanelWidget(QWidget):
             return
         write_herbs_pkl(path, all_ccf)
         self._status.setText(f"HERBS pkl → {Path(path).name}")
+
+    def _export_channel_csv(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save per-channel CSV", "", "CSV files (*.csv);;All files (*)"
+        )
+        if not path:
+            return
+        from histo_to_ccf.probes.channels import export_channel_csv
+
+        n = export_channel_csv(self._state.project, path)
+        if n == 0:
+            self._status.setText("No registered shank coords to export.")
+        else:
+            self._status.setText(f"Per-channel CSV ({n} rows) → {Path(path).name}")
