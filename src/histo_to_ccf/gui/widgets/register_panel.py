@@ -30,6 +30,14 @@ def _error_dialog(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.critical(parent, title, str(message)[:2000])
 
 
+def _viewer_alive(viewer) -> bool:
+    """True if a napari viewer window is still open (best-effort)."""
+    try:
+        return bool(viewer.window._qt_window.isVisible())
+    except Exception:
+        return False
+
+
 class RegisterPanelWidget(QWidget):
     """Register button, progress bar, residuals table, and export actions."""
 
@@ -42,6 +50,11 @@ class RegisterPanelWidget(QWidget):
         super().__init__(parent)
         self._state = state
         self._viewer = viewer
+        # Base dir that section.registration.bspline_transform_path resolves
+        # against (set when registration runs); needed to reload transforms.
+        self._reg_base_dir: Path | None = None
+        # Held so the separate 3D viewer window is not garbage-collected.
+        self._viewer3d = None
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -189,6 +202,8 @@ class RegisterPanelWidget(QWidget):
             project_path.parent / "transforms" if project_path is not None
             else Path(__import__("tempfile").mkdtemp()) / "transforms"
         )
+        # Transform sidecar paths are stored relative to this base dir.
+        self._reg_base_dir = transforms_dir.parent
 
         self._reg_btn.setEnabled(False)
         self._progress.setVisible(True)
@@ -262,34 +277,49 @@ class RegisterPanelWidget(QWidget):
             warp_annotation_to_section,
         )
 
+        registered = [
+            section
+            for slide in self._state.project.slides
+            for section in slide.sections
+            if section.registration is not None
+        ]
+        if not registered:
+            self._status.setText("No registered sections yet — run registration first.")
+            return
+
         count = 0
-        for slide_idx, slide in enumerate(self._state.project.slides):
-            for section in slide.sections:
-                if section.registration is None:
-                    continue
-                x0, y0, x1, y1 = section.bbox_px
-                shape = (y1 - y0, x1 - x0)
-                try:
-                    labels = warp_annotation_to_section(section.registration, atlas, shape)
-                    edges = annotation_boundaries(labels)
-                except Exception:
-                    continue
-                # Render boundaries as a labels layer placed at the section bbox.
-                name = f"Atlas overlay {section.index}"
-                edge_labels = edges.astype(np.uint8)
-                if name in self._viewer.layers:
-                    self._viewer.layers[name].data = edge_labels
-                else:
-                    self._viewer.add_labels(
-                        edge_labels, name=name, opacity=0.7,
-                        translate=(y0, x0),
-                    )
-                count += 1
+        first_error: Exception | None = None
+        for section in registered:
+            x0, y0, x1, y1 = section.bbox_px
+            shape = (y1 - y0, x1 - x0)
+            try:
+                labels = warp_annotation_to_section(
+                    section.registration, atlas, shape, project_dir=self._reg_base_dir
+                )
+                edges = annotation_boundaries(labels)
+            except Exception as exc:  # noqa: BLE001 — surface to user below
+                if first_error is None:
+                    first_error = exc
+                continue
+            name = f"Atlas overlay {section.index}"
+            edge_labels = edges.astype(np.uint8)
+            if name in self._viewer.layers:
+                self._viewer.layers[name].data = edge_labels
+            else:
+                self._viewer.add_labels(
+                    edge_labels, name=name, opacity=0.7, translate=(y0, x0)
+                )
+            count += 1
+
         if count:
             self._viewer.dims.ndisplay = 2
             self._status.setText(f"Overlaid atlas boundaries on {count} section(s).")
         else:
-            self._status.setText("No registered sections to overlay — run registration first.")
+            _error_dialog(
+                self, "Overlay failed",
+                f"{len(registered)} section(s) are registered but the atlas could not "
+                f"be warped onto them.\n\n{first_error}",
+            )
 
     # ------------------------------------------------------------------
     # 3D viz
@@ -311,21 +341,30 @@ class RegisterPanelWidget(QWidget):
 
     def _view_napari3d(self) -> None:
         try:
+            import napari
+
             from histo_to_ccf.viz.napari3d import show_3d_scene
             from histo_to_ccf.viz.plotly3d import DEFAULT_REGIONS
 
+            # Open in a SEPARATE viewer window so the main slide/section layers
+            # are never disturbed. Reuse the window if it is still open.
+            if self._viewer3d is None or not _viewer_alive(self._viewer3d):
+                self._viewer3d = napari.Viewer(title="Histo→CCF — 3D")
+            else:
+                self._viewer3d.layers.clear()
+
             added = show_3d_scene(
-                self._viewer,
+                self._viewer3d,
                 self._state.project,
                 self._state.atlas,
                 regions=DEFAULT_REGIONS if self._state.atlas is not None else None,
             )
             if self._state.atlas is None:
                 self._status.setText(
-                    "3D mode: probe tracks shown. Load an atlas to see the brain."
+                    "Opened 3D window: probe tracks only. Load an atlas to see the brain."
                 )
             else:
-                self._status.setText(f"3D scene: brain + {len(added)} layer(s).")
+                self._status.setText(f"Opened 3D window: brain + {len(added)} layer(s).")
         except Exception as exc:
             _error_dialog(self, "3D view failed", str(exc))
 

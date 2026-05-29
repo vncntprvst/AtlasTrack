@@ -254,6 +254,43 @@ def test_add_probe_arms_tip_mode(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_edit_boxes_resize_and_delete(qtbot) -> None:
+    import napari
+    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.add_slide("s.png", np.zeros((400, 400), dtype=np.uint8))
+        state.active_slide_idx = 0
+        slide = state.project.slides[0]
+        for i, box in enumerate([(0, 0, 80, 80), (100, 0, 180, 80), (200, 0, 280, 80)]):
+            slide.sections.append(Section(index=i, slide_idx=0, bbox_px=box, ap_order=i))
+
+        widget = SlideLoaderWidget(state, viewer=viewer)
+        qtbot.addWidget(widget)
+        widget._edit_boxes()
+        layer = widget._box_layer
+        assert layer is not None and len(layer.data) == 3
+
+        # Resize section 0's rectangle (taller box) and sync.
+        new = list(layer.data)
+        new[0] = np.array([[0, 0], [0, 120], [200, 120], [200, 0]], dtype=float)
+        layer.data = new
+        widget._sync_boxes_from_shapes()
+        sec0 = next(s for s in slide.sections if s.index == 0)
+        assert sec0.bbox_px == (0, 0, 120, 200)
+
+        # Delete the last rectangle and sync → that section is removed.
+        layer.data = list(layer.data)[:2]
+        layer.features = {"idx": [0, 1]}
+        widget._sync_boxes_from_shapes()
+        assert {s.index for s in slide.sections} == {0, 1}
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_ordering_resort_and_interpolate(qtbot) -> None:
     from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
     from histo_to_ccf.project.schema import PlaneParams

@@ -84,6 +84,44 @@ def test_order_sections_column_first_default() -> None:
     assert by_rc[(0, 1)] == 2
 
 
+def test_equalize_box_sizes_expands_undersized() -> None:
+    from histo_to_ccf.sectioning.split import DetectedSection, _equalize_box_sizes
+
+    def _sec(x0, y0, x1, y1):
+        return DetectedSection(
+            bbox_px=(x0, y0, x1, y1),
+            mask=np.zeros((1000, 1000), dtype=bool),
+            area_px=(x1 - x0) * (y1 - y0),
+            centroid_px=((x0 + x1) / 2, (y0 + y1) / 2),
+            aspect_ratio=1.0,
+        )
+
+    # Four ~100x100 boxes and one short 100x60 box (under-fit in height).
+    sections = [
+        _sec(0, 0, 100, 100),
+        _sec(200, 0, 300, 100),
+        _sec(400, 0, 500, 100),
+        _sec(600, 20, 700, 80),  # height 60 → under-sized
+    ]
+    out = _equalize_box_sizes(sections, (1000, 1000), min_frac=0.85)
+    # The short box grew to the median height (100), centred on y=50.
+    x0, y0, x1, y1 = out[3].bbox_px
+    assert (y1 - y0) == 100
+    assert (y0 + y1) // 2 == 50
+    # Correctly-sized boxes are untouched.
+    assert out[0].bbox_px == (0, 0, 100, 100)
+
+
+def test_equalize_box_sizes_noop_when_few_sections() -> None:
+    from histo_to_ccf.sectioning.split import DetectedSection, _equalize_box_sizes
+
+    secs = [
+        DetectedSection((0, 0, 10, 10), np.zeros((20, 20), bool), 100, (5, 5), 1.0),
+        DetectedSection((0, 0, 10, 4), np.zeros((20, 20), bool), 40, (5, 2), 2.5),
+    ]
+    assert _equalize_box_sizes(secs, (20, 20)) == secs  # < 3 sections → unchanged
+
+
 def test_aspect_ratio_filter_removes_label_like_blob() -> None:
     """A tall narrow blob (like a slide-edge label) should be filtered."""
     image = _synth_composite(rows=1, cols=2, noise=0.0)

@@ -17,7 +17,7 @@ just whatever the user confirmed.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from skimage import filters, measure, morphology
@@ -69,6 +69,8 @@ def detect_sections(
     closing_radius_px: int = 0,
     aspect_ratio_max: float = 4.0,
     expected_count: int | None = None,
+    equalize_boxes: bool = True,
+    box_min_frac: float = 0.85,
 ) -> list[DetectedSection]:
     """Find brain sections in a composite slide image.
 
@@ -95,6 +97,14 @@ def detect_sections(
         If given, keep only the top-``expected_count`` components by area
         among those that pass the filters. Useful when the user knows there
         should be 15 sections on the slide.
+    equalize_boxes
+        Serial sections on one slide are roughly the same size. When True,
+        boxes that are notably smaller than the slide's median box (because
+        dimmer tissue fell below threshold) are expanded to the median size,
+        centred on the box. Prevents recurrent under-fitting of a few sections.
+    box_min_frac
+        A box is expanded when its width or height is below this fraction of
+        the median box width/height.
     """
     gray = _to_gray(image)
     fg = _binarize(gray)
@@ -135,7 +145,51 @@ def detect_sections(
     if expected_count is not None and len(sections) > expected_count:
         sections = sorted(sections, key=lambda s: -s.area_px)[:expected_count]
 
+    if equalize_boxes:
+        sections = _equalize_box_sizes(sections, (h, w), min_frac=box_min_frac)
+
     return sections
+
+
+def _equalize_box_sizes(
+    sections: list[DetectedSection],
+    image_shape: tuple[int, int],
+    *,
+    min_frac: float = 0.85,
+) -> list[DetectedSection]:
+    """Expand under-sized boxes to the slide's median box size.
+
+    Only boxes whose width/height is below ``min_frac`` × the median are grown
+    (to the median, centred on the existing box and clamped to the image). Boxes
+    at or above the median are left untouched, so genuinely typical sections are
+    not enlarged. Needs at least 3 sections to estimate a stable median.
+    """
+    if len(sections) < 3:
+        return sections
+    h_img, w_img = image_shape
+    widths = np.array([s.bbox_px[2] - s.bbox_px[0] for s in sections], dtype=float)
+    heights = np.array([s.bbox_px[3] - s.bbox_px[1] for s in sections], dtype=float)
+    med_w = float(np.median(widths))
+    med_h = float(np.median(heights))
+
+    out: list[DetectedSection] = []
+    for s in sections:
+        x0, y0, x1, y1 = s.bbox_px
+        w = x1 - x0
+        h = y1 - y0
+        target_w = med_w if w < min_frac * med_w else w
+        target_h = med_h if h < min_frac * med_h else h
+        if target_w == w and target_h == h:
+            out.append(s)
+            continue
+        cx = (x0 + x1) / 2.0
+        cy = (y0 + y1) / 2.0
+        nx0 = max(0, int(round(cx - target_w / 2.0)))
+        nx1 = min(w_img, int(round(cx + target_w / 2.0)))
+        ny0 = max(0, int(round(cy - target_h / 2.0)))
+        ny1 = min(h_img, int(round(cy + target_h / 2.0)))
+        out.append(replace(s, bbox_px=(nx0, ny0, nx1, ny1)))
+    return out
 
 
 def section_mask_crop(section: DetectedSection) -> np.ndarray:

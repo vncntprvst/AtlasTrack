@@ -202,21 +202,29 @@ def _apply_to_shank_registered(
     project: Project,
     transforms: dict[tuple[int, int], RegisteredSectionTransform],
 ) -> None:
-    def lookup(section_idx: int) -> RegisteredSectionTransform | None:
+    def to_ccf(point, section_idx: int) -> tuple[float, float, float] | None:
         for slide_idx, slide in enumerate(project.slides):
             for section in slide.sections:
-                if section.index == section_idx:
-                    return transforms.get((slide_idx, section.index))
+                if section.index != section_idx:
+                    continue
+                tx = transforms.get((slide_idx, section.index))
+                if tx is None:
+                    return None
+                # Clicked points are in slide-global pixels, but the transform is
+                # defined on the section crop — convert to section-local coords
+                # by subtracting the bbox origin.
+                x0, y0 = section.bbox_px[0], section.bbox_px[1]
+                return tx.apply(point.x_px - x0, point.y_px - y0)
         return None
 
     if shank.tip_px is not None and shank.tip_section_idx is not None:
-        tx = lookup(shank.tip_section_idx)
-        if tx is not None:
-            shank.tip_ccf_um = tx.apply(shank.tip_px.x_px, shank.tip_px.y_px)
+        ccf = to_ccf(shank.tip_px, shank.tip_section_idx)
+        if ccf is not None:
+            shank.tip_ccf_um = ccf
     if shank.entry_px is not None and shank.entry_section_idx is not None:
-        tx = lookup(shank.entry_section_idx)
-        if tx is not None:
-            shank.entry_ccf_um = tx.apply(shank.entry_px.x_px, shank.entry_px.y_px)
+        ccf = to_ccf(shank.entry_px, shank.entry_section_idx)
+        if ccf is not None:
+            shank.entry_ccf_um = ccf
 
 
 def reload_registered_transforms(

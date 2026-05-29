@@ -141,6 +141,8 @@ def warp_annotation_to_section(
     result: RegistrationResult,
     atlas: "BrainGlobeAtlas",
     section_shape: tuple[int, int],
+    *,
+    project_dir: Path | None = None,
 ) -> np.ndarray:
     """Render the registered atlas annotation in a section's pixel grid.
 
@@ -167,7 +169,7 @@ def warp_annotation_to_section(
 
     import SimpleITK as sitk
 
-    transform = build_registered_transform(result, atlas).bspline
+    transform = build_registered_transform(result, atlas, project_dir=project_dir).bspline
     # The B-spline maps fixed (atlas slice) → moving (section). Resampling the
     # annotation into the section grid needs the section → slice map (inverse).
     try:

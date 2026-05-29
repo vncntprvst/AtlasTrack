@@ -64,3 +64,42 @@ def test_register_one_section() -> None:
     assert ap_e == 5400.0
     assert ml_e == MIDLINE_ML_UM + 20.0  # (510-500)*2
     assert dv_e == 40.0  # (120-100)*2
+
+
+def test_registered_shank_uses_section_local_coords() -> None:
+    """Slide-global clicks must be converted to section-local px for the M3 fit.
+
+    A regression guard for the bug where probes rendered tens of mm outside the
+    brain because slide-global pixels were fed to a section-crop transform.
+    """
+    from histo_to_ccf.registration.pipeline import _apply_to_shank_registered
+
+    seen: list[tuple[float, float]] = []
+
+    class _FakeTransform:
+        def apply(self, x: float, y: float) -> tuple[float, float, float]:
+            seen.append((x, y))
+            return (1.0, 2.0, 3.0)
+
+    section = Section(index=0, slide_idx=0, bbox_px=(100, 50, 500, 450))
+    project = Project(
+        slides=[Slide(image_path="s.tif", sections=[section])],
+        probes=[
+            ProbeSpec(
+                label="p",
+                type=ProbeType(name="np1", n_shanks=1),
+                shanks=[
+                    Shank(
+                        index=0,
+                        tip_px=Point2D(x_px=300.0, y_px=250.0),  # slide-global
+                        tip_section_idx=0,
+                    )
+                ],
+            )
+        ],
+    )
+    shank = project.probes[0].shanks[0]
+    _apply_to_shank_registered(shank, project, {(0, 0): _FakeTransform()})
+    # bbox origin (100, 50) subtracted → section-local (200, 200).
+    assert seen == [(200.0, 200.0)]
+    assert shank.tip_ccf_um == (1.0, 2.0, 3.0)

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 from qtpy.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -22,8 +23,12 @@ if TYPE_CHECKING:
 
 # Name template for the section outline layer (must match app.py).
 _SECTION_LAYER = "Sections {}"
+# Name template for the section-number Points layer (must match app.py).
+_NUMBERS_LAYER = "Section numbers {}"
 # Temporary Shapes layer used only while the user draws a new rectangle.
 _DRAW_LAYER = "_draw_section_temp"
+# Editable rectangle layer for resize/move/add/delete of section boxes.
+_BOX_LAYER = "Edit boxes {}"
 
 
 class SlideLoaderWidget(QWidget):
@@ -42,6 +47,8 @@ class SlideLoaderWidget(QWidget):
         self._viewer = viewer
         self._on_slide_loaded = on_slide_loaded
         self._on_sections_detected = on_sections_detected
+        self._box_layer = None  # editable rectangle Shapes layer
+        self._syncing_boxes = False  # re-entrancy guard for the data handler
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -100,6 +107,15 @@ class SlideLoaderWidget(QWidget):
         closing_row.addWidget(self._closing_r)
         params_layout.addLayout(closing_row)
 
+        self._equalize_box = QCheckBox("Equalize under-sized boxes")
+        self._equalize_box.setChecked(True)
+        self._equalize_box.setToolTip(
+            "Serial sections on one slide are about the same size, so boxes that "
+            "come out noticeably smaller than the others (dim tissue falling below\n"
+            "threshold) are grown to the median box size. Uncheck to keep raw boxes."
+        )
+        params_layout.addWidget(self._equalize_box)
+
         detect_btn = QPushButton("Detect sections")
         detect_btn.setToolTip("Run Otsu + connected-component detection with the parameters above.")
         detect_btn.clicked.connect(self._detect_sections)
@@ -114,6 +130,18 @@ class SlideLoaderWidget(QWidget):
         # --- Edit detected sections ------------------------------------
         edit_box = QGroupBox("Edit sections")
         edit_layout = QVBoxLayout(edit_box)
+
+        boxes_btn = QPushButton("Edit boxes (resize / move / add / delete)")
+        boxes_btn.setToolTip(
+            "Turn the detections into draggable rectangles:\n"
+            "  • hover an edge or corner handle and drag to resize\n"
+            "  • drag inside a box to move it\n"
+            "  • press Delete to remove the selected box\n"
+            "  • use the rectangle tool to add a missed section\n"
+            "Edits are saved to the project as you go."
+        )
+        boxes_btn.clicked.connect(self._edit_boxes)
+        edit_layout.addWidget(boxes_btn)
 
         discard_btn = QPushButton("Click to discard a box…")
         discard_btn.setToolTip(
@@ -205,6 +233,7 @@ class SlideLoaderWidget(QWidget):
             img,
             min_area_px=self._min_area.value(),
             closing_radius_px=self._closing_r.value(),
+            equalize_boxes=self._equalize_box.isChecked(),
         )
         worker.returned.connect(self._on_detected)
         worker.errored.connect(lambda e: self._status.setText(f"Error: {e}"))
@@ -306,6 +335,122 @@ class SlideLoaderWidget(QWidget):
         self._add_drawn_btn.setEnabled(False)
         self._status.setText(f"Added section {next_idx} ({x1 - x0}×{y1 - y0} px)")
         self._redraw_outlines()
+
+    # ------------------------------------------------------------------
+    # Editable boxes (resize / move / add / delete via napari Shapes)
+    # ------------------------------------------------------------------
+
+    def _edit_boxes(self) -> None:
+        if self._viewer is None:
+            self._status.setText("Viewer not available — cannot edit boxes.")
+            return
+        slide_idx = self._state.active_slide_idx
+        if slide_idx is None:
+            self._status.setText("Load a slide first.")
+            return
+        slide = self._state.project.slides[slide_idx]
+        if not slide.sections:
+            self._status.setText("Detect sections first, then edit the boxes.")
+            return
+
+        # Build one rectangle per section; carry the section index as a feature
+        # so identity survives moves, additions and deletions.
+        rects, idxs = [], []
+        for s in sorted(slide.sections, key=lambda s: s.ap_order):
+            x0, y0, x1, y1 = s.bbox_px
+            rects.append(np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]], dtype=float))
+            idxs.append(int(s.index))
+
+        name = _BOX_LAYER.format(slide_idx)
+        if name in self._viewer.layers:
+            self._viewer.layers.remove(name)
+        layer = self._viewer.add_shapes(
+            rects,
+            name=name,
+            shape_type="rectangle",
+            edge_color="yellow",
+            face_color="transparent",
+            edge_width=self._edge_width(),
+        )
+        layer.features = {"idx": idxs}
+        try:
+            layer.text = {"string": "{idx}", "size": 14, "color": "yellow", "anchor": "center"}
+        except Exception:
+            pass
+        try:
+            layer.feature_defaults = {"idx": -1}  # new shapes flagged until synced
+        except Exception:
+            pass
+
+        self._box_layer = layer
+        layer.events.data.connect(self._sync_boxes_from_shapes)
+
+        # Hide the static outline + numbers so the editable boxes are the only
+        # representation while editing (avoids a confusing double display).
+        for nm in (_SECTION_LAYER.format(slide_idx), _NUMBERS_LAYER.format(slide_idx)):
+            if nm in self._viewer.layers:
+                self._viewer.layers[nm].visible = False
+
+        self._viewer.layers.selection.active = layer
+        layer.mode = "select"
+        self._status.setText(
+            "Edit boxes: drag handles to resize, drag inside to move, "
+            "Delete to remove, rectangle tool to add."
+        )
+
+    def _sync_boxes_from_shapes(self, event=None) -> None:
+        """Write edited rectangles back to the project sections."""
+        if self._syncing_boxes or self._box_layer is None:
+            return
+        slide_idx = self._state.active_slide_idx
+        if slide_idx is None:
+            return
+        self._syncing_boxes = True
+        try:
+            from histo_to_ccf.project.schema import Section
+
+            slide = self._state.project.slides[slide_idx]
+            data = list(self._box_layer.data)
+            feats = self._box_layer.features
+            idx_col = list(feats["idx"]) if "idx" in getattr(feats, "columns", []) else []
+
+            by_index = {s.index: s for s in slide.sections}
+            next_idx = max((s.index for s in slide.sections), default=-1) + 1
+            stabilized: list[int] = []
+            seen: set[int] = set()
+
+            for i, poly in enumerate(data):
+                poly = np.asarray(poly)
+                y0, y1 = int(poly[:, 0].min()), int(poly[:, 0].max())
+                x0, x1 = int(poly[:, 1].min()), int(poly[:, 1].max())
+                bbox = (x0, y0, x1, y1)
+                raw = idx_col[i] if i < len(idx_col) else -1
+                sid = int(raw) if raw is not None and raw == raw and raw >= 0 else -1
+                if sid in by_index:
+                    by_index[sid].bbox_px = bbox
+                else:
+                    sid = next_idx
+                    next_idx += 1
+                    slide.sections.append(
+                        Section(index=sid, slide_idx=slide_idx, bbox_px=bbox,
+                                ap_order=len(slide.sections))
+                    )
+                stabilized.append(sid)
+                seen.add(sid)
+
+            # Drop sections whose rectangle was deleted.
+            slide.sections[:] = [s for s in slide.sections if s.index in seen]
+
+            # Persist stabilized indices so newly added shapes keep identity.
+            if idx_col != stabilized:
+                self._box_layer.features = {"idx": stabilized}
+                try:
+                    self._box_layer.refresh_text()
+                except Exception:
+                    pass
+            self._status.setText(f"{len(seen)} section box(es).")
+        finally:
+            self._syncing_boxes = False
 
     # ------------------------------------------------------------------
     # Helpers
