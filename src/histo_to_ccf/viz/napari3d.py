@@ -74,27 +74,28 @@ def add_region_layers(
     viewer: "napari.Viewer",
     atlas: "BrainGlobeAtlas",
     regions: list[str],
+    *,
+    opacity: float = 0.3,
 ) -> list:
     """Add atlas region meshes as napari Surface layers.
 
     Returns the list of added layers.
     """
+    from histo_to_ccf.atlas.meshes import mesh_vertices_faces
+
     added = []
     for acronym in regions:
         try:
             mesh = atlas.mesh_from_structure(acronym)
+            verts, faces = mesh_vertices_faces(mesh)  # (N,3) AP,DV,ML
         except Exception:
             continue
-        if mesh is None:
-            continue
-        verts = np.asarray(mesh.vertices, dtype=float)  # (N, 3) in AP, DV, ML
-        faces = np.asarray(mesh.faces, dtype=int)        # (M, 3)
         # Rearrange to (AP, ML, DV) to match probe layer convention.
         verts_aml = np.stack([verts[:, 0], verts[:, 2], verts[:, 1]], axis=1)
         layer = viewer.add_surface(
             (verts_aml, faces),
             name=acronym,
-            opacity=0.3,
+            opacity=opacity,
         )
         added.append(layer)
     return added
@@ -103,3 +104,40 @@ def add_region_layers(
 def switch_to_3d(viewer: "napari.Viewer") -> None:
     """Switch the napari viewer into 3D rendering mode."""
     viewer.dims.ndisplay = 3
+
+
+def show_3d_scene(
+    viewer: "napari.Viewer",
+    project: "Project",
+    atlas: "BrainGlobeAtlas | None" = None,
+    *,
+    regions: list[str] | None = None,
+    line_width: float = 30.0,
+) -> list:
+    """Build a clean 3D scene: brain outline + region meshes + probe tracks.
+
+    The 2D working layers (slide image, section outlines/numbers, tip/entry
+    markers, atlas preview) are hidden first so they do not clutter the 3D view
+    as flat sheets or tiny floating text. Returns the list of layers added.
+
+    ``line_width`` is in atlas µm (world units), so probe tracks are visible at
+    brain scale — the old 4 px default rendered as near-invisible hairlines.
+    """
+    # Hide everything currently shown; 3D content is added fresh on top.
+    for layer in list(viewer.layers):
+        layer.visible = False
+
+    added: list = []
+    if atlas is not None:
+        # Translucent whole-brain outline for context, then a few key regions.
+        added += add_region_layers(viewer, atlas, ["root"], opacity=0.08)
+        if regions:
+            added += add_region_layers(viewer, atlas, regions, opacity=0.25)
+
+    added += add_probe_layers(viewer, project, line_width=line_width)
+    switch_to_3d(viewer)
+    try:
+        viewer.reset_view()
+    except Exception:
+        pass
+    return added

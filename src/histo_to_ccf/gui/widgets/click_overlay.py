@@ -180,6 +180,16 @@ class ClickOverlayWidget(QWidget):
         except Exception:
             pass
 
+    def arm_tip(self) -> None:
+        """Select Tip + Marker mode and arm the viewer (e.g. after Add probe)."""
+        # Point at the most recently added probe so the tip lands on it.
+        n_probes = len(self._state.project.probes)
+        if n_probes:
+            self._probe_spin.setValue(min(n_probes - 1, self._probe_spin.maximum()))
+        self._mode_tip.setChecked(True)
+        self._entry_marker.setChecked(True)
+        self._activate_pick_mode()
+
     def _activate_pick_mode(self, *_args) -> None:
         """Arm the viewer tool that matches the current Tip/Entry selection."""
         if self._mode_entry.isChecked() and self._entry_line.isChecked():

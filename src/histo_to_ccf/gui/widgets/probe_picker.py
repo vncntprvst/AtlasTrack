@@ -1,6 +1,8 @@
 """Probe type selector widget."""
 from __future__ import annotations
 
+from typing import Callable
+
 from qtpy.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -33,6 +35,9 @@ class ProbePickerWidget(QWidget):
     ) -> None:
         super().__init__(parent)
         self._state = state
+        # Optional callback fired after a probe is added (wired in app.py to arm
+        # tip-marker mode so the user can immediately click a tip point).
+        self.on_probe_added: Callable[[], None] | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -83,6 +88,9 @@ class ProbePickerWidget(QWidget):
         probe = ProbeSpec(label=label, type=probe_type, shanks=shanks)
         self._state.project.probes.append(probe)
         self._status.setText(f"Added '{label}' ({n} shank{'s' if n > 1 else ''})")
+        # Auto-select this probe in the annotation widget and arm tip mode.
+        if self.on_probe_added is not None:
+            self.on_probe_added()
 
     def current_probe_index(self) -> int | None:
         probes = self._state.project.probes

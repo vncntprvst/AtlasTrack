@@ -119,6 +119,9 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     ann_layout.setContentsMargins(2, 2, 2, 2)
     probe_picker = ProbePickerWidget(state)
     click_overlay = ClickOverlayWidget(state, viewer)
+    # After adding a probe, immediately arm tip-marker mode so the user can
+    # click a tip point without first toggling the Tip/Entry selector.
+    probe_picker.on_probe_added = click_overlay.arm_tip
     ann_layout.addWidget(probe_picker)
     ann_layout.addWidget(click_overlay)
     tabs.addTab(tab_annotate, "Annotate")

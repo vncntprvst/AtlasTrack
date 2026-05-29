@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from skimage.draw import ellipse
 
-from histo_to_ccf.sectioning.ordering import order_sections
+from histo_to_ccf.sectioning.ordering import geometric_order, order_sections
 from histo_to_ccf.sectioning.split import detect_sections
 
 
@@ -53,6 +53,35 @@ def test_ordering_groups_into_rows() -> None:
         assert len(row_items) == 4
         xs = [o.section.centroid_px[0] for o in row_items]
         assert xs == sorted(xs), "row not left-to-right"
+
+
+def test_geometric_order_column_first() -> None:
+    """Column-first numbers down each column before moving right."""
+    # 2 rows x 3 cols grid of boxes (x0, y0, x1, y1).
+    bboxes = []
+    for col in range(3):
+        for row in range(2):
+            x0 = col * 100
+            y0 = row * 100
+            bboxes.append((x0, y0, x0 + 80, y0 + 80))
+    # bboxes order: (c0r0, c0r1, c1r0, c1r1, c2r0, c2r1)
+    ranks = geometric_order(bboxes, column_first=True)
+    assert ranks == [0, 1, 2, 3, 4, 5]  # already in column-first order
+    # Row-first: across row 0 (the 3 top boxes) then row 1.
+    ranks_row = geometric_order(bboxes, column_first=False)
+    # c0r0=0, c0r1=3, c1r0=1, c1r1=4, c2r0=2, c2r1=5
+    assert ranks_row == [0, 3, 1, 4, 2, 5]
+
+
+def test_order_sections_column_first_default() -> None:
+    image = _synth_composite(rows=2, cols=3)
+    sections = detect_sections(image, min_area_px=500)
+    ordered = order_sections(sections)  # column_first=True by default
+    # The section at (row 0, col 0) must be AP 0; (row 1, col 0) must be AP 1.
+    by_rc = {(o.row, o.col): o.ap_order for o in ordered}
+    assert by_rc[(0, 0)] == 0
+    assert by_rc[(1, 0)] == 1
+    assert by_rc[(0, 1)] == 2
 
 
 def test_aspect_ratio_filter_removes_label_like_blob() -> None:

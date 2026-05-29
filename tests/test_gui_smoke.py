@@ -230,6 +230,62 @@ def test_atlas_browser_assign_stores_absolute_ap(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_add_probe_arms_tip_mode(qtbot) -> None:
+    import napari
+    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        overlay = ClickOverlayWidget(state, viewer)
+        picker = ProbePickerWidget(state)
+        qtbot.addWidget(overlay)
+        qtbot.addWidget(picker)
+        picker.on_probe_added = overlay.arm_tip
+        picker._add_probe()
+        # Tip + Marker selected and the Tips layer armed, no extra clicks needed.
+        assert overlay._mode_tip.isChecked()
+        assert overlay._entry_marker.isChecked()
+        assert viewer.layers.selection.active is overlay._tip_layer
+        assert overlay._tip_layer.mode == "add"
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_ordering_resort_and_interpolate(qtbot) -> None:
+    from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
+    from histo_to_ccf.project.schema import PlaneParams
+
+    state = WorkflowState()
+    state.add_slide("s.png", np.zeros((10, 10), dtype=np.uint8))
+    state.active_slide_idx = 0
+    slide = state.project.slides[0]
+    # 2x2 grid; ap_order intentionally scrambled.
+    boxes = [(0, 0, 80, 80), (100, 0, 180, 80), (0, 100, 80, 180), (100, 100, 180, 180)]
+    for i, b in enumerate(boxes):
+        slide.sections.append(Section(index=i, slide_idx=0, bbox_px=b, ap_order=99))
+
+    widget = OrderingPanelWidget(state)
+    qtbot.addWidget(widget)
+    widget._col_first.setChecked(True)
+    widget._resort_sections()
+    top_left = next(s for s in slide.sections if s.bbox_px == (0, 0, 80, 80))
+    bottom_left = next(s for s in slide.sections if s.bbox_px == (0, 100, 80, 180))
+    assert top_left.ap_order == 0  # column-first: down column 0 first
+    assert bottom_left.ap_order == 1
+
+    # Interpolate: assign ends, fill the middle linearly.
+    ordered = sorted(slide.sections, key=lambda s: s.ap_order)
+    ordered[0].plane = PlaneParams(ap_um=1000.0)
+    ordered[3].plane = PlaneParams(ap_um=1300.0)
+    widget._interpolate_ap()
+    aps = [s.plane.ap_um for s in sorted(slide.sections, key=lambda s: s.ap_order)]
+    assert aps == [1000.0, 1100.0, 1200.0, 1300.0]
+
+
+@pytest.mark.qt
 def test_click_overlay_modes_and_nearest_section(qtbot) -> None:
     import napari
     from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget

@@ -69,6 +69,23 @@ class RegisterPanelWidget(QWidget):
         self._iter_spin.setValue(100)
         iter_row.addWidget(self._iter_spin)
         params_layout.addLayout(iter_row)
+
+        method_lbl = QLabel(
+            "Method: per-section 2D B-spline (SimpleITK) onto the atlas plane "
+            "chosen by the AP you assigned. Each section is fit independently."
+        )
+        method_lbl.setWordWrap(True)
+        method_lbl.setStyleSheet("color: gray; font-size: 11px;")
+        method_lbl.setToolTip(
+            "For each section: the assigned AP defines a coronal atlas plane; the "
+            "atlas reference is resampled at that plane and a 2D B-spline warps the "
+            "histology onto it (mutual-information metric).\n\n"
+            "DeepSlice (optional extra) can predict the plane automatically but is "
+            "not wired into this button yet — planes come from your AP assignments.\n\n"
+            "Fits are independent per section, so check the residuals column: a "
+            "section with a much higher residual may need its AP re-assigned."
+        )
+        params_layout.addWidget(method_lbl)
         layout.addWidget(params_box)
 
         self._reg_btn = QPushButton("Register all sections")
@@ -92,6 +109,14 @@ class RegisterPanelWidget(QWidget):
         self._residuals_table.setHorizontalHeaderLabels(["Section", "AP µm", "Residual"])
         self._residuals_table.setMaximumHeight(160)
         layout.addWidget(self._residuals_table)
+
+        self._overlay_btn = QPushButton("Show atlas overlay on sections")
+        self._overlay_btn.setToolTip(
+            "Warp the registered atlas region boundaries back onto each section "
+            "image so you can see how well the fit matches the histology."
+        )
+        self._overlay_btn.clicked.connect(self._show_overlay)
+        layout.addWidget(self._overlay_btn)
 
         viz_box = QGroupBox("3D Visualization")
         viz_layout = QVBoxLayout(viz_box)
@@ -225,6 +250,47 @@ class RegisterPanelWidget(QWidget):
             self._residuals_table.setItem(i, 1, QTableWidgetItem(f"{ap:.0f}" if ap == ap else "—"))
             self._residuals_table.setItem(i, 2, QTableWidgetItem(f"{res:.4f}" if res is not None else "—"))
 
+    def _show_overlay(self) -> None:
+        """Overlay registered atlas boundaries on each section in the viewer."""
+        atlas = self._state.atlas
+        if atlas is None:
+            _error_dialog(self, "Atlas not loaded", "Load the atlas used for registration.")
+            return
+        import numpy as np
+        from histo_to_ccf.registration.transforms import (
+            annotation_boundaries,
+            warp_annotation_to_section,
+        )
+
+        count = 0
+        for slide_idx, slide in enumerate(self._state.project.slides):
+            for section in slide.sections:
+                if section.registration is None:
+                    continue
+                x0, y0, x1, y1 = section.bbox_px
+                shape = (y1 - y0, x1 - x0)
+                try:
+                    labels = warp_annotation_to_section(section.registration, atlas, shape)
+                    edges = annotation_boundaries(labels)
+                except Exception:
+                    continue
+                # Render boundaries as a labels layer placed at the section bbox.
+                name = f"Atlas overlay {section.index}"
+                edge_labels = edges.astype(np.uint8)
+                if name in self._viewer.layers:
+                    self._viewer.layers[name].data = edge_labels
+                else:
+                    self._viewer.add_labels(
+                        edge_labels, name=name, opacity=0.7,
+                        translate=(y0, x0),
+                    )
+                count += 1
+        if count:
+            self._viewer.dims.ndisplay = 2
+            self._status.setText(f"Overlaid atlas boundaries on {count} section(s).")
+        else:
+            self._status.setText("No registered sections to overlay — run registration first.")
+
     # ------------------------------------------------------------------
     # 3D viz
     # ------------------------------------------------------------------
@@ -245,10 +311,21 @@ class RegisterPanelWidget(QWidget):
 
     def _view_napari3d(self) -> None:
         try:
-            from histo_to_ccf.viz.napari3d import add_probe_layers, switch_to_3d
-            add_probe_layers(self._viewer, self._state.project)
-            switch_to_3d(self._viewer)
-            self._status.setText("Probe layers added; viewer in 3D mode")
+            from histo_to_ccf.viz.napari3d import show_3d_scene
+            from histo_to_ccf.viz.plotly3d import DEFAULT_REGIONS
+
+            added = show_3d_scene(
+                self._viewer,
+                self._state.project,
+                self._state.atlas,
+                regions=DEFAULT_REGIONS if self._state.atlas is not None else None,
+            )
+            if self._state.atlas is None:
+                self._status.setText(
+                    "3D mode: probe tracks shown. Load an atlas to see the brain."
+                )
+            else:
+                self._status.setText(f"3D scene: brain + {len(added)} layer(s).")
         except Exception as exc:
             _error_dialog(self, "3D view failed", str(exc))
 

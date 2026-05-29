@@ -44,16 +44,22 @@ def _cluster_rows(ys: np.ndarray, min_gap: float) -> np.ndarray:
 def order_sections(
     sections: list[DetectedSection],
     *,
+    column_first: bool = True,
     left_to_right: bool = True,
     top_to_bottom: bool = True,
     row_gap_factor: float = 0.6,
 ) -> list[OrderedSection]:
-    """Order sections row-by-row then within-row.
+    """Order sections into a linear AP sequence and tag each with row/col.
 
-    Two centroids belong to different rows when their y differ by more than
-    ``row_gap_factor`` × median section bbox height. Defaults match the
-    convention used in the example fluorescence slides: rows top→bottom,
-    columns left→right, AP order = reading order.
+    Sections are clustered into rows (centroids differing in y by more than
+    ``row_gap_factor`` × median section height start a new row). The ``row`` and
+    ``col`` tags follow that grid. The ``ap_order`` numbering then walks the grid
+    either:
+
+    * **column-first** (default) — down column 0 (top→bottom), then column 1,
+      etc. This matches how sections are usually laid out on the lab's slides.
+    * **row-first** — across row 0 (left→right), then row 1, etc. (reading
+      order).
     """
     if not sections:
         return []
@@ -70,26 +76,68 @@ def order_sections(
     row_order = sorted(row_means, key=lambda r: row_means[r], reverse=not top_to_bottom)
     new_row_idx = {old: new for new, old in enumerate(row_order)}
 
-    out: list[OrderedSection] = []
-    ap = 0
-    for new_row in range(len(row_order)):
-        old_row = row_order[new_row]
+    # First pass: assign each section its (row, col) grid position.
+    entries: list[tuple[int, int, int]] = []  # (orig_idx, row, col)
+    for old_row in row_order:
         indices = np.where(rows == old_row)[0]
-        xs_in_row = cxs[indices]
-        col_sort = np.argsort(xs_in_row)
+        col_sort = np.argsort(cxs[indices])
         if not left_to_right:
             col_sort = col_sort[::-1]
         for col, idx in enumerate(indices[col_sort]):
-            out.append(
-                OrderedSection(
-                    section=sections[idx],
-                    row=new_row_idx[old_row],
-                    col=col,
-                    ap_order=ap,
-                )
-            )
-            ap += 1
-    return out
+            entries.append((int(idx), new_row_idx[old_row], col))
+
+    # Second pass: number ap_order by walking the grid in the requested order.
+    key = (lambda e: (e[2], e[1])) if column_first else (lambda e: (e[1], e[2]))
+    ap_rank = {e[0]: rank for rank, e in enumerate(sorted(entries, key=key))}
+
+    return [
+        OrderedSection(section=sections[idx], row=row, col=col, ap_order=ap_rank[idx])
+        for (idx, row, col) in entries
+    ]
+
+
+def geometric_order(
+    bboxes: list[tuple[int, int, int, int]],
+    *,
+    column_first: bool = True,
+    left_to_right: bool = True,
+    top_to_bottom: bool = True,
+    row_gap_factor: float = 0.6,
+) -> list[int]:
+    """Return the AP-order rank for each bbox, in the order they were given.
+
+    Operates on bounding boxes ``(x0, y0, x1, y1)`` alone (centroids derived
+    from them), so the GUI can re-sort the project's sections after the user has
+    added/removed boxes without needing the original masks. ``rank[i]`` is the
+    AP position of ``bboxes[i]``; smaller = earlier in the sequence.
+    """
+    if not bboxes:
+        return []
+    cxs = np.array([(b[0] + b[2]) / 2.0 for b in bboxes])
+    cys = np.array([(b[1] + b[3]) / 2.0 for b in bboxes])
+    heights = np.array([b[3] - b[1] for b in bboxes], dtype=float)
+    median_h = float(np.median(heights)) if len(heights) else 1.0
+    rows = _cluster_rows(cys, min_gap=max(median_h * row_gap_factor, 1.0))
+
+    row_means = {r: float(cys[rows == r].mean()) for r in np.unique(rows)}
+    row_order = sorted(row_means, key=lambda r: row_means[r], reverse=not top_to_bottom)
+    new_row_idx = {old: new for new, old in enumerate(row_order)}
+
+    entries: list[tuple[int, int, int]] = []
+    for old_row in row_order:
+        indices = np.where(rows == old_row)[0]
+        col_sort = np.argsort(cxs[indices])
+        if not left_to_right:
+            col_sort = col_sort[::-1]
+        for col, idx in enumerate(indices[col_sort]):
+            entries.append((int(idx), new_row_idx[old_row], col))
+
+    key = (lambda e: (e[2], e[1])) if column_first else (lambda e: (e[1], e[2]))
+    ordered = sorted(entries, key=key)
+    rank = [0] * len(bboxes)
+    for r, (idx, _row, _col) in enumerate(ordered):
+        rank[idx] = r
+    return rank
 
 
 def apply_missing_flags(

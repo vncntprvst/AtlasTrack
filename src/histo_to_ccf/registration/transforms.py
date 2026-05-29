@@ -137,6 +137,63 @@ def _invert_displacement(
     return sitk.DisplacementFieldTransform(inverse_disp)
 
 
+def warp_annotation_to_section(
+    result: RegistrationResult,
+    atlas: "BrainGlobeAtlas",
+    section_shape: tuple[int, int],
+) -> np.ndarray:
+    """Render the registered atlas annotation in a section's pixel grid.
+
+    Resamples the atlas annotation at the section's plane (``anchoring``), then
+    warps that slice through the fitted B-spline into the histology section's
+    pixel space, so the result can be overlaid directly on the section image.
+
+    Returns an integer label image of shape ``section_shape`` (H, W). If no
+    B-spline was stored the plane annotation is returned resized to the section
+    (i.e. the un-refined plane), which is still a useful sanity overlay.
+    """
+    from histo_to_ccf.atlas.planes import resample_atlas_at_plane
+
+    anchoring = Anchoring.from_iterable(result.anchoring)
+    h_slice, w_slice = result.output_size_px
+    _, ann_slice = resample_atlas_at_plane(atlas, anchoring, (int(h_slice), int(w_slice)))
+
+    h_sec, w_sec = int(section_shape[0]), int(section_shape[1])
+    if result.bspline_transform_path is None:
+        # No refinement available: nearest-neighbour resize of the plane.
+        ys = (np.linspace(0, h_slice - 1, h_sec)).round().astype(int)
+        xs = (np.linspace(0, w_slice - 1, w_sec)).round().astype(int)
+        return ann_slice[np.ix_(ys, xs)]
+
+    import SimpleITK as sitk
+
+    transform = build_registered_transform(result, atlas).bspline
+    # The B-spline maps fixed (atlas slice) → moving (section). Resampling the
+    # annotation into the section grid needs the section → slice map (inverse).
+    try:
+        inverse = transform.GetInverse()
+    except RuntimeError:
+        inverse = _invert_displacement(transform, (h_slice, w_slice))
+
+    ann_img = sitk.GetImageFromArray(ann_slice.astype(np.int32))
+    reference = sitk.Image(w_sec, h_sec, sitk.sitkInt32)
+    warped = sitk.Resample(
+        ann_img, reference, inverse, sitk.sitkNearestNeighbor, 0.0
+    )
+    return sitk.GetArrayFromImage(warped)
+
+
+def annotation_boundaries(labels: np.ndarray) -> np.ndarray:
+    """Boolean edge map: True where a label differs from a 4-neighbour."""
+    labels = np.asarray(labels)
+    edges = np.zeros(labels.shape, dtype=bool)
+    edges[:-1, :] |= labels[:-1, :] != labels[1:, :]
+    edges[1:, :] |= labels[:-1, :] != labels[1:, :]
+    edges[:, :-1] |= labels[:, :-1] != labels[:, 1:]
+    edges[:, 1:] |= labels[:, :-1] != labels[:, 1:]
+    return edges
+
+
 def build_registered_transform(
     result: RegistrationResult,
     atlas: "BrainGlobeAtlas",

@@ -43,6 +43,8 @@ def _mesh_for_region(atlas: "BrainGlobeAtlas", acronym: str) -> "go.Mesh3d | Non
     """Return a Plotly Mesh3d for one brain region, or None if unavailable."""
     import plotly.graph_objects as go
 
+    from histo_to_ccf.atlas.meshes import mesh_vertices_faces
+
     try:
         mesh = atlas.mesh_from_structure(acronym)
     except Exception:
@@ -50,8 +52,10 @@ def _mesh_for_region(atlas: "BrainGlobeAtlas", acronym: str) -> "go.Mesh3d | Non
     if mesh is None:
         return None
 
-    verts = np.asarray(mesh.vertices, dtype=float)  # (N, 3) in AP, DV, ML µm
-    faces = np.asarray(mesh.faces, dtype=int)        # (M, 3)
+    try:
+        verts, faces = mesh_vertices_faces(mesh)  # (N,3) AP,DV,ML µm ; (M,3)
+    except ValueError:
+        return None
     # Plotly axes: x=ML, y=AP, z=DV
     color_idx = DEFAULT_REGIONS.index(acronym) if acronym in DEFAULT_REGIONS else 0
     color = _REGION_COLORS[color_idx % len(_REGION_COLORS)]
