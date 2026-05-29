@@ -62,8 +62,8 @@ class PlaneParams(BaseModel):
     ap_um: float
     ml_tilt_deg: float = 0.0
     dv_tilt_deg: float = 0.0
-    midline_px: float
-    dorsal_surface_px: float
+    midline_px: float = 0.0
+    dorsal_surface_px: float = 0.0
     pixel_size_um: float = 1.0
     image_right_is_anatomical_right: bool = True
 

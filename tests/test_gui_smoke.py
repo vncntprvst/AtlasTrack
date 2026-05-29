@@ -173,3 +173,87 @@ def test_save_panel_saves_json(qtbot, tmp_path) -> None:
     assert out_path.exists()
     p = load_project(out_path)
     assert p.version == 1
+
+
+# ---------------------------------------------------------------------------
+# Viewer-dependent widgets (atlas browser, click overlay)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.qt
+def test_atlas_browser_ap_is_bregma_relative(qtbot) -> None:
+    import napari
+    from histo_to_ccf.config import AppSettings
+    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+
+    viewer = napari.Viewer(show=False)
+    try:
+        widget = AtlasBrowserWidget(WorkflowState(), viewer, settings=AppSettings())
+        qtbot.addWidget(widget)
+        # Default shows bregma (0) and converts to the absolute origin AP.
+        assert widget._ap_spin.value() == 0.0
+        assert widget._bregma_to_absolute(0.0) == pytest.approx(BREGMA_AP_FROM_ORIGIN_UM)
+        assert widget._absolute_to_bregma(BREGMA_AP_FROM_ORIGIN_UM) == pytest.approx(0.0)
+        # The removed midline / dorsal / px controls should no longer exist.
+        assert not hasattr(widget, "_midline_spin")
+        assert not hasattr(widget, "_dorsal_spin")
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_atlas_browser_assign_stores_absolute_ap(qtbot) -> None:
+    import napari
+    from histo_to_ccf.config import AppSettings
+    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        img = np.zeros((40, 40), dtype=np.uint8)
+        state.add_slide("s.png", img)
+        state.active_slide_idx = 0
+        state.project.slides[0].sections.append(
+            Section(index=0, slide_idx=0, bbox_px=(0, 0, 20, 20))
+        )
+        widget = AtlasBrowserWidget(state, viewer, settings=AppSettings())
+        qtbot.addWidget(widget)
+        widget._ap_spin.setValue(-2000.0)  # 2 mm posterior to bregma
+        widget._sec_spin.setValue(0)
+        widget._assign_ap()
+        plane = state.project.slides[0].sections[0].plane
+        assert plane is not None
+        assert plane.ap_um == pytest.approx(BREGMA_AP_FROM_ORIGIN_UM + 2000.0)
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_click_overlay_modes_and_nearest_section(qtbot) -> None:
+    import napari
+    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        img = np.zeros((100, 100), dtype=np.uint8)
+        state.add_slide("s.png", img)
+        state.active_slide_idx = 0
+        state.project.slides[0].sections.append(
+            Section(index=3, slide_idx=0, bbox_px=(10, 10, 30, 30))
+        )
+        widget = ClickOverlayWidget(state, viewer)
+        qtbot.addWidget(widget)
+
+        # Trajectory-line entry mode arms a Trajectory shapes layer.
+        widget._mode_entry.setChecked(True)
+        widget._entry_line.setChecked(True)
+        widget._activate_pick_mode()
+        assert "Trajectory" in viewer.layers
+
+        # A point just OUTSIDE the tight bbox still resolves to that section.
+        assert widget._find_section_for_point(32.0, 20.0) == 3
+        assert widget._find_section_for_point(20.0, 20.0) == 3  # inside
+    finally:
+        viewer.close()

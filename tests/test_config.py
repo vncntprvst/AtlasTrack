@@ -14,7 +14,7 @@ def test_defaults() -> None:
     assert s.last_atlas_id == "allen_mouse_25um"
     assert s.bspline_grid == 8
     assert s.max_iterations == 100
-    assert s.section_spacing_um == 200.0
+    assert s.section_spacing_um == 80.0
 
 
 def test_round_trip(tmp_path: Path, monkeypatch) -> None:
@@ -84,7 +84,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from histo_to_ccf import __version__
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.1.8"
 
 
 @pytest.mark.qt

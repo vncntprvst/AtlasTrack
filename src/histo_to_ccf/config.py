@@ -48,9 +48,10 @@ class AppSettings(BaseModel):
 
     last_atlas_id: str = "allen_mouse_25um"
     last_project_dir: str = ""
+    atlas_dir: str = ""  # where BrainGlobe atlases are stored; "" = default
     bspline_grid: int = 8
     max_iterations: int = 100
-    section_spacing_um: float = 200.0
+    section_spacing_um: float = 80.0
 
     @field_validator("bspline_grid")
     @classmethod

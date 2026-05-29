@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "histo-to-ccf"
-version = "0.1.0"
+version = "0.1.8"
 description = "Guided registration of histological brain sections to a reference atlas (Allen CCF), with probe trajectory mapping in 3D."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,7 +45,7 @@ dependencies = [
 [project.optional-dependencies]
 deepslice = [
     # DeepSlice pulls TensorFlow; keep it gated behind an extra so the base install stays light.
-    "DeepSlice>=1.2.7",
+    "DeepSlice>=1.1",
 ]
 dev = [
     "pytest>=8.0",

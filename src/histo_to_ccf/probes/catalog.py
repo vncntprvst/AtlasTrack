@@ -18,14 +18,27 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ProbeLayout:
-    """Physical recording-site layout for one probe model."""
+    """Physical recording-site layout for one probe model.
+
+    Most Neuropixels models are a regular interleaved grid, fully described by
+    the parametric fields (``tip_to_first_site_um`` … ``col_pitch_um``).
+    Irregular layouts (e.g. the NeuroNexus Poly3, whose centre column is longer
+    than its flanking columns) instead supply ``explicit_depths_um`` and
+    ``explicit_offsets_um`` — per-site arrays in channel order (tip → base) that
+    override the parametric computation.
+    """
 
     name: str
     n_channels: int
-    tip_to_first_site_um: float
-    site_row_pitch_um: float
-    n_columns: int
-    col_pitch_um: float
+    tip_to_first_site_um: float = 0.0
+    site_row_pitch_um: float = 0.0
+    n_columns: int = 1
+    col_pitch_um: float = 0.0
+    # Optional explicit per-site geometry (length == n_channels, tip → base).
+    explicit_depths_um: tuple[float, ...] | None = None
+    explicit_offsets_um: tuple[float, ...] | None = None
+    # Informational: optical-fibre offset above the top-most site (optetrodes).
+    fiber_offset_above_top_site_um: float | None = None
 
     def site_depths_from_tip_um(self) -> np.ndarray:
         """Depth of each recording site from the probe tip (µm).
@@ -34,6 +47,8 @@ class ProbeLayout:
         col 1 row 0, col 0 row 1, …) matching how channels are typically
         numbered from tip to base.
         """
+        if self.explicit_depths_um is not None:
+            return np.array(self.explicit_depths_um, dtype=float)
         n_per_col = self.n_channels // self.n_columns
         row_pitch = self.site_row_pitch_um * self.n_columns  # distance between same-col rows
         depths = []
@@ -49,6 +64,8 @@ class ProbeLayout:
         Returns an array of length ``n_channels`` in the same channel order
         as :meth:`site_depths_from_tip_um`.
         """
+        if self.explicit_offsets_um is not None:
+            return np.array(self.explicit_offsets_um, dtype=float)
         if self.n_columns == 1:
             return np.zeros(self.n_channels, dtype=float)
         half = (self.n_columns - 1) * self.col_pitch_um / 2.0
@@ -65,6 +82,48 @@ class ProbeLayout:
 # Catalog of known probe models
 # ---------------------------------------------------------------------------
 
+NEURONEXUS_A1X32_POLY3 = "NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP"
+
+
+def _neuronexus_a1x32_poly3() -> ProbeLayout:
+    """Build the NeuroNexus A1x32-Poly3-10mm-25s-177(-OA32LP) site layout.
+
+    The Poly3 topology is taken from the catalogued ProbeInterface entry
+    ``neuronexus / A1x32-Poly3-10mm-50-177`` (verified geometry: 3 columns, the
+    centre column carrying 12 sites and each side column 10, for 32 total) with
+    the site grid rescaled from the 50 µm to the 25 µm pitch of this model:
+
+      * 25 µm vertical pitch within a column; 25 µm lateral column pitch
+      * the physical shank tip sits 100 µm below the lowest site (the taper is a
+        property of the 10 mm shank, so it is *not* rescaled with the pitch)
+
+    The OA32LP optical assembly carries a fibre 50 µm above the top-most site;
+    that offset is recorded as metadata and does not affect the site
+    coordinates.  Sites are ordered tip → base (ascending depth), ties broken
+    left → right, matching the channel convention used elsewhere in the catalog.
+    """
+    pitch = 25.0
+    tip_to_lowest_site = 100.0
+    left, centre, right = -pitch, 0.0, pitch
+
+    sites: list[tuple[float, float]] = []  # (depth_from_tip, lateral_offset)
+    # Centre column spans rows 0..11; side columns the inner rows 1..10.
+    for row in range(12):
+        sites.append((tip_to_lowest_site + row * pitch, centre))
+    for row in range(1, 11):
+        sites.append((tip_to_lowest_site + row * pitch, left))
+        sites.append((tip_to_lowest_site + row * pitch, right))
+    sites.sort(key=lambda s: (s[0], s[1]))
+
+    return ProbeLayout(
+        name=NEURONEXUS_A1X32_POLY3,
+        n_channels=32,
+        explicit_depths_um=tuple(d for d, _ in sites),
+        explicit_offsets_um=tuple(o for _, o in sites),
+        fiber_offset_above_top_site_um=50.0,
+    )
+
+
 CATALOG: dict[str, ProbeLayout] = {
     "Neuropixels 1.0": ProbeLayout(
         name="Neuropixels 1.0",
@@ -74,14 +133,6 @@ CATALOG: dict[str, ProbeLayout] = {
         n_columns=2,
         col_pitch_um=32.0,            # ±16 µm from centreline
     ),
-    "Neuropixels 2.0 (1-shank)": ProbeLayout(
-        name="Neuropixels 2.0 (1-shank)",
-        n_channels=384,
-        tip_to_first_site_um=0.0,     # first site very close to tip
-        site_row_pitch_um=7.5,        # 15 µm same-col pitch
-        n_columns=2,
-        col_pitch_um=32.0,
-    ),
     "Neuropixels 2.0 (4-shank)": ProbeLayout(
         name="Neuropixels 2.0 (4-shank)",
         n_channels=384,               # per shank
@@ -90,14 +141,7 @@ CATALOG: dict[str, ProbeLayout] = {
         n_columns=2,
         col_pitch_um=32.0,
     ),
-    "Neuropixels Ultra": ProbeLayout(
-        name="Neuropixels Ultra",
-        n_channels=384,
-        tip_to_first_site_um=0.0,
-        site_row_pitch_um=3.0,        # 6 µm same-col pitch (dense packing)
-        n_columns=2,
-        col_pitch_um=6.0,
-    ),
+    NEURONEXUS_A1X32_POLY3: _neuronexus_a1x32_poly3(),
 }
 
 

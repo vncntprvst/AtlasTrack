@@ -21,6 +21,14 @@ ML_UM = 11400.0
 BREGMA_AP_UM = 6600.0
 MIDLINE_ML_UM = 5700.0
 
+# Bregma position measured from the anterior-most coronal slice of the atlas
+# volume (i.e. in the same "distance from the AP origin" frame the GUI uses to
+# index the reference volume: ap_index = ap_um / ap_resolution). Allen CCFv3
+# places bregma ≈ 5400 µm caudal to the anterior edge. Used to show AP as a
+# bregma-relative value (bregma = 0, anterior positive) in the atlas browser
+# while still storing the absolute-from-origin AP that the resampler expects.
+BREGMA_AP_FROM_ORIGIN_UM = 5400.0
+
 
 def relative_ap_ml_dv_to_ccf(ap_rel: float, ml_rel: float, dv_um: float) -> np.ndarray:
     """Convert bregma/midline-relative AP/ML/DV (µm) to Allen CCF AP/ML/DV (µm).

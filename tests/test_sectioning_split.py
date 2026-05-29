@@ -84,7 +84,7 @@ def test_real_slide_yields_expected_sections() -> None:
     slide = (
         Path(__file__).parent.parent
         / "example data"
-        / "L07_07_slide3_2x_whole_overlay.jpg"
+        / "L07_slide3_2x_whole_overlay.jpg"
     )
     image = load_image(slide)
     # Auto-split is a HINT — it correctly localizes most sections without manual

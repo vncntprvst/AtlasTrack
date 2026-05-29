@@ -7,6 +7,7 @@ import numpy as np
 from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -15,6 +16,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
 from histo_to_ccf.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
@@ -68,20 +70,40 @@ class AtlasBrowserWidget(QWidget):
         self._custom_id.setVisible(False)
         layout.addWidget(self._custom_id)
 
+        # Atlas storage folder — atlases download once and are reused from here,
+        # which is why a previously-fetched atlas loads almost instantly.
+        layout.addWidget(QLabel("Atlas folder:"))
+        dir_row = QHBoxLayout()
+        self._atlas_dir = QLineEdit(self._default_atlas_dir())
+        self._atlas_dir.setToolTip(
+            "Where BrainGlobe atlases are downloaded to and loaded from.\n"
+            "An atlas already present here is reused (no re-download)."
+        )
+        browse_btn = QPushButton("Browse…")
+        browse_btn.clicked.connect(self._browse_atlas_dir)
+        dir_row.addWidget(self._atlas_dir)
+        dir_row.addWidget(browse_btn)
+        layout.addLayout(dir_row)
+
         load_btn = QPushButton("Load atlas")
         load_btn.clicked.connect(self._load_atlas)
         layout.addWidget(load_btn)
 
         self._atlas_status = QLabel("Atlas not loaded")
+        self._atlas_status.setWordWrap(True)
         layout.addWidget(self._atlas_status)
 
-        # AP slider (SpinBox for precision)
+        # AP position, shown relative to bregma (bregma = 0, anterior positive).
         ap_row = QHBoxLayout()
-        ap_row.addWidget(QLabel("AP µm:"))
+        ap_row.addWidget(QLabel("AP from bregma (µm):"))
         self._ap_spin = QDoubleSpinBox()
-        self._ap_spin.setRange(0.0, 15000.0)
-        self._ap_spin.setValue(5400.0)
+        self._ap_spin.setRange(-15000.0, BREGMA_AP_FROM_ORIGIN_UM)
+        self._ap_spin.setValue(0.0)  # bregma
         self._ap_spin.setSingleStep(25.0)
+        self._ap_spin.setToolTip(
+            "Antero-posterior level relative to bregma.\n"
+            "0 = bregma, negative = posterior, positive = anterior."
+        )
         self._ap_spin.valueChanged.connect(self._preview_slice)
         ap_row.addWidget(self._ap_spin)
         layout.addLayout(ap_row)
@@ -99,32 +121,6 @@ class AtlasBrowserWidget(QWidget):
         sec_row.addWidget(self._sec_spin)
         layout.addLayout(sec_row)
 
-        # Midline and dorsal-surface px (needed for PlaneParams)
-        mid_row = QHBoxLayout()
-        mid_row.addWidget(QLabel("Midline px:"))
-        self._midline_spin = QDoubleSpinBox()
-        self._midline_spin.setRange(0, 100000)
-        self._midline_spin.setValue(0.0)
-        mid_row.addWidget(self._midline_spin)
-        layout.addLayout(mid_row)
-
-        ds_row = QHBoxLayout()
-        ds_row.addWidget(QLabel("Dorsal surf px:"))
-        self._dorsal_spin = QDoubleSpinBox()
-        self._dorsal_spin.setRange(0, 100000)
-        self._dorsal_spin.setValue(0.0)
-        ds_row.addWidget(self._dorsal_spin)
-        layout.addLayout(ds_row)
-
-        px_row = QHBoxLayout()
-        px_row.addWidget(QLabel("µm/px:"))
-        self._px_spin = QDoubleSpinBox()
-        self._px_spin.setRange(0.01, 1000.0)
-        self._px_spin.setValue(1.0)
-        self._px_spin.setSingleStep(0.1)
-        px_row.addWidget(self._px_spin)
-        layout.addLayout(px_row)
-
         assign_btn = QPushButton("Assign AP to section")
         assign_btn.clicked.connect(self._assign_ap)
         layout.addWidget(assign_btn)
@@ -134,6 +130,35 @@ class AtlasBrowserWidget(QWidget):
         layout.addStretch()
 
     # ------------------------------------------------------------------
+
+    def _default_atlas_dir(self) -> str:
+        """Initial atlas folder: persisted setting, else the BrainGlobe default."""
+        if self._settings is not None:
+            saved = getattr(self._settings, "atlas_dir", "")
+            if saved:
+                return saved
+        from histo_to_ccf.config import get_settings
+
+        return str(get_settings().atlas_cache_dir)
+
+    def _browse_atlas_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, "Choose atlas storage folder", self._atlas_dir.text()
+        )
+        if path:
+            self._atlas_dir.setText(path)
+
+    # -- bregma ↔ absolute AP -------------------------------------------
+    # The resampler indexes the volume with an absolute "distance from the
+    # anterior edge" AP. The UI shows bregma-relative AP (anterior positive),
+    # so convert on the way in and out.
+    @staticmethod
+    def _bregma_to_absolute(ap_bregma: float) -> float:
+        return BREGMA_AP_FROM_ORIGIN_UM - ap_bregma
+
+    @staticmethod
+    def _absolute_to_bregma(ap_abs: float) -> float:
+        return BREGMA_AP_FROM_ORIGIN_UM - ap_abs
 
     def _on_combo_changed(self, idx: int) -> None:
         label, _ = _QUICK_PICKS[idx]
@@ -151,10 +176,11 @@ class AtlasBrowserWidget(QWidget):
         if not atlas_id:
             self._atlas_status.setText("Enter an atlas id first.")
             return
+        atlas_dir = self._atlas_dir.text().strip() or None
         self._atlas_status.setText(f"Loading {atlas_id}…")
         from histo_to_ccf.gui.workers import load_atlas_worker
 
-        worker = load_atlas_worker(atlas_id)
+        worker = load_atlas_worker(atlas_id, brainglobe_dir=atlas_dir)
         worker.returned.connect(self._on_atlas_loaded)
         worker.errored.connect(lambda e: self._atlas_status.setText(f"Error: {e}"))
         worker.start()
@@ -164,9 +190,13 @@ class AtlasBrowserWidget(QWidget):
         atlas_id = self._current_atlas_id()
         self._state.project.atlas.name = atlas_id
         ap_max = atlas.reference.shape[0] * atlas.resolution[0]
-        self._ap_spin.setRange(0.0, float(ap_max))
+        # Bregma-relative range: bregma (0) down to the posterior-most slice.
+        self._ap_spin.setRange(
+            self._absolute_to_bregma(float(ap_max)), BREGMA_AP_FROM_ORIGIN_UM
+        )
+        location = getattr(atlas, "root_dir", None) or self._atlas_dir.text()
         self._atlas_status.setText(
-            f"Loaded {atlas.atlas_name}  {atlas.resolution[0]:.0f} µm"
+            f"Loaded {atlas.atlas_name} ({atlas.resolution[0]:.0f} µm)\nfrom {location}"
         )
         if self._settings is not None:
             self._settings.last_atlas_id = atlas_id
@@ -189,24 +219,47 @@ class AtlasBrowserWidget(QWidget):
         atlas_id = self._current_atlas_id()
         if atlas_id:
             settings.last_atlas_id = atlas_id
+        if hasattr(settings, "atlas_dir"):
+            settings.atlas_dir = self._atlas_dir.text().strip()
 
     def _preview_slice(self) -> None:
         atlas = self._state.atlas
         if atlas is None:
+            self._assign_status.setText("Load an atlas first.")
             return
         from histo_to_ccf.atlas.planes import coronal_anchoring, resample_atlas_at_plane
 
-        ap_um = self._ap_spin.value()
+        ap_um = self._bregma_to_absolute(self._ap_spin.value())
         anchoring = coronal_anchoring(atlas, ap_um)
         dv, ml = atlas.reference.shape[1], atlas.reference.shape[2]
         ref, _ = resample_atlas_at_plane(atlas, anchoring, (dv, ml))
 
+        # Contrast limits from the actual data — a fresh float layer otherwise
+        # defaults to [0, 1] and renders blank for uint16-range references.
+        lo, hi = float(np.min(ref)), float(np.max(ref))
+        clim = (lo, hi) if hi > lo else (0.0, 1.0)
+
         if _LAYER_ATLAS in self._viewer.layers:
-            self._viewer.layers[_LAYER_ATLAS].data = ref
+            layer = self._viewer.layers[_LAYER_ATLAS]
+            layer.data = ref
+            layer.contrast_limits = clim
+            layer.visible = True
+            self._bring_atlas_to_front(layer)
         else:
             self._atlas_layer = self._viewer.add_image(
-                ref, name=_LAYER_ATLAS, colormap="gray", opacity=0.5
+                ref, name=_LAYER_ATLAS, colormap="gray", contrast_limits=clim
             )
+            # Frame the freshly-added slice so it is actually on screen.
+            self._viewer.reset_view()
+
+    def _bring_atlas_to_front(self, layer) -> None:
+        layers = self._viewer.layers
+        try:
+            src = layers.index(layer)
+            if src != len(layers) - 1:
+                layers.move(src, len(layers) - 1)
+        except Exception:
+            pass
 
     def _assign_ap(self) -> None:
         slide_idx = self._state.active_slide_idx
@@ -221,10 +274,11 @@ class AtlasBrowserWidget(QWidget):
             return
         from histo_to_ccf.project.schema import PlaneParams
 
-        section.plane = PlaneParams(
-            ap_um=self._ap_spin.value(),
-            midline_px=self._midline_spin.value(),
-            dorsal_surface_px=self._dorsal_spin.value(),
-            pixel_size_um=self._px_spin.value(),
+        ap_abs = self._bregma_to_absolute(self._ap_spin.value())
+        if section.plane is not None:
+            section.plane = section.plane.model_copy(update={"ap_um": ap_abs})
+        else:
+            section.plane = PlaneParams(ap_um=ap_abs)
+        self._assign_status.setText(
+            f"Assigned AP={self._ap_spin.value():.0f} µm (from bregma) to section {sec_idx}"
         )
-        self._assign_status.setText(f"Assigned AP={self._ap_spin.value():.0f} µm to section {sec_idx}")

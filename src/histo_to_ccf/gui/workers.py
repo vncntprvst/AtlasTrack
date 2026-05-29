@@ -29,14 +29,21 @@ def detect_sections_worker(
 
 
 @thread_worker
-def load_atlas_worker(atlas_id: str, *, max_retries: int = 3) -> "BrainGlobeAtlas":
-    """Load a BrainGlobe atlas, retrying up to ``max_retries`` times on failure."""
+def load_atlas_worker(
+    atlas_id: str, *, brainglobe_dir: str | None = None, max_retries: int = 3
+) -> "BrainGlobeAtlas":
+    """Load a BrainGlobe atlas, retrying up to ``max_retries`` times on failure.
+
+    ``brainglobe_dir`` overrides where atlases are downloaded to / loaded from;
+    ``None`` uses the BrainGlobe default (``~/.brainglobe``).
+    """
     from brainglobe_atlasapi import BrainGlobeAtlas
 
+    kwargs = {"brainglobe_dir": brainglobe_dir} if brainglobe_dir else {}
     last_exc: Exception = RuntimeError("unknown error")
     for attempt in range(max_retries):
         try:
-            return BrainGlobeAtlas(atlas_id)
+            return BrainGlobeAtlas(atlas_id, **kwargs)
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries - 1:

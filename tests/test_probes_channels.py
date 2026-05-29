@@ -36,8 +36,25 @@ from histo_to_ccf.project.schema import (
 
 def test_catalog_contains_known_probes() -> None:
     assert "Neuropixels 1.0" in CATALOG
-    assert "Neuropixels 2.0 (1-shank)" in CATALOG
     assert "Neuropixels 2.0 (4-shank)" in CATALOG
+    assert "NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP" in CATALOG
+
+
+def test_neuronexus_poly3_layout() -> None:
+    layout = CATALOG["NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP"]
+    depths = layout.site_depths_from_tip_um()
+    offsets = layout.site_lateral_offsets_um()
+    assert layout.n_channels == 32
+    assert len(depths) == 32 and len(offsets) == 32
+    # Ordered tip → base.
+    assert list(depths) == sorted(depths)
+    # Lowest site is the centre column at 100 µm above the tip; centred laterally.
+    assert depths[0] == pytest.approx(100.0)
+    assert offsets[0] == pytest.approx(0.0)
+    assert offsets.mean() == pytest.approx(0.0, abs=1e-6)  # symmetric about centreline
+    # 3 columns at -25 / 0 / +25 µm.
+    assert sorted(set(round(o, 3) for o in offsets)) == [-25.0, 0.0, 25.0]
+    assert layout.fiber_offset_above_top_site_um == pytest.approx(50.0)
 
 
 def test_np10_depths_start_at_175() -> None:
@@ -54,7 +71,7 @@ def test_np10_lateral_offsets_are_symmetric() -> None:
 
 
 def test_np20_depths_start_near_zero() -> None:
-    layout = CATALOG["Neuropixels 2.0 (1-shank)"]
+    layout = CATALOG["Neuropixels 2.0 (4-shank)"]
     depths = layout.site_depths_from_tip_um()
     assert depths[0] == pytest.approx(0.0)
 

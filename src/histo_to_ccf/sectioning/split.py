@@ -142,3 +142,75 @@ def section_mask_crop(section: DetectedSection) -> np.ndarray:
     """Return the per-section mask cropped to its bbox."""
     x0, y0, x1, y1 = section.bbox_px
     return section.mask[y0:y1, x0:x1]
+
+
+def estimate_min_area(image: np.ndarray) -> int:
+    """Estimate a reasonable ``min_area_px`` for this slide.
+
+    Strategy
+    --------
+    1. Drop components larger than 25 % of the slide (background blob).
+    2. Drop the bottom 80 % of components by count — these are tiny noise
+       specks that would otherwise dominate the Otsu histogram and push the
+       threshold into the wrong gap (noise vs debris instead of debris vs
+       sections).
+    3. Run log-space Otsu on the surviving "significant" components to split
+       debris/text from real sections.
+    4. Return 30 % of the *largest* component above the threshold.
+       That value sits well below the biggest section (so nothing is excluded)
+       while being large enough to reject most debris.
+    """
+    gray = _to_gray(image)
+    fg = _binarize(gray)
+    labeled = measure.label(fg, connectivity=2)
+    h, w = fg.shape
+    image_area = h * w
+
+    # Collect areas AND aspect-ratios in one regionprops pass.
+    areas, aspect_ratios = [], []
+    for r in measure.regionprops(labeled):
+        minr, minc, maxr, maxc = r.bbox
+        rh = maxr - minr
+        rw = maxc - minc
+        if rh == 0 or rw == 0:
+            continue
+        ar = max(rh / rw, rw / rh)
+        areas.append(float(r.area))
+        aspect_ratios.append(ar)
+
+    if not areas:
+        return 5_000
+
+    areas_arr = np.array(areas, dtype=float)
+    ar_arr = np.array(aspect_ratios, dtype=float)
+
+    # Step 1: drop background-sized blobs AND elongated slide labels/text.
+    # Brain sections are roughly equant (aspect ratio < 3); text labels,
+    # slide barcodes and scale bars are elongated.
+    keep = (areas_arr <= 0.25 * image_area) & (ar_arr < 3.5)
+    all_areas = areas_arr[keep]
+    if len(all_areas) < 2:
+        return max(1_000, int(0.001 * image_area))
+
+    # Step 2: keep only the top 20 % by size — removes the huge pool of tiny
+    # noise components so Otsu can find the debris/section boundary.
+    n_keep = max(2, len(all_areas) // 5)
+    significant = np.sort(all_areas)[::-1][:n_keep]
+
+    # Step 3: log-space Otsu on the significant components.
+    log_a = np.log10(significant + 1.0)
+    try:
+        thresh_log = filters.threshold_otsu(log_a)
+        large = significant[log_a >= thresh_log]
+    except Exception:
+        large = significant  # if Otsu fails, treat all significant as large
+
+    if len(large) == 0:
+        large = significant
+
+    # Step 4: 30 % of the biggest "section-sized" component.
+    estimate = int(np.max(large) * 0.30)
+
+    floor = max(1_000, int(0.0005 * image_area))
+    ceiling = int(0.05 * image_area)
+    return max(floor, min(estimate, ceiling))

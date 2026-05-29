@@ -1,0 +1,149 @@
+# Histo-to-CCF v0.1.0 — Test walkthrough
+
+## Prerequisites
+
+```
+uv pip install -e .[deepslice]
+
+# Activate your environment
+.venv\Scripts\activate # Windows
+source .venv/bin/activate # macOS/Linux
+
+histo2ccf version          # should print: histo2ccf 0.1.0
+```
+
+You need one composite slide image (multi-section TIFF or JPEG).  
+The repo includes an example: `example data\L07_slide3_2x_whole_overlay.jpg`
+
+---
+
+## 1 — Launch
+
+```
+histo2ccf gui
+```
+
+A napari viewer opens with a 5-tab panel on the right: **Load / Annotate / Atlas / Register / Save**.
+
+---
+
+## 2 — Load tab: load the slide and detect sections
+
+1. Click **Open slide…** → select your image.  
+   The slide appears as a gray layer in the viewer.
+2. Optionally adjust **Min area px** (default 5000) and **Closing r** (try 0 first).
+3. Click **Detect sections**.  
+   Yellow rectangles appear around the detected brain sections.  
+   Status should read e.g. *"Detected 14 section(s)"*.
+
+**Image tools** (same tab):
+
+- Use **Flip H** or **Flip V** if the brain is mirrored relative to anatomical orientation.
+- Adjust the **R / G / B** level spinboxes (or click **Auto**) if contrast is poor.
+
+---
+
+## 3 — Annotate tab: add a probe and click tip + entry
+
+1. **Add probe**: choose probe type (*Neuropixels 1.0*, *Neuropixels 2.0 (4-shank)*,
+   or *NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP*), set a label, click **Add probe**.
+2. **Pick points** — just select a mode and click; no extra button:
+   - Select **Tip** mode, then click the shank tip in the viewer on the section where
+     the probe ends. The marker stays on top of the image automatically.
+   - Select **Entry** mode for the brain-surface entry point. Two ways to set it:
+     - **Marker**: click the surface directly.
+     - **Trajectory line**: draw the probe track as a line; the point where it crosses
+       the tissue surface is taken as the entry.
+3. The table at the bottom shows the stored coordinates for both tips **and** entries.
+
+---
+
+## 4 — Atlas tab: load atlas and assign AP planes
+
+1. (Optional) Set the **Atlas folder** — where atlases are downloaded to and reused
+   from. Leave the default (`~/.brainglobe`) unless you want them elsewhere.
+2. Select **Allen CCFv3 25 µm** (default) and click **Load atlas**.  
+   First run downloads ~400 MB; subsequent runs are instant because the atlas is
+   reused from the folder above (the status line shows where it loaded from).
+3. Set **AP from bregma (µm)** to match a section — **0 = bregma**, negative = posterior,
+   positive = anterior. Click **Preview slice** to see that atlas plane in the viewer.
+4. For each section: set **Assign to section idx**, then click **Assign AP to section**.
+   (Midline / dorsal-surface anchoring is handled automatically by registration — no
+   manual pixel entry needed.)
+5. In **Section ordering**: drag sections in the list to reorder them, set
+   **Section spacing (µm)** (default 80 µm), pick the anchor section, and click
+   **Apply spacing** to propagate AP values across all sections.
+
+---
+
+## 5 — Register tab: run the registration
+
+1. Confirm **B-spline grid** (8) and **Max iterations** (100).  
+   For a quick first test use grid = 6 and iterations = 60.
+2. Click **Register all sections**.  
+   The progress bar fills section-by-section; status shows the residual as each finishes.  
+   Typical runtime: ~30 s per section on CPU.
+3. After completion the residuals table populates — lower MI metric = better alignment.
+
+---
+
+## 6 — View and export
+
+**In-app 3D**  
+Click **View in napari 3D** — the viewer switches to 3D mode and shows the probe trajectory as a colored line.
+
+**Plotly HTML**  
+Click **Export Plotly HTML…** → save to e.g. `Desktop\probe_3d.html`.  
+Opens automatically in your browser; rotate the atlas + probe interactively.
+
+**Save tab**  
+Click **Save project** — writes `<slide_name>.histo2ccf.json` next to the image by default.
+
+To reload a session in Python:
+
+```python
+from histo_to_ccf.project.io import load_project
+p = load_project(r"path\to\project.json")
+```
+
+**HERBS pkl** (legacy compatibility)  
+Click **Export HERBS pkl…** — writes a `.pkl` readable by the old pipeline.
+
+**Per-channel CSV**  
+Click **Export per-channel CSV…** — writes `probe, shank, channel, ap_um, ml_um, dv_um` for all 384 channels.
+
+---
+
+## 7 — Headless / CLI path (no GUI)
+
+```
+# Detect sections and write a sidecar JSON
+histo2ccf split --image data\slide.tif
+
+# Single-section registration (manual mode, no atlas download needed)
+histo2ccf register-one ^
+  --image data\slide.tif ^
+  --ap-um 5400 ^
+  --tip 512,900 ^
+  --entry 512,120 ^
+  --midline-px 512 ^
+  --dorsal-surface-px 120 ^
+  --pixel-size-um 2.0 ^
+  --output-pkl auto
+
+# Full M3 pipeline on a saved project
+histo2ccf register project.histo2ccf.json --atlas allen_mouse_25um
+```
+
+---
+
+## What "passing" looks like
+
+| Check | Expected |
+|---|---|
+| Sections detected | ≥ 1 yellow rectangle per brain section |
+| Atlas loaded | Status shows resolution; AP range updates |
+| Registration completes | All residuals shown, no error dialog |
+| Plotly HTML opens | Probe line visible inside semi-transparent brain |
+| HERBS pkl | Readable by `legacy/HERBS_to_AllenCCF/herbs_probe_mapping.py` |
+| Per-channel CSV | 384 rows × 6 columns for NP 1.0 |

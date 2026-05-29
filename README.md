@@ -34,6 +34,12 @@ uv pip install histo-to-ccf[deepslice] # enable auto plane prediction
 histo2ccf gui                          # launch the guided workflow
 ```
 
+To install as dev: 
+```bash
+uv pip install -e . # To install without deepslice
+uv pip install -e .[deepslice] # To install with deepslice
+```
+
 ## Repository layout
 
 ```
