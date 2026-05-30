@@ -15,18 +15,70 @@ if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
     from histo_to_ccf.project.schema import Project
 
-# Regions displayed by default when an atlas is available.
-DEFAULT_REGIONS = ["CB", "CTX", "HPF", "TH", "STR", "BS"]
+# Large outer divisions drawn as a faint translucent shell for context.
+CONTEXT_REGIONS = ["Isocortex", "CB", "BS"]
 
-# Soft colours for each default region (same order as DEFAULT_REGIONS).
-_REGION_COLORS = [
-    "rgba(150,200,150,0.25)",
-    "rgba(200,150,100,0.18)",
-    "rgba(100,170,220,0.22)",
-    "rgba(220,180,100,0.22)",
-    "rgba(190,130,210,0.22)",
-    "rgba(160,160,160,0.18)",
+# Kept for backward compatibility (older callers / tests import this).
+DEFAULT_REGIONS = CONTEXT_REGIONS
+
+# Curated region styling: acronym -> (hex colour, opacity). Hand-picked so that
+# distinct structures — including separate nuclei within one parent (e.g. VII /
+# XII / IRN in the brainstem) — are clearly separable. The native atlas colours
+# are intentionally NOT used (too muddy / too similar between siblings).
+REGION_STYLE: dict[str, tuple[str, float]] = {
+    "Isocortex": ("#d4c8a8", 0.07),
+    "CB": ("#a8c8d4", 0.09),
+    "OLF": ("#c8d4a8", 0.09),
+    "BS": ("#b8a0c8", 0.13),
+    "VII": ("#e05030", 0.40),
+    "XII": ("#3080c8", 0.40),
+    "IRN": ("#40a850", 0.28),
+    "TH": ("#d8a010", 0.18),
+    "STR": ("#c86060", 0.13),
+    "MOp": ("#6090d0", 0.13),
+}
+
+# Qualitative fallback palette for regions not in REGION_STYLE — kept mutually
+# distinct so sibling nuclei never collide on colour.
+_FALLBACK_COLORS = [
+    "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
+    "#46f0f0", "#f032e6", "#bcf60c", "#fabed4", "#469990", "#dcbeff",
 ]
+
+
+def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """``'#rrggbb'`` -> ``(r, g, b)`` in 0–255."""
+    h = hex_color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def region_style(acronym: str, fallback_index: int = 0) -> tuple[str, float]:
+    """Return ``(hex colour, opacity)`` for a region; cycle fallbacks otherwise."""
+    if acronym in REGION_STYLE:
+        return REGION_STYLE[acronym]
+    return (_FALLBACK_COLORS[fallback_index % len(_FALLBACK_COLORS)], 0.30)
+
+
+def styled_regions(regions: list[str]) -> list[tuple[str, str, float]]:
+    """Map a region list to ``(acronym, hex colour, opacity)``, deduped in order.
+
+    Fallback colours advance only for regions missing from REGION_STYLE, so the
+    curated entries keep their fixed colour regardless of ordering.
+    """
+    out: list[tuple[str, str, float]] = []
+    seen: set[str] = set()
+    fb = 0
+    for acr in regions:
+        if acr in seen:
+            continue
+        seen.add(acr)
+        if acr in REGION_STYLE:
+            color, op = REGION_STYLE[acr]
+        else:
+            color, op = _FALLBACK_COLORS[fb % len(_FALLBACK_COLORS)], 0.30
+            fb += 1
+        out.append((acr, color, op))
+    return out
 
 # Probe trajectory colours (cycling).
 _PROBE_COLORS = [
@@ -39,8 +91,10 @@ _PROBE_COLORS = [
 # Atlas mesh helpers
 # ---------------------------------------------------------------------------
 
-def _mesh_for_region(atlas: "BrainGlobeAtlas", acronym: str) -> "go.Mesh3d | None":
-    """Return a Plotly Mesh3d for one brain region, or None if unavailable."""
+def _mesh_for_region(
+    atlas: "BrainGlobeAtlas", acronym: str, *, color: str, opacity: float
+) -> "go.Mesh3d | None":
+    """Return a Plotly Mesh3d for one brain region in the given hex ``color``."""
     import plotly.graph_objects as go
 
     from histo_to_ccf.atlas.meshes import mesh_vertices_faces
@@ -56,9 +110,7 @@ def _mesh_for_region(atlas: "BrainGlobeAtlas", acronym: str) -> "go.Mesh3d | Non
         verts, faces = mesh_vertices_faces(mesh)  # (N,3) AP,DV,ML µm ; (M,3)
     except ValueError:
         return None
-    # Plotly axes: x=ML, y=AP, z=DV
-    color_idx = DEFAULT_REGIONS.index(acronym) if acronym in DEFAULT_REGIONS else 0
-    color = _REGION_COLORS[color_idx % len(_REGION_COLORS)]
+    r, g, b = hex_to_rgb(color)
     return go.Mesh3d(
         x=verts[:, 2].tolist(),  # ML
         y=verts[:, 0].tolist(),  # AP
@@ -66,8 +118,8 @@ def _mesh_for_region(atlas: "BrainGlobeAtlas", acronym: str) -> "go.Mesh3d | Non
         i=faces[:, 0].tolist(),
         j=faces[:, 1].tolist(),
         k=faces[:, 2].tolist(),
-        color=color,
-        opacity=0.25,
+        color=f"rgb({r},{g},{b})",
+        opacity=opacity,
         name=acronym,
         showlegend=True,
         lighting={"diffuse": 0.5, "specular": 0.1, "roughness": 0.8},
@@ -78,13 +130,45 @@ def _mesh_for_region(atlas: "BrainGlobeAtlas", acronym: str) -> "go.Mesh3d | Non
 def add_atlas_meshes(
     fig: "go.Figure",
     atlas: "BrainGlobeAtlas",
-    regions: list[str] = DEFAULT_REGIONS,
+    regions: list[str] = CONTEXT_REGIONS,
 ) -> None:
-    """Load BrainGlobe meshes and add as Mesh3d traces."""
-    for region in regions:
-        mesh = _mesh_for_region(atlas, region)
+    """Load BrainGlobe meshes and add them as styled Mesh3d traces."""
+    for acronym, color, opacity in styled_regions(list(regions)):
+        mesh = _mesh_for_region(atlas, acronym, color=color, opacity=opacity)
         if mesh is not None:
             fig.add_trace(mesh)
+
+
+def _tip_points(project: "Project") -> list[tuple[float, float, float]]:
+    """CCF (AP, ML, DV) of every registered shank tip."""
+    pts = []
+    for probe in project.probes:
+        for shank in probe.shanks:
+            if shank.tip_ccf_um is not None:
+                pts.append(tuple(shank.tip_ccf_um))
+    return pts
+
+
+def resolve_regions(
+    project: "Project",
+    atlas: "BrainGlobeAtlas | None",
+    *,
+    extra_regions: "list[str] | tuple[str, ...]" = (),
+    show_tip_regions: bool = True,
+) -> list[str]:
+    """Internal regions to draw: those at shank tips plus any user extras."""
+    if atlas is None:
+        return list(extra_regions)
+    from histo_to_ccf.atlas.meshes import region_acronyms_at_points
+
+    internal: list[str] = []
+    if show_tip_regions:
+        internal += region_acronyms_at_points(atlas, _tip_points(project))
+    for acr in extra_regions:
+        if acr and acr not in internal:
+            internal.append(acr)
+    # Don't duplicate the context shell.
+    return [a for a in internal if a not in CONTEXT_REGIONS]
 
 
 # ---------------------------------------------------------------------------
@@ -156,11 +240,13 @@ def build_figure(
     project: "Project",
     atlas: "BrainGlobeAtlas | None" = None,
     *,
-    regions: list[str] = DEFAULT_REGIONS,
+    context_regions: list[str] = CONTEXT_REGIONS,
+    extra_regions: "list[str] | tuple[str, ...]" = (),
+    show_tip_regions: bool = True,
     style: str = "line",
     title: str = "Histo-to-CCF: Probe trajectories",
 ) -> "go.Figure":
-    """Build a Plotly 3D figure with probe trajectories and optional atlas meshes.
+    """Build a Plotly 3D figure with probe trajectories and atlas meshes.
 
     Parameters
     ----------
@@ -168,8 +254,12 @@ def build_figure(
         The project holding CCF-registered shank coordinates.
     atlas
         If provided, brain-region meshes are added.
-    regions
-        List of BrainGlobe structure acronyms to render.  Skipped if atlas is None.
+    context_regions
+        Large outer divisions drawn as a faint shell (default Isocortex/CB/BS).
+    extra_regions
+        Additional structure acronyms the user asked to display.
+    show_tip_regions
+        When True, the region containing each shank tip is drawn (opaque-ish).
     style
         ``'line'``, ``'mesh'``, or ``'both'`` for probe representation.
     title
@@ -180,7 +270,14 @@ def build_figure(
     fig = go.Figure()
 
     if atlas is not None:
-        add_atlas_meshes(fig, atlas, regions)
+        internal = resolve_regions(
+            project, atlas, extra_regions=extra_regions, show_tip_regions=show_tip_regions
+        )
+        # Context shell first, then tip/extra regions — each with its style.
+        for acronym, color, opacity in styled_regions(list(context_regions) + internal):
+            mesh = _mesh_for_region(atlas, acronym, color=color, opacity=opacity)
+            if mesh is not None:
+                fig.add_trace(mesh)
 
     add_probe_traces(fig, project, style=style)
 

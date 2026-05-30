@@ -149,7 +149,9 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     tab_save = QWidget()
     save_layout = QVBoxLayout(tab_save)
     save_layout.setContentsMargins(2, 2, 2, 2)
-    save_panel = SavePanelWidget(state)
+    save_panel = SavePanelWidget(
+        state, on_project_loaded=lambda: _reload_project_display(viewer, state)
+    )
     save_layout.addWidget(save_panel)
     tabs.addTab(tab_save, "Save")
 
@@ -290,6 +292,48 @@ def _update_section_numbers(
         lyr.text.size = 18
         lyr.text.color = "yellow"
         lyr.text.anchor = "center"
+    except Exception:
+        pass
+
+
+def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> None:
+    """After loading a project, reload slide images and redraw section outlines.
+
+    Registration results and CCF coordinates come back with the project JSON, so
+    3D / HTML / HERBS / CSV exports work immediately. The atlas is not auto-loaded
+    (click *Load atlas* if you want the overlay or the 3D brain); the atlas-overlay
+    transform sidecars are resolved from the project folder when needed.
+    """
+    from pathlib import Path
+
+    from histo_to_ccf.gui.section_display import sections_to_outline_labels
+    from histo_to_ccf.io.image import load_image
+
+    for slide_idx, slide in enumerate(state.project.slides):
+        try:
+            img = load_image(Path(slide.image_path))
+        except Exception:
+            continue
+        state.slide_images[slide_idx] = img
+        state.active_slide_idx = slide_idx
+        name = f"Slide {slide_idx}"
+        if name in viewer.layers:
+            viewer.layers[name].data = img
+        else:
+            viewer.add_image(img, name=name, colormap="gray")
+        if slide.sections:
+            labels = sections_to_outline_labels(img.shape[:2], slide.sections)
+            outline = f"Sections {slide_idx}"
+            if outline in viewer.layers:
+                viewer.layers[outline].data = labels
+            else:
+                viewer.add_labels(labels, name=outline, opacity=0.85)
+            _update_section_numbers(viewer, state, slide_idx)
+
+    if state.project.slides:
+        state.active_slide_idx = 0
+    try:
+        viewer.reset_view()
     except Exception:
         pass
 

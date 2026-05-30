@@ -70,35 +70,77 @@ def add_probe_layers(
     return added
 
 
+def _solid_colormap(rgb: tuple[int, int, int], name: str):
+    """A single-colour napari Colormap (both ends = ``rgb``) for flat shading."""
+    from napari.utils.colormaps import Colormap
+
+    c = [rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0, 1.0]
+    return Colormap([c, c], name=name or "region")
+
+
+def _add_region_surface(
+    viewer: "napari.Viewer",
+    atlas: "BrainGlobeAtlas",
+    acronym: str,
+    *,
+    rgb: tuple[int, int, int],
+    opacity: float,
+    blending: str = "translucent",
+):
+    """Add one region mesh as a flat-coloured napari Surface layer."""
+    from histo_to_ccf.atlas.meshes import mesh_vertices_faces
+
+    try:
+        mesh = atlas.mesh_from_structure(acronym)
+        verts, faces = mesh_vertices_faces(mesh)  # (N,3) AP,DV,ML
+    except Exception:
+        return None
+    # Rearrange to (AP, ML, DV) to match probe layer convention.
+    verts_aml = np.stack([verts[:, 0], verts[:, 2], verts[:, 1]], axis=1)
+    try:
+        layer = viewer.add_surface(
+            (verts_aml, faces, np.ones(len(verts_aml))),
+            name=acronym, opacity=opacity, blending=blending,
+            colormap=_solid_colormap(rgb, acronym),
+        )
+    except Exception:
+        layer = viewer.add_surface((verts_aml, faces), name=acronym, opacity=opacity)
+    return layer
+
+
 def add_region_layers(
     viewer: "napari.Viewer",
     atlas: "BrainGlobeAtlas",
     regions: list[str],
     *,
-    opacity: float = 0.3,
+    blending: str = "translucent",
 ) -> list:
-    """Add atlas region meshes as napari Surface layers.
-
-    Returns the list of added layers.
-    """
-    from histo_to_ccf.atlas.meshes import mesh_vertices_faces
+    """Add atlas region meshes as napari Surface layers using the palette."""
+    from histo_to_ccf.viz.plotly3d import hex_to_rgb, styled_regions
 
     added = []
-    for acronym in regions:
-        try:
-            mesh = atlas.mesh_from_structure(acronym)
-            verts, faces = mesh_vertices_faces(mesh)  # (N,3) AP,DV,ML
-        except Exception:
-            continue
-        # Rearrange to (AP, ML, DV) to match probe layer convention.
-        verts_aml = np.stack([verts[:, 0], verts[:, 2], verts[:, 1]], axis=1)
-        layer = viewer.add_surface(
-            (verts_aml, faces),
-            name=acronym,
-            opacity=opacity,
+    for acronym, color, opacity in styled_regions(regions):
+        layer = _add_region_surface(
+            viewer, atlas, acronym, rgb=hex_to_rgb(color),
+            opacity=opacity, blending=blending,
         )
-        added.append(layer)
+        if layer is not None:
+            added.append(layer)
     return added
+
+
+def add_region_by_acronym(
+    viewer: "napari.Viewer",
+    atlas: "BrainGlobeAtlas",
+    acronym: str,
+):
+    """Add a single searched-for region mesh (palette-coloured) to a 3D scene."""
+    from histo_to_ccf.viz.plotly3d import hex_to_rgb, region_style
+
+    color, opacity = region_style(acronym)
+    return _add_region_surface(
+        viewer, atlas, acronym, rgb=hex_to_rgb(color), opacity=opacity
+    )
 
 
 def switch_to_3d(viewer: "napari.Viewer") -> None:
@@ -111,28 +153,49 @@ def show_3d_scene(
     project: "Project",
     atlas: "BrainGlobeAtlas | None" = None,
     *,
-    regions: list[str] | None = None,
-    line_width: float = 30.0,
+    extra_regions: "list[str] | tuple[str, ...]" = (),
+    show_tip_regions: bool = True,
+    line_width: float = 40.0,
 ) -> list:
-    """Build a clean 3D scene: brain outline + region meshes + probe tracks.
+    """Build a clean 3D scene: brain shell + tip regions + probe tracks.
 
-    The 2D working layers (slide image, section outlines/numbers, tip/entry
-    markers, atlas preview) are hidden first so they do not clutter the 3D view
-    as flat sheets or tiny floating text. Returns the list of layers added.
-
-    ``line_width`` is in atlas µm (world units), so probe tracks are visible at
-    brain scale — the old 4 px default rendered as near-invisible hairlines.
+    The 2D working layers are hidden first so they do not clutter the 3D view.
+    The whole-brain outline and the large context divisions use *additive*
+    blending so they never hide the probe tracks running inside the brain.
+    Internal regions shown are only those containing a shank tip, plus any
+    ``extra_regions`` the user searched for.
     """
-    # Hide everything currently shown; 3D content is added fresh on top.
+    from histo_to_ccf.viz.plotly3d import (
+        CONTEXT_REGIONS,
+        hex_to_rgb,
+        resolve_regions,
+        styled_regions,
+    )
+
     for layer in list(viewer.layers):
         layer.visible = False
 
     added: list = []
     if atlas is not None:
-        # Translucent whole-brain outline for context, then a few key regions.
-        added += add_region_layers(viewer, atlas, ["root"], opacity=0.08)
-        if regions:
-            added += add_region_layers(viewer, atlas, regions, opacity=0.25)
+        # Faint whole-brain shell (additive so it never hides the probe).
+        root = _add_region_surface(
+            viewer, atlas, "root", rgb=(170, 170, 170), opacity=0.04, blending="additive"
+        )
+        if root is not None:
+            added.append(root)
+
+        internal = resolve_regions(
+            project, atlas, extra_regions=extra_regions, show_tip_regions=show_tip_regions
+        )
+        for acronym, color, opacity in styled_regions(list(CONTEXT_REGIONS) + internal):
+            # Context shell additive (see-through); internal nuclei translucent.
+            blending = "additive" if acronym in CONTEXT_REGIONS else "translucent"
+            layer = _add_region_surface(
+                viewer, atlas, acronym, rgb=hex_to_rgb(color),
+                opacity=opacity, blending=blending,
+            )
+            if layer is not None:
+                added.append(layer)
 
     added += add_probe_layers(viewer, project, line_width=line_width)
     switch_to_3d(viewer)

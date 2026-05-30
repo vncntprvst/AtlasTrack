@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from qtpy.QtWidgets import (
     QFileDialog,
@@ -17,11 +18,18 @@ from histo_to_ccf.gui.workflow import WorkflowState
 
 
 class SavePanelWidget(QWidget):
-    """Save project JSON and optionally export HERBS pkl."""
+    """Save / load the project JSON (the per-project configuration)."""
 
-    def __init__(self, state: WorkflowState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        state: WorkflowState,
+        on_project_loaded: Callable[[], None] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._state = state
+        # Fired after a project is loaded so the viewer can redraw (wired in app).
+        self._on_project_loaded = on_project_loaded
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -39,9 +47,18 @@ class SavePanelWidget(QWidget):
         path_row.addWidget(browse_btn)
         layout.addLayout(path_row)
 
+        btn_row = QHBoxLayout()
         save_btn = QPushButton("Save project")
         save_btn.clicked.connect(self._save)
-        layout.addWidget(save_btn)
+        load_btn = QPushButton("Load project…")
+        load_btn.setToolTip(
+            "Load a saved .histo2ccf.json — restores slides, sections, AP planes "
+            "and the registration result (no need to re-run registration)."
+        )
+        load_btn.clicked.connect(self._load)
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(load_btn)
+        layout.addLayout(btn_row)
 
         self._status = QLabel("")
         self._status.setWordWrap(True)
@@ -76,3 +93,31 @@ class SavePanelWidget(QWidget):
 
         save_project(self._state.project, out_path)
         self._status.setText(f"Saved → {out_path.name}")
+
+    def _load(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load project JSON", "", "JSON files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        from histo_to_ccf.project.io import load_project
+
+        try:
+            project = load_project(path)
+        except Exception as exc:  # noqa: BLE001
+            self._status.setText(f"Load failed: {exc}")
+            return
+        self._state.project = project
+        self._state.project_path = Path(path)
+        self._path_edit.setText(path)
+        n_reg = sum(
+            1 for slide in project.slides
+            for sec in slide.sections
+            if sec.registration is not None
+        )
+        self._status.setText(
+            f"Loaded {Path(path).name} — {len(project.slides)} slide(s), "
+            f"{n_reg} registered section(s)."
+        )
+        if self._on_project_loaded is not None:
+            self._on_project_loaded()

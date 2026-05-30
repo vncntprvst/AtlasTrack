@@ -81,6 +81,20 @@ def register_worker(
 
 
 @thread_worker
+def deepslice_worker(
+    section_images: dict[int, np.ndarray],
+    atlas: "BrainGlobeAtlas",
+    workdir: Path,
+    *,
+    species: str = "mouse",
+) -> dict[int, list[float]]:
+    """Predict per-section atlas anchorings with DeepSlice (background thread)."""
+    from histo_to_ccf.registration.deepslice_adapter import predict_anchorings
+
+    return predict_anchorings(section_images, atlas, workdir=workdir, species=species)
+
+
+@thread_worker
 def register_worker_progressive(
     project: "Project",
     atlas: "BrainGlobeAtlas",
@@ -89,6 +103,7 @@ def register_worker_progressive(
     *,
     bspline_grid: tuple[int, int] = (8, 8),
     max_iterations: int = 100,
+    anchorings: dict[int, list[float]] | None = None,
 ):
     """Registration pipeline that yields per-section progress dicts.
 
@@ -101,7 +116,7 @@ def register_worker_progressive(
     """
     import SimpleITK as sitk
 
-    from histo_to_ccf.atlas.planes import anchoring_from_plane_params
+    from histo_to_ccf.atlas.planes import Anchoring, anchoring_from_plane_params
     from histo_to_ccf.io.ccf_coords import atlas_resolution_um
     from histo_to_ccf.registration.pipeline import (
         _apply_to_shank_registered,
@@ -109,11 +124,16 @@ def register_worker_progressive(
     )
     from histo_to_ccf.registration.transforms import RegisteredSectionTransform
 
-    # Collect work items: only sections with a plane AND a provided image.
+    anchorings = anchorings or {}
+
+    # Collect work items: sections with a provided image AND either a DeepSlice
+    # anchoring or a manually-assigned plane.
     tasks: list[tuple[int, object, object]] = []
     for slide_idx, slide in enumerate(project.slides):
         for section in slide.sections:
-            if section.plane is not None and section.index in section_images:
+            if section.index not in section_images:
+                continue
+            if section.index in anchorings or section.plane is not None:
                 tasks.append((slide_idx, slide, section))
 
     n_total = len(tasks)
@@ -121,23 +141,48 @@ def register_worker_progressive(
         yield {"current": 0, "total": 0, "msg": "No sections to register."}
         return project
 
+    from loguru import logger
+
     tfm_dir = Path(transforms_dir)
     tfm_dir.mkdir(parents=True, exist_ok=True)
     res_um = atlas_resolution_um(atlas)
+    # Cast the reference volume to float32 once; re-casting the whole atlas (and
+    # resampling the annotation) per section churns hundreds of MB and, stacked
+    # on TensorFlow's resident memory after DeepSlice, can OOM the process.
+    ref_vol = atlas.reference.astype(np.float32)
     registered: dict[tuple[int, int], RegisteredSectionTransform] = {}
 
+    failed: list[int] = []
     for i, (slide_idx, slide, section) in enumerate(tasks):
         yield {"current": i, "total": n_total, "msg": f"Registering section {section.index} ({i + 1}/{n_total})…"}
+        logger.info("Registering section {} ({}/{})", section.index, i + 1, n_total)
 
         img = section_images[section.index]
-        anchoring = anchoring_from_plane_params(atlas, section.plane)
-        reg, sitk_tf = register_section_image(
-            img,
-            atlas,
-            anchoring=anchoring,
-            bspline_grid=bspline_grid,
-            max_iterations=max_iterations,
-        )
+        if section.index in anchorings:
+            anchoring = Anchoring.from_iterable(anchorings[section.index])
+        else:
+            anchoring = anchoring_from_plane_params(atlas, section.plane)
+
+        # One section failing (e.g. a plane with too little atlas overlap) must
+        # not abort the whole batch — log it and carry on.
+        try:
+            reg, sitk_tf = register_section_image(
+                img,
+                atlas,
+                anchoring=anchoring,
+                bspline_grid=bspline_grid,
+                max_iterations=max_iterations,
+                reference_volume=ref_vol,
+            )
+        except Exception as exc:  # noqa: BLE001 — reported to the user, batch continues
+            failed.append(section.index)
+            logger.warning("Section {} failed: {}", section.index, exc)
+            yield {
+                "current": i + 1, "total": n_total,
+                "msg": f"Section {section.index} FAILED: {str(exc).splitlines()[-1][:120]}",
+            }
+            continue
+        logger.info("Section {} done (residual={})", section.index, reg.residual)
 
         tfm_path = tfm_dir / f"section_{section.index:03d}.h5"
         sitk.WriteTransform(sitk_tf, str(tfm_path))
@@ -152,6 +197,12 @@ def register_worker_progressive(
         )
         res_str = f"{reg.residual:.4f}" if reg.residual is not None else "n/a"
         yield {"current": i + 1, "total": n_total, "msg": f"Section {section.index} done (residual={res_str})"}
+
+    if failed:
+        yield {
+            "current": n_total, "total": n_total,
+            "msg": f"Done with {len(failed)} failure(s): sections {failed}",
+        }
 
     # Project CCF positions onto shanks.
     for probe in project.probes:

@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -90,15 +92,20 @@ class RegisterPanelWidget(QWidget):
         method_lbl.setWordWrap(True)
         method_lbl.setStyleSheet("color: gray; font-size: 11px;")
         method_lbl.setToolTip(
-            "For each section: the assigned AP defines a coronal atlas plane; the "
-            "atlas reference is resampled at that plane and a 2D B-spline warps the "
-            "histology onto it (mutual-information metric).\n\n"
-            "DeepSlice (optional extra) can predict the plane automatically but is "
-            "not wired into this button yet — planes come from your AP assignments.\n\n"
-            "Fits are independent per section, so check the residuals column: a "
-            "section with a much higher residual may need its AP re-assigned."
+            "For each section: a coronal atlas plane is chosen (from DeepSlice or "
+            "your assigned AP), the atlas reference is resampled at that plane and "
+            "a 2D B-spline warps the histology onto it (mutual-information metric)."
         )
         params_layout.addWidget(method_lbl)
+
+        self._use_deepslice = QCheckBox("Predict planes with DeepSlice")
+        self._use_deepslice.setToolTip(
+            "Run DeepSlice on all section images first to predict a consistent set "
+            "of atlas planes across the series (with angle propagation and AP "
+            "ordering), then refine each with the B-spline. No manual AP needed.\n"
+            "First run downloads the DeepSlice model and is slow."
+        )
+        params_layout.addWidget(self._use_deepslice)
         layout.addWidget(params_box)
 
         self._reg_btn = QPushButton("Register all sections")
@@ -133,6 +140,19 @@ class RegisterPanelWidget(QWidget):
 
         viz_box = QGroupBox("3D Visualization")
         viz_layout = QVBoxLayout(viz_box)
+
+        reg_row = QHBoxLayout()
+        reg_row.addWidget(QLabel("Extra regions:"))
+        self._extra_regions = QLineEdit()
+        self._extra_regions.setPlaceholderText("acronyms, comma-sep (e.g. VII, XII)")
+        self._extra_regions.setToolTip(
+            "Atlas structure acronyms to also display in 3D, on top of the brain "
+            "shell and the regions at each shank tip. Example: VII (facial nucleus), "
+            "XII (hypoglossal nucleus)."
+        )
+        reg_row.addWidget(self._extra_regions)
+        viz_layout.addLayout(reg_row)
+
         plotly_btn = QPushButton("Export Plotly HTML…")
         plotly_btn.clicked.connect(self._export_plotly)
         napari_btn = QPushButton("View in napari 3D")
@@ -179,25 +199,30 @@ class RegisterPanelWidget(QWidget):
         import numpy as np
         from histo_to_ccf.io.image import crop
 
+        use_deepslice = self._use_deepslice.isChecked()
         section_images: dict[int, np.ndarray] = {}
         for slide_idx, slide in enumerate(self._state.project.slides):
             img = self._state.slide_images.get(slide_idx)
             if img is None:
                 continue
             for section in slide.sections:
-                if section.plane is None:
+                # With DeepSlice, planes are predicted — include every section.
+                if not use_deepslice and section.plane is None:
                     continue
                 x0, y0, x1, y1 = section.bbox_px
                 section_images[section.index] = crop(img, (x0, y0, x1, y1)).astype(np.float32)
 
         if not section_images:
             _error_dialog(
-                self, "No AP planes assigned",
-                "Assign AP positions to sections in the Atlas tab before registering."
+                self, "Nothing to register",
+                "Assign AP positions to sections in the Atlas tab first, or enable "
+                "'Predict planes with DeepSlice'."
             )
             return
 
-        project_path = self._state.project_path
+        # Ensure a persistent project location so the transforms (and the
+        # auto-saved project) survive a reload, instead of a temp dir.
+        project_path = self._ensure_project_path()
         transforms_dir = (
             project_path.parent / "transforms" if project_path is not None
             else Path(__import__("tempfile").mkdtemp()) / "transforms"
@@ -208,7 +233,25 @@ class RegisterPanelWidget(QWidget):
         self._reg_btn.setEnabled(False)
         self._progress.setVisible(True)
         self._progress.setValue(0)
-        self._status.setText(f"Starting registration of {len(section_images)} section(s)…")
+
+        if use_deepslice:
+            self._status.setText("Running DeepSlice plane prediction (first run is slow)…")
+            from histo_to_ccf.gui.workers import deepslice_worker
+
+            ds_dir = transforms_dir.parent / "deepslice"
+            ds = deepslice_worker(section_images, atlas, ds_dir)
+            ds.returned.connect(
+                lambda anch: self._start_register(section_images, transforms_dir, anch)
+            )
+            ds.errored.connect(self._on_registration_error)
+            ds.start()
+        else:
+            self._start_register(section_images, transforms_dir, None)
+
+    def _start_register(self, section_images, transforms_dir, anchorings) -> None:
+        atlas = self._state.atlas
+        n = len(anchorings) if anchorings else len(section_images)
+        self._status.setText(f"Starting registration of {n} section(s)…")
 
         from histo_to_ccf.gui.workers import register_worker_progressive
 
@@ -219,6 +262,7 @@ class RegisterPanelWidget(QWidget):
             transforms_dir,
             bspline_grid=(self._grid_spin.value(),) * 2,
             max_iterations=self._iter_spin.value(),
+            anchorings=anchorings,
         )
         worker.yielded.connect(self._on_progress)
         worker.returned.connect(self._on_registration_done)
@@ -234,6 +278,17 @@ class RegisterPanelWidget(QWidget):
         self._progress.setFormat(f"{current}/{total} — {pct}%")
         self._status.setText(msg)
 
+    def _ensure_project_path(self) -> "Path | None":
+        """Return the project path, defaulting to one next to the input data."""
+        if self._state.project_path is not None:
+            return self._state.project_path
+        slides = self._state.project.slides
+        if slides:
+            self._state.project_path = Path(slides[0].image_path).with_suffix(
+                ".histo2ccf.json"
+            )
+        return self._state.project_path
+
     def _on_registration_done(self, project) -> None:
         self._state.project = project
         n = sum(
@@ -242,9 +297,22 @@ class RegisterPanelWidget(QWidget):
             if sec.registration is not None
         )
         self._progress.setValue(100)
-        self._status.setText(f"Done — {n} section(s) registered")
         self._reg_btn.setEnabled(True)
         self._refresh_residuals()
+
+        # Auto-save so the registration (results + transform sidecars) persists
+        # and can be reloaded without re-running.
+        msg = f"Done — {n} section(s) registered"
+        path = self._ensure_project_path()
+        if path is not None:
+            try:
+                from histo_to_ccf.project.io import save_project
+
+                save_project(self._state.project, path)
+                msg += f"  ·  auto-saved → {path.name}"
+            except Exception as exc:  # noqa: BLE001
+                msg += f"  ·  auto-save failed: {exc}"
+        self._status.setText(msg)
 
     def _on_registration_error(self, exc: Exception) -> None:
         self._reg_btn.setEnabled(True)
@@ -287,6 +355,12 @@ class RegisterPanelWidget(QWidget):
             self._status.setText("No registered sections yet — run registration first.")
             return
 
+        # Transform sidecars resolve against the run's base dir, or — after a
+        # project reload — against the loaded project's folder.
+        base_dir = self._reg_base_dir
+        if base_dir is None and self._state.project_path is not None:
+            base_dir = self._state.project_path.parent
+
         count = 0
         first_error: Exception | None = None
         for section in registered:
@@ -294,7 +368,7 @@ class RegisterPanelWidget(QWidget):
             shape = (y1 - y0, x1 - x0)
             try:
                 labels = warp_annotation_to_section(
-                    section.registration, atlas, shape, project_dir=self._reg_base_dir
+                    section.registration, atlas, shape, project_dir=base_dir
                 )
                 edges = annotation_boundaries(labels)
             except Exception as exc:  # noqa: BLE001 — surface to user below
@@ -333,18 +407,24 @@ class RegisterPanelWidget(QWidget):
             return
         try:
             from histo_to_ccf.viz.plotly3d import build_figure, save_html
-            fig = build_figure(self._state.project, self._state.atlas)
+            fig = build_figure(
+                self._state.project, self._state.atlas,
+                extra_regions=self._extra_region_list(),
+            )
             out = save_html(fig, path, open_browser=True)
             self._status.setText(f"Saved → {out.name}")
         except Exception as exc:
             _error_dialog(self, "Export failed", str(exc))
+
+    def _extra_region_list(self) -> list[str]:
+        """Parse the comma-separated extra-regions field into acronyms."""
+        return [a.strip() for a in self._extra_regions.text().split(",") if a.strip()]
 
     def _view_napari3d(self) -> None:
         try:
             import napari
 
             from histo_to_ccf.viz.napari3d import show_3d_scene
-            from histo_to_ccf.viz.plotly3d import DEFAULT_REGIONS
 
             # Open in a SEPARATE viewer window so the main slide/section layers
             # are never disturbed. Reuse the window if it is still open.
@@ -357,7 +437,7 @@ class RegisterPanelWidget(QWidget):
                 self._viewer3d,
                 self._state.project,
                 self._state.atlas,
-                regions=DEFAULT_REGIONS if self._state.atlas is not None else None,
+                extra_regions=self._extra_region_list(),
             )
             if self._state.atlas is None:
                 self._status.setText(

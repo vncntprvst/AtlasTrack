@@ -109,15 +109,35 @@ def register_section_image(
     anchoring: Anchoring,
     bspline_grid: tuple[int, int] = (8, 8),
     max_iterations: int = 100,
+    reference_volume: np.ndarray | None = None,
 ) -> tuple[RegistrationResult, "object"]:
     """Run the M3 registration on one section.
 
     Returns the persistable :class:`RegistrationResult` plus the in-memory
     SimpleITK transform (caller writes it to a sidecar if desired).
+
+    ``reference_volume`` lets the caller pass a float32 copy of
+    ``atlas.reference`` cast **once** and reused across sections; otherwise the
+    full volume is cast (and the annotation needlessly resampled) on every call,
+    which churns hundreds of MB per section.
     """
     h, w = section_image.shape[:2]
     out_shape = (int(h), int(w))
-    reference, _annot = resample_atlas_at_plane(atlas, anchoring, out_shape)
+    if reference_volume is not None:
+        from histo_to_ccf.atlas.planes import sample_plane
+
+        reference = sample_plane(reference_volume, anchoring, out_shape, order=1)
+    else:
+        reference, _annot = resample_atlas_at_plane(atlas, anchoring, out_shape)
+
+    # A plane that lands (almost) entirely outside the brain yields a constant
+    # reference; the MI metric then can't establish overlap and ITK aborts with
+    # a cryptic error. Fail early with an actionable message instead.
+    if float(reference.max()) - float(reference.min()) < 1e-6:
+        raise ValueError(
+            "atlas plane is empty (no tissue overlap) — check the section's "
+            "AP/anchoring"
+        )
 
     moving = section_image
     if moving.ndim == 3:
@@ -158,6 +178,8 @@ def register_project_with_atlas(
     transforms_dir = Path(transforms_dir)
     transforms_dir.mkdir(parents=True, exist_ok=True)
     res_um = atlas_resolution_um(atlas)
+    # Cast the reference volume to float32 once and reuse it across sections.
+    ref_vol = atlas.reference.astype(np.float32)
 
     registered: dict[tuple[int, int], RegisteredSectionTransform] = {}
     for slide_idx, slide in enumerate(project.slides):
@@ -175,6 +197,7 @@ def register_project_with_atlas(
                 anchoring=anchoring,
                 bspline_grid=bspline_grid,
                 max_iterations=max_iterations,
+                reference_volume=ref_vol,
             )
 
             import SimpleITK as sitk

@@ -47,3 +47,36 @@ def mesh_vertices_faces(mesh) -> tuple[np.ndarray, np.ndarray]:
     if faces is None:
         raise ValueError("mesh has no triangular faces")
     return verts, np.asarray(faces, dtype=int)
+
+
+def region_acronyms_at_points(atlas, points_ap_ml_dv_um, *, exclude=("root",)):
+    """Region acronyms at a list of CCF ``(AP, ML, DV)`` µm points.
+
+    The atlas indexes coordinates in ASR order ``(AP, DV, ML)``, so each point is
+    reordered before lookup. Points outside the atlas (or in ``exclude``) are
+    dropped. Returns a de-duplicated list preserving first-seen order.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in points_ap_ml_dv_um:
+        if p is None:
+            continue
+        ap, ml, dv = float(p[0]), float(p[1]), float(p[2])
+        try:
+            acr = atlas.structure_from_coords((ap, dv, ml), microns=True, as_acronym=True)
+        except Exception:
+            continue
+        if not acr or acr == "Outside atlas" or acr in exclude or acr in seen:
+            continue
+        seen.add(acr)
+        out.append(acr)
+    return out
+
+
+def structure_rgb(atlas, acronym, default=(180, 180, 180)) -> tuple[int, int, int]:
+    """Return the atlas's RGB triplet (0–255) for a structure acronym."""
+    try:
+        rgb = atlas.structures[acronym]["rgb_triplet"]
+        return int(rgb[0]), int(rgb[1]), int(rgb[2])
+    except Exception:
+        return default
