@@ -146,10 +146,10 @@ def register_worker_progressive(
     tfm_dir = Path(transforms_dir)
     tfm_dir.mkdir(parents=True, exist_ok=True)
     res_um = atlas_resolution_um(atlas)
-    # Cast the reference volume to float32 once; re-casting the whole atlas (and
-    # resampling the annotation) per section churns hundreds of MB and, stacked
-    # on TensorFlow's resident memory after DeepSlice, can OOM the process.
-    ref_vol = atlas.reference.astype(np.float32)
+    # Pass the raw (uint16) reference volume; each section's slice is
+    # interpolated to float32 on the fly, so we never hold a full float32 copy
+    # of the atlas (hundreds of MB) during the loop.
+    ref_vol = atlas.reference
     registered: dict[tuple[int, int], RegisteredSectionTransform] = {}
 
     failed: list[int] = []

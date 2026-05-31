@@ -230,6 +230,36 @@ def test_atlas_browser_assign_stores_absolute_ap(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_gl_report_never_raises(qtbot) -> None:
+    from histo_to_ccf.gui.gl_diagnostics import format_gl_report, gl_report
+
+    rep = gl_report()  # must not raise, even with no usable GL context
+    assert {"ok", "vendor", "renderer", "version", "error"} <= set(rep)
+    text = format_gl_report(rep)
+    assert "OpenGL diagnostic" in text
+    assert "Roll Back Driver" in text  # remediation guidance is included
+
+
+@pytest.mark.qt
+def test_build_panel_constructs_full_app(qtbot) -> None:
+    """Build the entire dock panel exactly as launch() does (all tabs wired)."""
+    import napari
+    from histo_to_ccf.gui.app import _build_panel
+
+    viewer = napari.Viewer(show=False)
+    try:
+        panel = _build_panel(viewer)
+        qtbot.addWidget(panel)
+        assert panel is not None
+        # No empty Tips/Entries marker layers at launch — adding those triggered
+        # vispy "Unsupported framebuffer format" shader errors on some GPUs.
+        assert "Tips" not in viewer.layers
+        assert "Entries" not in viewer.layers
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_add_probe_arms_tip_mode(qtbot) -> None:
     import napari
     from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget

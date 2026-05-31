@@ -137,6 +137,7 @@ def sample_plane(
     *,
     order: int = 1,
     cval: float = 0.0,
+    out_dtype: "np.dtype | type | None" = None,
 ) -> np.ndarray:
     """Sample ``volume`` on the 2D grid defined by ``anchoring``.
 
@@ -153,6 +154,10 @@ def sample_plane(
         0 = nearest (use for integer annotation labels).
     cval
         Value for samples outside the volume.
+    out_dtype
+        If given, the interpolation is computed directly into this dtype. Lets a
+        uint16 atlas volume be sampled to a float32 slice **without** first
+        casting the whole volume to float (which would copy hundreds of MB).
     """
     h, w = out_shape
     # 1-D parametric coords along u and v in [0, 1].
@@ -169,8 +174,12 @@ def sample_plane(
     coords_ml = oz + su * uz + sv * vz
     coords = np.stack([coords_ap, coords_dv, coords_ml], axis=0)  # (3, h, w)
 
+    out = None
+    if out_dtype is not None:
+        out = np.empty((h, w), dtype=out_dtype)
     return ndimage.map_coordinates(
-        volume, coords, order=order, mode="constant", cval=cval, prefilter=False
+        volume, coords, order=order, mode="constant", cval=cval, prefilter=False,
+        output=out,
     )
 
 

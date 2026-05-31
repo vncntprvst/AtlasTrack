@@ -116,17 +116,19 @@ def register_section_image(
     Returns the persistable :class:`RegistrationResult` plus the in-memory
     SimpleITK transform (caller writes it to a sidecar if desired).
 
-    ``reference_volume`` lets the caller pass a float32 copy of
-    ``atlas.reference`` cast **once** and reused across sections; otherwise the
-    full volume is cast (and the annotation needlessly resampled) on every call,
-    which churns hundreds of MB per section.
+    ``reference_volume`` lets the caller pass ``atlas.reference`` directly (the
+    raw uint16 volume, no copy); the slice is interpolated into float32 on the
+    fly. Otherwise the full volume is cast and the annotation needlessly
+    resampled on every call, churning hundreds of MB per section.
     """
     h, w = section_image.shape[:2]
     out_shape = (int(h), int(w))
     if reference_volume is not None:
         from histo_to_ccf.atlas.planes import sample_plane
 
-        reference = sample_plane(reference_volume, anchoring, out_shape, order=1)
+        reference = sample_plane(
+            reference_volume, anchoring, out_shape, order=1, out_dtype=np.float32
+        )
     else:
         reference, _annot = resample_atlas_at_plane(atlas, anchoring, out_shape)
 
@@ -178,8 +180,9 @@ def register_project_with_atlas(
     transforms_dir = Path(transforms_dir)
     transforms_dir.mkdir(parents=True, exist_ok=True)
     res_um = atlas_resolution_um(atlas)
-    # Cast the reference volume to float32 once and reuse it across sections.
-    ref_vol = atlas.reference.astype(np.float32)
+    # Pass the raw (uint16) reference volume — slices are interpolated to float
+    # per section, so we never copy the whole volume to float32.
+    ref_vol = atlas.reference
 
     registered: dict[tuple[int, int], RegisteredSectionTransform] = {}
     for slide_idx, slide in enumerate(project.slides):

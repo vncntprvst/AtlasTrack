@@ -1,6 +1,8 @@
 """Tests for mesh array extraction and registration overlay helpers."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -114,6 +116,56 @@ def test_deepslice_anchoring_permutation_and_flips() -> None:
     # u dominated by ML, v by DV — as sample_plane expects.
     assert abs(out[5]) == max(abs(out[3]), abs(out[4]), abs(out[5]))  # u → ML
     assert abs(out[7]) == max(abs(out[6]), abs(out[7]), abs(out[8]))  # v → DV
+
+
+def test_sample_plane_out_dtype_matches_float_cast() -> None:
+    from histo_to_ccf.atlas.planes import Anchoring, sample_plane
+
+    vol = np.arange(2 * 3 * 4, dtype=np.uint16).reshape(2, 3, 4)  # (AP, DV, ML)
+    anch = Anchoring(0, 0, 0, 0, 0, 3, 0, 2, 0)  # u→ML, v→DV
+    direct = sample_plane(vol, anch, (3, 4), order=1, out_dtype=np.float32)
+    cast_first = sample_plane(vol.astype(np.float32), anch, (3, 4), order=1)
+    assert direct.dtype == np.float32
+    np.testing.assert_allclose(direct, cast_first, atol=1e-4)
+
+
+def test_predict_anchorings_runs_subprocess_and_parses(tmp_path, monkeypatch) -> None:
+    import subprocess
+
+    from histo_to_ccf.io.quicknii import QuickNiiDocument, QuickNiiSlice, save_quicknii
+    from histo_to_ccf.registration import deepslice_adapter as ds
+
+    class _Annot:
+        shape = (528, 320, 456)
+
+    class _Atlas:
+        annotation = _Annot()
+
+    anchoring = [379.03, 107.44, 270.03, -320.33, -29.73, -10.68, -6.81, 19.19, -231.72]
+
+    def fake_run(cmd, **kwargs):
+        # cmd = [exe, "-m", module, workdir, species]
+        workdir = Path(cmd[-2])
+        doc = QuickNiiDocument(
+            slices=[QuickNiiSlice(
+                filename="section_s000.png", nr=1, width=10, height=10,
+                anchoring=anchoring,
+            )]
+        )
+        save_quicknii(doc, workdir / "deepslice_predictions.json")
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    section_images = {0: np.zeros((10, 10), dtype=np.uint8)}
+    out = ds.predict_anchorings(section_images, _Atlas(), workdir=tmp_path)
+    assert set(out) == {0}
+    expected = ds._quicknii_to_atlas_anchoring(anchoring, (528, 320, 456))
+    assert out[0] == pytest.approx(expected)
 
 
 def test_deepslice_anchoring_scales_with_resolution() -> None:

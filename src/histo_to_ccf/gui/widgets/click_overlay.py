@@ -58,7 +58,11 @@ class ClickOverlayWidget(QWidget):
         # Per-slide tissue-mask cache for trajectory→surface intersection.
         self._mask_cache: tuple[int, np.ndarray] | None = None
         self._build_ui()
-        self._init_layers()
+        # NOTE: the Tips/Entries Points layers are created lazily (the first time
+        # the user arms tip/entry), not here. Adding empty Points layers at
+        # launch made vispy try to draw a Markers visual with no data, which on
+        # some Windows GPUs triggers "Unsupported framebuffer format" / shader
+        # errors before any slide is even loaded.
 
     # ------------------------------------------------------------------
     # UI
@@ -135,24 +139,24 @@ class ClickOverlayWidget(QWidget):
     # Layer management
     # ------------------------------------------------------------------
 
-    def _init_layers(self) -> None:
-        if _LAYER_TIP not in self._viewer.layers:
-            self._tip_layer = self._viewer.add_points(
-                name=_LAYER_TIP, face_color="red", size=12, ndim=2
-            )
-        else:
-            self._tip_layer = self._viewer.layers[_LAYER_TIP]  # type: ignore[assignment]
-
-        if _LAYER_ENTRY not in self._viewer.layers:
-            self._entry_layer = self._viewer.add_points(
-                name=_LAYER_ENTRY, face_color="cyan", size=12, ndim=2
-            )
-        else:
-            self._entry_layer = self._viewer.layers[_LAYER_ENTRY]  # type: ignore[assignment]
-
-        # Listen for new points on both layers.
-        self._tip_layer.events.data.connect(self._on_tip_data_changed)
-        self._entry_layer.events.data.connect(self._on_entry_data_changed)
+    def _ensure_points_layers(self) -> None:
+        """Create the Tips/Entries Points layers on first use (and wire events)."""
+        if self._tip_layer is None:
+            if _LAYER_TIP in self._viewer.layers:
+                self._tip_layer = self._viewer.layers[_LAYER_TIP]  # type: ignore[assignment]
+            else:
+                self._tip_layer = self._viewer.add_points(
+                    name=_LAYER_TIP, face_color="red", size=12, ndim=2
+                )
+            self._tip_layer.events.data.connect(self._on_tip_data_changed)
+        if self._entry_layer is None:
+            if _LAYER_ENTRY in self._viewer.layers:
+                self._entry_layer = self._viewer.layers[_LAYER_ENTRY]  # type: ignore[assignment]
+            else:
+                self._entry_layer = self._viewer.add_points(
+                    name=_LAYER_ENTRY, face_color="cyan", size=12, ndim=2
+                )
+            self._entry_layer.events.data.connect(self._on_entry_data_changed)
 
     def _ensure_traj_layer(self) -> "napari.layers.Shapes":
         """Create (or fetch) the trajectory Shapes layer used for line drawing."""
@@ -202,6 +206,7 @@ class ClickOverlayWidget(QWidget):
                 layer.mode = "add_path"
             return
 
+        self._ensure_points_layers()
         layer = self._tip_layer if self._mode_tip.isChecked() else self._entry_layer
         if layer is None:
             return
@@ -241,6 +246,7 @@ class ClickOverlayWidget(QWidget):
             return
         # Drop a marker on the Entries layer; its data event stores the point.
         ex, ey = entry
+        self._ensure_points_layers()
         if self._entry_layer is not None:
             self._entry_layer.data = np.vstack([self._entry_layer.data, [[ey, ex]]])
             self._bring_to_front(self._entry_layer)

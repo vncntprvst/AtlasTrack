@@ -53,10 +53,23 @@ def version() -> None:
 
 @app.command()
 def gui() -> None:
-    """Launch the interactive napari GUI."""
+    """Launch the interactive napari GUI.
+
+    If it fails with 'QOpenGLFramebufferObject: Unsupported framebuffer format',
+    your GPU/OpenGL driver is the problem — run ``histo2ccf gl-info`` to see what
+    renderer is active and how to fix it.
+    """
     from histo_to_ccf.gui.app import launch
 
     launch()
+
+
+@app.command("gl-info")
+def gl_info() -> None:
+    """Report the OpenGL renderer/driver and diagnose GUI launch failures."""
+    from histo_to_ccf.gui.gl_diagnostics import format_gl_report
+
+    typer.echo(format_gl_report())
 
 
 @app.command()

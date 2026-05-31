@@ -12,7 +12,17 @@ def launch() -> None:
     import napari
 
     _install_exception_handler()
-    viewer = napari.Viewer(title="Histo-to-CCF")
+    try:
+        viewer = napari.Viewer(title="Histo-to-CCF")
+    except Exception as exc:
+        # A dead GPU/OpenGL context (bad driver, RDP session, disabled GPU) makes
+        # Viewer creation raise — print an actionable GL diagnosis instead of a
+        # raw traceback, then exit.
+        from histo_to_ccf.gui.gl_diagnostics import report_launch_failure
+
+        report_launch_failure(exc)
+        raise SystemExit(1) from exc
+
     panel = _build_panel(viewer)
     viewer.window.add_dock_widget(panel, area="right", name="Histo→CCF", tabify=False)
     _size_main_window(viewer)

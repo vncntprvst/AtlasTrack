@@ -11,6 +11,7 @@ Install via the optional extra::
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -169,16 +170,18 @@ def predict_anchorings(
     *,
     workdir: Path | str,
     species: str = "mouse",
-    ensemble: bool = True,
 ) -> dict[int, list[float]]:
     """Run DeepSlice on section crops and return per-section atlas anchorings.
 
     Writes each crop to ``workdir`` as ``section_s<idx>.png`` (DeepSlice reads
-    the section number from the ``_s<idx>`` token), runs DeepSlice with angle
-    propagation + index ordering for cross-section consistency, then returns
-    ``{section_idx: anchoring9}`` scaled to the loaded atlas. The anchorings drop
-    straight into the existing B-spline pipeline.
+    the section number from the ``_s<idx>`` token), then runs DeepSlice **in a
+    separate process** (see :mod:`deepslice_run`) so its TensorFlow memory is
+    freed before the calling process moves on to registration. Returns
+    ``{section_idx: anchoring9}`` converted to the loaded atlas's anchoring,
+    ready to drop into the B-spline pipeline.
     """
+    import subprocess
+
     import imageio.v3 as iio
 
     workdir = Path(workdir)
@@ -186,9 +189,20 @@ def predict_anchorings(
     for idx, img in section_images.items():
         iio.imwrite(workdir / _section_filename(idx), _to_uint8(img))
 
-    predictor = DeepSlicePredictor(species, ensemble=ensemble)
-    doc = predictor.predict_folder(workdir)
+    # Inherit stdout/stderr so DeepSlice's progress bar still shows in the
+    # console; TensorFlow lives and dies inside this child process.
+    result = subprocess.run(
+        [sys.executable, "-m", "histo_to_ccf.registration.deepslice_run",
+         str(workdir), species],
+    )
+    pred_json = workdir / "deepslice_predictions.json"
+    if result.returncode != 0 or not pred_json.exists():
+        raise RuntimeError(
+            "DeepSlice prediction failed (see console output above). "
+            f"Exit code {result.returncode}."
+        )
 
+    doc = load_quicknii(pred_json)
     shape = tuple(int(s) for s in atlas.annotation.shape)
     out: dict[int, list[float]] = {}
     for sl in doc.slices:
