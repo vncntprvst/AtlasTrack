@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numpy as np
 from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -30,9 +29,6 @@ _QUICK_PICKS = [
     ("Custom ID…", ""),
 ]
 
-_LAYER_ATLAS = "Atlas preview"
-
-
 class AtlasBrowserWidget(QWidget):
     """Browse coronal atlas slices and assign AP positions to sections."""
 
@@ -47,7 +43,7 @@ class AtlasBrowserWidget(QWidget):
         self._state = state
         self._viewer = viewer
         self._settings = settings
-        self._atlas_layer: "napari.layers.Image | None" = None
+        self._matcher: "AtlasMatcherDialog | None" = None
         self._build_ui()
         if settings is not None:
             self._apply_settings(settings)
@@ -104,13 +100,15 @@ class AtlasBrowserWidget(QWidget):
             "Antero-posterior level relative to bregma.\n"
             "0 = bregma, negative = posterior, positive = anterior."
         )
-        self._ap_spin.valueChanged.connect(self._preview_slice)
         ap_row.addWidget(self._ap_spin)
         layout.addLayout(ap_row)
 
-        preview_btn = QPushButton("Preview slice")
-        preview_btn.clicked.connect(self._preview_slice)
-        layout.addWidget(preview_btn)
+        matcher_btn = QPushButton("Open atlas matcher…")
+        matcher_btn.setToolTip(
+            "Side-by-side / overlay tool to match each section to an atlas AP."
+        )
+        matcher_btn.clicked.connect(self._open_matcher)
+        layout.addWidget(matcher_btn)
 
         # Section selector
         sec_row = QHBoxLayout()
@@ -222,44 +220,19 @@ class AtlasBrowserWidget(QWidget):
         if hasattr(settings, "atlas_dir"):
             settings.atlas_dir = self._atlas_dir.text().strip()
 
-    def _preview_slice(self) -> None:
-        atlas = self._state.atlas
-        if atlas is None:
+    def _open_matcher(self) -> None:
+        if self._state.atlas is None:
             self._assign_status.setText("Load an atlas first.")
             return
-        from histo_to_ccf.atlas.planes import coronal_anchoring, resample_atlas_at_plane
+        if self._state.active_slide_idx is None:
+            self._assign_status.setText("Load a slide with sections first.")
+            return
+        from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
 
-        ap_um = self._bregma_to_absolute(self._ap_spin.value())
-        anchoring = coronal_anchoring(atlas, ap_um)
-        dv, ml = atlas.reference.shape[1], atlas.reference.shape[2]
-        ref, _ = resample_atlas_at_plane(atlas, anchoring, (dv, ml))
-
-        # Contrast limits from the actual data — a fresh float layer otherwise
-        # defaults to [0, 1] and renders blank for uint16-range references.
-        lo, hi = float(np.min(ref)), float(np.max(ref))
-        clim = (lo, hi) if hi > lo else (0.0, 1.0)
-
-        if _LAYER_ATLAS in self._viewer.layers:
-            layer = self._viewer.layers[_LAYER_ATLAS]
-            layer.data = ref
-            layer.contrast_limits = clim
-            layer.visible = True
-            self._bring_atlas_to_front(layer)
-        else:
-            self._atlas_layer = self._viewer.add_image(
-                ref, name=_LAYER_ATLAS, colormap="gray", contrast_limits=clim
-            )
-            # Frame the freshly-added slice so it is actually on screen.
-            self._viewer.reset_view()
-
-    def _bring_atlas_to_front(self, layer) -> None:
-        layers = self._viewer.layers
-        try:
-            src = layers.index(layer)
-            if src != len(layers) - 1:
-                layers.move(src, len(layers) - 1)
-        except Exception:
-            pass
+        # Keep a reference so the non-modal dialog is not garbage-collected.
+        self._matcher = AtlasMatcherDialog(self._state, parent=self)
+        self._matcher.show()
+        self._matcher.raise_()
 
     def _assign_ap(self) -> None:
         slide_idx = self._state.active_slide_idx

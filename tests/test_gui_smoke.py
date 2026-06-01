@@ -229,6 +229,58 @@ def test_atlas_browser_assign_stores_absolute_ap(qtbot) -> None:
         viewer.close()
 
 
+class _FakeAtlas:
+    """Minimal stand-in for a BrainGlobeAtlas (reference/annotation/resolution)."""
+
+    def __init__(self) -> None:
+        self.resolution = (25.0, 25.0, 25.0)
+        # AP span must cover bregma-relative test positions (~ -2000 µm => abs 7400).
+        shape = (320, 16, 18)  # (AP, DV, ML)
+        n = int(np.prod(shape))
+        self.reference = np.arange(n, dtype=np.uint16).reshape(shape)
+        self.annotation = (np.arange(n) % 5).astype(np.int32).reshape(shape)
+        self.atlas_name = "fake_25um"
+
+
+@pytest.mark.qt
+def test_atlas_matcher_navigate_and_assign(qtbot) -> None:
+    from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+
+    state = WorkflowState()
+    state.add_slide("s.png", np.zeros((40, 60), dtype=np.uint8))
+    state.active_slide_idx = 0
+    slide = state.project.slides[0]
+    slide.sections.append(Section(index=0, slide_idx=0, bbox_px=(0, 0, 20, 20), ap_order=0))
+    slide.sections.append(Section(index=1, slide_idx=0, bbox_px=(20, 0, 40, 20), ap_order=1))
+    state.atlas = _FakeAtlas()
+
+    dlg = AtlasMatcherDialog(state)
+    qtbot.addWidget(dlg)
+
+    # Navigate to the second section (by ap_order).
+    dlg._step_section(1)
+    assert dlg._pos == 1
+    assert state.active_section_idx == 1
+
+    # Assign the current AP: stored as absolute, bregma-converted.
+    dlg._ap_spin.setValue(-2000.0)
+    dlg._assign_current()
+    sec1 = next(s for s in slide.sections if s.index == 1)
+    assert sec1.plane is not None
+    assert sec1.plane.ap_um == pytest.approx(BREGMA_AP_FROM_ORIGIN_UM + 2000.0)
+
+    # Linked assign-all fills every section from the anchor + spacing.
+    dlg._link_check.setChecked(True)
+    dlg._spacing_spin.setValue(100.0)
+    dlg._assign_all()
+    assert all(s.plane is not None for s in slide.sections)
+
+    # Overlay mode must render without raising.
+    dlg._overlay_radio.setChecked(True)
+    assert dlg._stack.currentIndex() == 1
+
+
 @pytest.mark.qt
 def test_gl_report_never_raises(qtbot) -> None:
     from histo_to_ccf.gui.gl_diagnostics import format_gl_report, gl_report
