@@ -175,30 +175,100 @@ class SlideLoaderWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _open_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open slide image", "",
+        # Allow selecting several images at once; they are merged into one slide.
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Open slide image(s)", "",
             "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;All files (*)",
         )
-        if path:
+        for path in paths:
             self._load_path(path)
 
     def _load_path(self, path) -> None:
         from pathlib import Path
-        from histo_to_ccf.io.image import load_image
-        from histo_to_ccf.sectioning.split import estimate_min_area
 
         p = Path(path)
+        first = self._state.active_slide_idx is None or not self._state.project.slides
+        if first:
+            self._load_first_slide(p)
+        else:
+            self._merge_slide(p)
+
+    def _load_first_slide(self, p) -> None:
+        from histo_to_ccf.io.image import load_image
+
         img = load_image(p)
         slide_idx = self._state.add_slide(p, img)
         self._state.active_slide_idx = slide_idx
+        self._state.project.slides[slide_idx].source_paths = [str(p)]
         self._path_label.setText(p.name)
-        self._status.setText(f"Loaded {img.shape[1]}×{img.shape[0]} px — estimating min area…")
+        self._after_image_changed(img, slide_idx)
 
+    def _merge_slide(self, p) -> None:
+        """Merge a newly opened image into the existing single slide.
+
+        Multiple slides share one coordinate space by living in one combined
+        image, so probes can span sections from different source images. Merging
+        changes pixel coordinates, so any existing detected sections are cleared
+        and the user is told to re-detect.
+        """
+        from histo_to_ccf.io.image import load_image, merge_images
+
+        slide_idx = self._state.active_slide_idx
+        slide = self._state.project.slides[slide_idx]
+        sources = list(slide.source_paths) if slide.source_paths else [slide.image_path]
+        sources.append(str(p))
+        # Deterministic, reproducible layout (also matches reload): alphabetical.
+        sources = sorted(sources)
+
+        from pathlib import Path
+
+        try:
+            images = [load_image(Path(s)) for s in sources]
+            combined = merge_images(images)
+        except Exception as exc:  # noqa: BLE001
+            self._status.setText(f"Merge failed: {exc}")
+            return
+
+        had_sections = bool(slide.sections)
+        slide.source_paths = sources
+        slide.image_path = sources[0]
+        slide.sections.clear()
+        # The combined image is rebuilt from raw sources, so any prior flips /
+        # levels no longer apply — clear them to stay consistent with reload.
+        slide.flip_h = False
+        slide.flip_v = False
+        slide.levels = None
+        self._state.slide_images[slide_idx] = combined
+        self._path_label.setText(f"{len(sources)} images merged")
+        note = (
+            f"Merged {len(sources)} images into one combined slide "
+            f"({combined.shape[1]}×{combined.shape[0]} px). "
+        )
+        if had_sections:
+            note += "Existing sections were cleared — click 'Detect sections' again."
+        self._info_merge(note)
+        self._after_image_changed(combined, slide_idx)
+
+    def _info_merge(self, message: str) -> None:
+        """Tell the user that images were merged (best-effort dialog + status)."""
+        self._status.setText(message)
+        try:
+            from qtpy.QtWidgets import QMessageBox
+
+            QMessageBox.information(self, "Slides merged", message)
+        except Exception:
+            pass
+
+    def _after_image_changed(self, img, slide_idx: int) -> None:
+        """Shared post-load work: estimate min area and refresh the viewer."""
+        self._status.setText(
+            f"Loaded {img.shape[1]}×{img.shape[0]} px — estimating min area…"
+        )
         # Auto-estimate in a worker so the UI stays responsive for large images.
         worker = self._estimate_worker(img)
         worker.returned.connect(lambda v: self._min_area.setValue(v))
         worker.returned.connect(lambda v: self._status.setText(
-            f"Loaded {img.shape[1]}×{img.shape[0]} px  |  min area estimated: {v:,} px²"
+            f"{img.shape[1]}×{img.shape[0]} px  |  min area estimated: {v:,} px²"
         ))
         worker.start()
 

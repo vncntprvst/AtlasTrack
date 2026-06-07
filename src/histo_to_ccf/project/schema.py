@@ -107,9 +107,17 @@ class Section(BaseModel):
 
 
 class Slide(BaseModel):
-    """One slide image — typically holds several Sections."""
+    """One slide image — typically holds several Sections.
+
+    When several source images are opened they are merged into a single combined
+    image (so every section shares one coordinate space). ``image_path`` is the
+    primary/first source; ``source_paths`` lists all sources in merge order so
+    the exact combined image can be reproduced on reload. For a single-image
+    slide ``source_paths`` is empty and ``image_path`` is used directly.
+    """
 
     image_path: str
+    source_paths: list[str] = []
     sections: list[Section] = []
     flip_h: bool = False
     flip_v: bool = False

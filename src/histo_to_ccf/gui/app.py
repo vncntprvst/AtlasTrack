@@ -384,11 +384,17 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
     import numpy as np
 
     from histo_to_ccf.gui.section_display import sections_to_outline_labels
-    from histo_to_ccf.io.image import load_image
+    from histo_to_ccf.io.image import load_image, merge_images
 
     for slide_idx, slide in enumerate(state.project.slides):
         try:
-            img = load_image(Path(slide.image_path))
+            # Reproduce a merged slide from its (sorted) source images; a single
+            # source loads directly. merge_images is deterministic, so the
+            # combined pixels — and hence the stored section bboxes — line up.
+            if slide.source_paths and len(slide.source_paths) > 1:
+                img = merge_images([load_image(Path(s)) for s in slide.source_paths])
+            else:
+                img = load_image(Path(slide.image_path))
         except Exception:
             continue
         # Flips are baked into the in-memory array at flip-time and only the
