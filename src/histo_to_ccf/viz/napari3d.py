@@ -85,7 +85,7 @@ def _add_region_surface(
     *,
     rgb: tuple[int, int, int],
     opacity: float,
-    blending: str = "translucent",
+    blending: str = "translucent_no_depth",
 ):
     """Add one region mesh as a flat-coloured napari Surface layer."""
     from histo_to_ccf.atlas.meshes import mesh_vertices_faces
@@ -188,8 +188,10 @@ def show_3d_scene(
             project, atlas, extra_regions=extra_regions, show_tip_regions=show_tip_regions
         )
         for acronym, color, opacity in styled_regions(list(CONTEXT_REGIONS) + internal):
-            # Context shell additive (see-through); internal nuclei translucent.
-            blending = "additive" if acronym in CONTEXT_REGIONS else "translucent"
+            # Context shell additive (see-through); internal nuclei use
+            # translucent_no_depth so a region surrounding a shank tip colours
+            # the volume but never writes depth — the probe stays visible inside.
+            blending = "additive" if acronym in CONTEXT_REGIONS else "translucent_no_depth"
             layer = _add_region_surface(
                 viewer, atlas, acronym, rgb=hex_to_rgb(color),
                 opacity=opacity, blending=blending,

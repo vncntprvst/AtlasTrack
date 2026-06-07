@@ -94,7 +94,6 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
     from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
     from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
-    from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
     from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
 
     settings = load_app_settings()
@@ -155,15 +154,9 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     reg_layout.addWidget(register_panel)
     tabs.addTab(tab_register, "Register")
 
-    # -- Tab 5: Save ---------------------------------------------------------
-    tab_save = QWidget()
-    save_layout = QVBoxLayout(tab_save)
-    save_layout.setContentsMargins(2, 2, 2, 2)
-    save_panel = SavePanelWidget(
-        state, on_project_loaded=lambda: _reload_project_display(viewer, state)
-    )
-    save_layout.addWidget(save_panel)
-    tabs.addTab(tab_save, "Save")
+    # Project save/load live in the menu bar (see _install_project_menu), not a
+    # tab — they are file actions, not part of the left-to-right workflow.
+    _install_project_menu(viewer, state)
 
     # Persist settings when the tab changes (cheap enough to do on every switch).
     def _on_tab_change(_idx: int) -> None:
@@ -174,6 +167,57 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     tabs.currentChanged.connect(_on_tab_change)
 
     return container
+
+
+def _install_project_menu(viewer: "napari.Viewer", state: "WorkflowState") -> None:
+    """Add a "Histo→CCF" menu with Save / Save As… / Load Project actions.
+
+    These are file operations (not workflow steps), so they belong in the menu
+    bar rather than a docked tab. Save/Load reuse :class:`SavePanelWidget`'s
+    logic via a hidden instance so behaviour stays in one place. Best-effort:
+    if the Qt main window or menu bar is unavailable (headless), do nothing.
+    """
+    from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
+
+    try:
+        menubar = viewer.window._qt_window.menuBar()
+    except Exception:
+        return
+
+    # A hidden helper widget owns the save/load implementation + file dialogs.
+    helper = SavePanelWidget(
+        state, on_project_loaded=lambda: _reload_project_display(viewer, state)
+    )
+    helper.hide()
+    # Keep it alive for the session (parent it to the main window).
+    try:
+        helper.setParent(viewer.window._qt_window)
+    except Exception:
+        pass
+
+    menu = menubar.addMenu("Histo→CCF")
+
+    def _save() -> None:
+        # Save to the known project path if set, else prompt as Save As.
+        if state.project_path is not None:
+            helper._path_edit.setText(str(state.project_path))
+            helper._save()
+        else:
+            _save_as()
+
+    def _save_as() -> None:
+        helper._path_edit.clear()
+        helper._browse()
+        if helper._path_edit.text().strip():
+            helper._save()
+
+    save_action = menu.addAction("Save Project")
+    save_action.triggered.connect(_save)
+    save_as_action = menu.addAction("Save Project As…")
+    save_as_action.triggered.connect(_save_as)
+    menu.addSeparator()
+    load_action = menu.addAction("Load Project…")
+    load_action.triggered.connect(helper._load)
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +360,8 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
     """
     from pathlib import Path
 
+    import numpy as np
+
     from histo_to_ccf.gui.section_display import sections_to_outline_labels
     from histo_to_ccf.io.image import load_image
 
@@ -324,6 +370,23 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
             img = load_image(Path(slide.image_path))
         except Exception:
             continue
+        # Flips are baked into the in-memory array at flip-time and only the
+        # boolean flags are persisted, so the freshly-loaded raw image must be
+        # re-flipped to match the saved orientation (whole-slide then per-section).
+        if slide.flip_h:
+            img = np.fliplr(img)
+        if slide.flip_v:
+            img = np.flipud(img)
+        for section in slide.sections:
+            if not (section.flip_h or section.flip_v):
+                continue
+            x0, y0, x1, y1 = section.bbox_px
+            crop = img[y0:y1, x0:x1]
+            if section.flip_h:
+                crop = np.fliplr(crop)
+            if section.flip_v:
+                crop = np.flipud(crop)
+            img[y0:y1, x0:x1] = crop
         state.slide_images[slide_idx] = img
         state.active_slide_idx = slide_idx
         name = f"Slide {slide_idx}"

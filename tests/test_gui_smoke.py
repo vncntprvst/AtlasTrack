@@ -307,6 +307,36 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
         # vispy "Unsupported framebuffer format" shader errors on some GPUs.
         assert "Tips" not in viewer.layers
         assert "Entries" not in viewer.layers
+        # Project save/load moved to a menu (no "Save" tab); the menu exists.
+        titles = [a.text() for a in viewer.window._qt_window.menuBar().actions()]
+        assert any("Histo" in t for t in titles)
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_reload_restores_slide_flip(qtbot, tmp_path) -> None:
+    """Loading a project re-applies the persisted slide flip to the raw image."""
+    import napari
+    from histo_to_ccf.gui.app import _reload_project_display
+    from histo_to_ccf.io.image import load_image
+
+    # A non-symmetric image so a flip is detectable.
+    img = np.arange(12, dtype=np.uint8).reshape(3, 4)
+    img_path = tmp_path / "slide.png"
+    import imageio.v3 as iio
+
+    iio.imwrite(img_path, img)
+    expected = np.fliplr(load_image(img_path))
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.project = Project(
+            slides=[Slide(image_path=str(img_path), flip_h=True)]
+        )
+        _reload_project_display(viewer, state)
+        np.testing.assert_array_equal(state.slide_images[0], expected)
     finally:
         viewer.close()
 

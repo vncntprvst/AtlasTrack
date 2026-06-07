@@ -57,6 +57,8 @@ class RegisterPanelWidget(QWidget):
         self._reg_base_dir: Path | None = None
         # Held so the separate 3D viewer window is not garbage-collected.
         self._viewer3d = None
+        # Persisted AppSettings (for the atlas storage folder); set via apply_settings.
+        self._settings = None
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -175,6 +177,7 @@ class RegisterPanelWidget(QWidget):
 
     def apply_settings(self, settings) -> None:
         """Populate controls from persisted AppSettings."""
+        self._settings = settings
         self._grid_spin.setValue(settings.bspline_grid)
         self._iter_spin.setValue(settings.max_iterations)
 
@@ -335,6 +338,9 @@ class RegisterPanelWidget(QWidget):
 
     def _show_overlay(self) -> None:
         """Overlay registered atlas boundaries on each section in the viewer."""
+        self._ensure_atlas(self._render_overlay)
+
+    def _render_overlay(self) -> None:
         atlas = self._state.atlas
         if atlas is None:
             _error_dialog(self, "Atlas not loaded", "Load the atlas used for registration.")
@@ -420,7 +426,44 @@ class RegisterPanelWidget(QWidget):
         """Parse the comma-separated extra-regions field into acronyms."""
         return [a.strip() for a in self._extra_regions.text().split(",") if a.strip()]
 
+    def _ensure_atlas(self, on_ready) -> None:
+        """Ensure ``state.atlas`` is loaded, then call ``on_ready()``.
+
+        After a project reload the atlas is not auto-loaded, so the 3D brain and
+        the section overlay would be empty. This lazily loads the atlas named in
+        the project (from the saved atlas folder) in a background thread and
+        invokes ``on_ready`` once it is available. If it is already loaded, or no
+        atlas name is recorded, ``on_ready`` runs immediately.
+        """
+        if self._state.atlas is not None:
+            on_ready()
+            return
+        atlas_id = self._state.project.atlas.name
+        if not atlas_id:
+            on_ready()
+            return
+        atlas_dir = None
+        if self._settings is not None:
+            atlas_dir = getattr(self._settings, "atlas_dir", "") or None
+        self._status.setText(f"Loading atlas {atlas_id} for 3D view…")
+        from histo_to_ccf.gui.workers import load_atlas_worker
+
+        worker = load_atlas_worker(atlas_id, brainglobe_dir=atlas_dir)
+
+        def _loaded(atlas) -> None:
+            self._state.atlas = atlas
+            on_ready()
+
+        worker.returned.connect(_loaded)
+        worker.errored.connect(
+            lambda exc: (self._status.setText(f"Atlas load failed: {exc}"), on_ready())
+        )
+        worker.start()
+
     def _view_napari3d(self) -> None:
+        self._ensure_atlas(self._render_napari3d)
+
+    def _render_napari3d(self) -> None:
         try:
             import napari
 
