@@ -6,6 +6,7 @@ from typing import Callable
 import numpy as np
 from qtpy.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QDoubleSpinBox,
     QGroupBox,
     QHBoxLayout,
@@ -45,7 +46,8 @@ class ImageToolsWidget(QWidget):
 
         # Scope toggle
         scope_box = QGroupBox("Scope")
-        scope_row = QHBoxLayout(scope_box)
+        scope_layout = QVBoxLayout(scope_box)
+        scope_row = QHBoxLayout()
         self._scope_whole = QRadioButton("Whole slide")
         self._scope_whole.setChecked(True)
         self._scope_section = QRadioButton("Selected section")
@@ -54,6 +56,23 @@ class ImageToolsWidget(QWidget):
         scope_grp.addButton(self._scope_section)
         scope_row.addWidget(self._scope_whole)
         scope_row.addWidget(self._scope_section)
+        scope_layout.addLayout(scope_row)
+
+        # Which section the "Selected section" scope acts on. Without this the
+        # active section was never set from the main UI, so section-scoped flips
+        # and levels silently did nothing.
+        sec_row = QHBoxLayout()
+        sec_row.addWidget(QLabel("Section:"))
+        self._section_combo = QComboBox()
+        self._section_combo.setToolTip(
+            "The section that 'Selected section' scope applies to. "
+            "Choosing 'Selected section' refreshes this list."
+        )
+        self._section_combo.currentIndexChanged.connect(self._on_section_combo_changed)
+        sec_row.addWidget(self._section_combo, 1)
+        scope_layout.addLayout(sec_row)
+        # Refresh the section list whenever section scope is chosen.
+        self._scope_section.toggled.connect(self._on_scope_section_toggled)
         layout.addWidget(scope_box)
 
         # Flip controls
@@ -100,6 +119,41 @@ class ImageToolsWidget(QWidget):
         levels_layout.addWidget(auto_btn)
         layout.addWidget(levels_box)
         layout.addStretch()
+
+    # ------------------------------------------------------------------
+    # Section selection (drives the "Selected section" scope)
+    # ------------------------------------------------------------------
+
+    def _populate_sections(self) -> None:
+        """Fill the section dropdown from the active slide's sections."""
+        self._section_combo.blockSignals(True)
+        self._section_combo.clear()
+        slide_idx = self._state.active_slide_idx
+        if slide_idx is not None and slide_idx < len(self._state.project.slides):
+            slide = self._state.project.slides[slide_idx]
+            for sec in sorted(slide.sections, key=lambda s: s.ap_order):
+                self._section_combo.addItem(f"Section {sec.index}", sec.index)
+        self._section_combo.blockSignals(False)
+        # Keep the active section in sync with the (possibly new) selection.
+        if self._section_combo.count():
+            if self._state.active_section_idx is None:
+                self._state.active_section_idx = self._section_combo.currentData()
+            else:
+                # Reselect the previously-active section if it still exists.
+                pos = self._section_combo.findData(self._state.active_section_idx)
+                if pos >= 0:
+                    self._section_combo.setCurrentIndex(pos)
+                else:
+                    self._state.active_section_idx = self._section_combo.currentData()
+
+    def _on_scope_section_toggled(self, checked: bool) -> None:
+        if checked:
+            self._populate_sections()
+
+    def _on_section_combo_changed(self, _idx: int) -> None:
+        data = self._section_combo.currentData()
+        if data is not None:
+            self._state.active_section_idx = int(data)
 
     # ------------------------------------------------------------------
     # Flip helpers

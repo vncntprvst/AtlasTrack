@@ -131,6 +131,20 @@ class OrderingPanelWidget(QWidget):
         layout.addStretch()
 
     # ------------------------------------------------------------------
+    # Public accessors (used by the Atlas matcher to stay in sync)
+    # ------------------------------------------------------------------
+
+    def current_spacing(self) -> float:
+        return self._spacing.value()
+
+    def set_spacing(self, value: float) -> None:
+        self._spacing.setValue(value)
+
+    def refresh(self) -> None:
+        """Re-read the section list (e.g. after the matcher reorders/assigns AP)."""
+        self._refresh_list()
+
+    # ------------------------------------------------------------------
 
     def _active_slide(self):
         slide_idx = self._state.active_slide_idx

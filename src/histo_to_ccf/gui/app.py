@@ -25,8 +25,26 @@ def launch() -> None:
 
     panel = _build_panel(viewer)
     viewer.window.add_dock_widget(panel, area="right", name="Histo→CCF", tabify=False)
+    _hide_layer_panels(viewer)
     _size_main_window(viewer)
     napari.run()
+
+
+def _hide_layer_panels(viewer: "napari.Viewer") -> None:
+    """Hide napari's built-in 'layer list' + 'layer controls' docks.
+
+    The user drives everything through the Histo→CCF workflow panel; the raw
+    layer list/controls only add confusion. Best-effort across napari versions —
+    silently ignore if the private dock handles are not present.
+    """
+    try:
+        qt_viewer = viewer.window._qt_viewer
+        for attr in ("dockLayerList", "dockLayerControls"):
+            dock = getattr(qt_viewer, attr, None)
+            if dock is not None:
+                dock.setVisible(False)
+    except Exception:
+        pass
 
 
 # Target aspect ratio (width : height) for the main window. 16:9 keeps the
@@ -133,7 +151,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     probe_picker.on_probe_added = click_overlay.arm_tip
     ann_layout.addWidget(probe_picker)
     ann_layout.addWidget(click_overlay)
-    tabs.addTab(tab_annotate, "Annotate")
+    tabs.addTab(tab_annotate, "Probes")
 
     # -- Tab 3: Atlas --------------------------------------------------------
     tab_atlas = QWidget()
@@ -141,6 +159,9 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     atlas_layout.setContentsMargins(2, 2, 2, 2)
     atlas_browser = AtlasBrowserWidget(state, viewer, settings=settings)
     ordering = OrderingPanelWidget(state)
+    # The matcher dialog (opened from the browser) syncs AP + spacing with these
+    # widgets, so give the browser a handle to the ordering panel.
+    atlas_browser.ordering_panel = ordering
     atlas_layout.addWidget(atlas_browser)
     atlas_layout.addWidget(ordering)
     tabs.addTab(tab_atlas, "Atlas")
@@ -390,10 +411,11 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
         state.slide_images[slide_idx] = img
         state.active_slide_idx = slide_idx
         name = f"Slide {slide_idx}"
+        disp = _display_image_for_slide(state, slide_idx, img)
         if name in viewer.layers:
-            viewer.layers[name].data = img
+            viewer.layers[name].data = disp
         else:
-            viewer.add_image(img, name=name, colormap="gray")
+            viewer.add_image(disp, name=name, colormap="gray")
         if slide.sections:
             labels = sections_to_outline_labels(img.shape[:2], slide.sections)
             outline = f"Sections {slide_idx}"
@@ -420,4 +442,57 @@ def _refresh_slide(viewer: "napari.Viewer", state: "WorkflowState") -> None:
         return
     name = f"Slide {slide_idx}"
     if name in viewer.layers:
-        viewer.layers[name].data = img
+        viewer.layers[name].data = _display_image_for_slide(state, slide_idx, img)
+
+
+def _window(channel, lo_frac: float, hi_frac: float):
+    """Window a 2D channel to its own dtype using 0-1 fractions of full scale."""
+    import numpy as np
+
+    a = channel.astype(np.float32)
+    full = 255.0 if a.max() <= 255.0 else float(a.max())
+    lo, hi = lo_frac * full, hi_frac * full
+    if hi <= lo:
+        hi = lo + 1.0
+    out = np.clip((a - lo) / (hi - lo), 0.0, 1.0) * full
+    return out.astype(channel.dtype)
+
+
+def _apply_levels(img, levels):
+    """Return a copy of ``img`` with per-channel display levels applied."""
+    import numpy as np
+
+    if levels is None:
+        return img
+    low, high = levels.low, levels.high
+    if img.ndim == 2:
+        return _window(img, low[0], high[0])
+    out = img.copy()
+    for i in range(min(3, out.shape[2])):
+        lo = low[i] if i < len(low) else 0.0
+        hi = high[i] if i < len(high) else 1.0
+        out[..., i] = _window(out[..., i], lo, hi)
+    return out
+
+
+def _display_image_for_slide(state: "WorkflowState", slide_idx: int, raw):
+    """Build the display image for a slide: whole-slide levels + per-section levels.
+
+    The raw array in ``state.slide_images`` is kept untouched (registration uses
+    it); only this display copy is windowed. Flips are already baked into the raw
+    array, so positions line up.
+    """
+    if slide_idx >= len(state.project.slides):
+        return raw
+    slide = state.project.slides[slide_idx]
+    if slide.levels is None and not any(s.levels for s in slide.sections):
+        return raw  # nothing to apply — show the raw array as-is
+    disp = _apply_levels(raw, slide.levels)
+    if disp is raw:
+        disp = raw.copy()
+    for sec in slide.sections:
+        if sec.levels is None:
+            continue
+        x0, y0, x1, y1 = sec.bbox_px
+        disp[y0:y1, x0:x1] = _apply_levels(raw[y0:y1, x0:x1], sec.levels)
+    return disp

@@ -143,6 +143,28 @@ def test_save_panel_creates(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_image_tools_section_scope_flip(qtbot) -> None:
+    """Selecting a section in the dropdown makes section-scoped flips apply to it."""
+    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+
+    state = WorkflowState()
+    state.add_slide("fake.png", np.zeros((40, 40), dtype=np.uint8))
+    state.active_slide_idx = 0
+    slide = state.project.slides[0]
+    slide.sections.append(Section(index=2, slide_idx=0, bbox_px=(0, 0, 20, 20)))
+
+    widget = ImageToolsWidget(state)
+    qtbot.addWidget(widget)
+    # Choose section scope → dropdown populates and the active section is set.
+    widget._scope_section.setChecked(True)
+    assert state.active_section_idx == 2
+    # A section-scoped flip now toggles that section's flag (previously a no-op).
+    widget._flip_section("h")
+    sec = next(s for s in slide.sections if s.index == 2)
+    assert sec.flip_h is True
+
+
+@pytest.mark.qt
 def test_image_tools_flip_h_updates_state(qtbot) -> None:
     from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
 

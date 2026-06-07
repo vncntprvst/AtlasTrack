@@ -44,6 +44,8 @@ class AtlasBrowserWidget(QWidget):
         self._viewer = viewer
         self._settings = settings
         self._matcher: "AtlasMatcherDialog | None" = None
+        # Set by app.py so the matcher can sync the section-spacing value too.
+        self.ordering_panel = None
         self._build_ui()
         if settings is not None:
             self._apply_settings(settings)
@@ -89,6 +91,13 @@ class AtlasBrowserWidget(QWidget):
         self._atlas_status.setWordWrap(True)
         layout.addWidget(self._atlas_status)
 
+        matcher_btn = QPushButton("Open atlas matcher…")
+        matcher_btn.setToolTip(
+            "Side-by-side / overlay tool to match each section to an atlas AP."
+        )
+        matcher_btn.clicked.connect(self._open_matcher)
+        layout.addWidget(matcher_btn)
+
         # AP position, shown relative to bregma (bregma = 0, anterior positive).
         ap_row = QHBoxLayout()
         ap_row.addWidget(QLabel("AP from bregma (µm):"))
@@ -102,13 +111,6 @@ class AtlasBrowserWidget(QWidget):
         )
         ap_row.addWidget(self._ap_spin)
         layout.addLayout(ap_row)
-
-        matcher_btn = QPushButton("Open atlas matcher…")
-        matcher_btn.setToolTip(
-            "Side-by-side / overlay tool to match each section to an atlas AP."
-        )
-        matcher_btn.clicked.connect(self._open_matcher)
-        layout.addWidget(matcher_btn)
 
         # Section selector
         sec_row = QHBoxLayout()
@@ -230,9 +232,19 @@ class AtlasBrowserWidget(QWidget):
         from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
 
         # Keep a reference so the non-modal dialog is not garbage-collected.
-        self._matcher = AtlasMatcherDialog(self._state, parent=self)
+        # Pass this browser so the matcher seeds its AP/spacing from the tab on
+        # open and writes them back on close (sync with the Atlas tab).
+        self._matcher = AtlasMatcherDialog(self._state, browser=self, parent=self)
         self._matcher.show()
         self._matcher.raise_()
+
+    # -- matcher <-> tab sync accessors ---------------------------------
+
+    def current_ap_bregma(self) -> float:
+        return self._ap_spin.value()
+
+    def set_ap_bregma(self, value: float) -> None:
+        self._ap_spin.setValue(value)
 
     def _assign_ap(self) -> None:
         slide_idx = self._state.active_slide_idx

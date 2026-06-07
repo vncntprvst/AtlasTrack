@@ -161,18 +161,48 @@ class AtlasMatcherDialog(QDialog):
     def __init__(
         self,
         state: WorkflowState,
+        browser=None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Atlas matcher")
         self.resize(1000, 640)
         self._state = state
+        # The Atlas-tab browser (+ its ordering panel) to sync with on open/close.
+        self._browser = browser
         self._pos = 0  # index into the AP-ordered section list
         self._anchor: tuple[int, float] | None = None  # (position, AP-from-bregma)
         self._updating = False
         self._build_ui()
         self._init_ap_range()
+        self._sync_from_tab()
         self._refresh(fit=True)
+
+    # -- sync with the Atlas tab ----------------------------------------
+
+    def _ordering_panel(self):
+        return getattr(self._browser, "ordering_panel", None) if self._browser else None
+
+    def _sync_from_tab(self) -> None:
+        """Seed AP + spacing from the Atlas-tab widgets when the dialog opens."""
+        if self._browser is not None:
+            self._set_ap_silent(self._browser.current_ap_bregma())
+        panel = self._ordering_panel()
+        if panel is not None:
+            self._spacing_spin.setValue(panel.current_spacing())
+
+    def _sync_to_tab(self) -> None:
+        """Write AP + spacing back to the Atlas-tab widgets when closing."""
+        if self._browser is not None:
+            self._browser.set_ap_bregma(self._ap_spin.value())
+        panel = self._ordering_panel()
+        if panel is not None:
+            panel.set_spacing(self._spacing_spin.value())
+            panel.refresh()  # section ordering / AP may have changed
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+        self._sync_to_tab()
+        super().closeEvent(event)
 
     # -- ordered sections ------------------------------------------------
 
