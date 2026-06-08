@@ -100,7 +100,7 @@ class EphysPanelWidget(QWidget):
         rec_layout.addLayout(secs_row)
         layout.addWidget(rec_box)
 
-        self._compute_btn = QPushButton("Load & compute LFP power")
+        self._compute_btn = QPushButton("Load and compute LFP power")
         self._compute_btn.setFixedHeight(32)
         self._compute_btn.clicked.connect(self._compute)
         layout.addWidget(self._compute_btn)
@@ -267,6 +267,6 @@ class EphysPanelWidget(QWidget):
             except Exception as exc:  # noqa: BLE001
                 msg += f"  ·  auto-save failed: {exc}"
         else:
-            msg += "  ·  use Histo→CCF ▸ Save Project to persist."
+            msg += "  ·  use Project ▸ Save Project to persist."
         msg += "  View in napari 3D to see the channels."
         self._status.setText(msg)

@@ -32,13 +32,15 @@ The repo includes an example: `example data\L07_slide3_2x_whole_overlay.jpg`
 histo2ccf gui
 ```
 
-A napari viewer opens with a 5-tab panel on the right:
-**Load / Probes / Atlas / Register / Ephys**.
-Project **Save / Load** live in the **Histo→CCF menu** in the menu bar (not a tab).
+A napari viewer opens with the **Registration** panel (5 tabs) docked on the
+**left** — **Histology / Atlas / Probes / Register / Ephys** — and a permanent
+**3D & Export** panel docked on the **right** (3D view + Plotly/HERBS/CSV export,
+always available). Project **Save / Load** live in the **Project menu** (first in
+the menu bar, not a tab).
 
 ---
 
-## 2 — Load tab: load the slide and detect sections
+## 2 — Histology tab: load the slide and detect sections
 
 1. Click **Open slide…** → select your image.  
    The slide appears as a gray layer in the viewer.
@@ -54,10 +56,31 @@ Project **Save / Load** live in the **Histo→CCF menu** in the menu bar (not a 
 
 ---
 
-## 3 — Probes tab: add a probe and click tip + entry
+## 3 — Atlas tab: load atlas and assign AP planes
+
+1. (Optional) Set the **Atlas folder** — where atlases are downloaded to and reused
+   from. Leave the default (`~/.brainglobe`) unless you want them elsewhere.
+2. Select **Allen CCFv3 25 µm** (default) and click **Load atlas**.  
+   First run downloads ~400 MB; subsequent runs are instant because the atlas is
+   reused from the folder above (the status line shows where it loaded from).
+3. Set **AP from bregma (µm)** to match a section — **0 = bregma**, negative = posterior,
+   positive = anterior. Click **Open atlas matcher…** to compare your section against
+   atlas slices side-by-side / overlaid and assign the AP.
+4. For each section: set **Assign to section idx**, then click **Assign AP to section**.
+   (Midline / dorsal-surface anchoring is handled automatically by registration — no
+   manual pixel entry needed.)
+5. In **Section ordering**: drag sections in the list to reorder them, set
+   **Section spacing (µm)** (persists with the project), pick the anchor section, and
+   click **Apply spacing** to propagate AP values across all sections.
+
+---
+
+## 4 — Probes tab: add a probe and click tip + entry
 
 1. **Add probe**: choose probe type (*Neuropixels 1.0*, *Neuropixels 2.0 (4-shank)*,
    or *NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP*), set a label, click **Add probe**.
+   Select the probe (by label) and shank from the dropdowns — the same labels are
+   used in the Ephys tab.
 2. **Pick points** — just select a mode and click; no extra button:
    - Select **Tip** mode, then click the shank tip in the viewer on the section where
      the probe ends. The marker stays on top of the image automatically.
@@ -66,24 +89,6 @@ Project **Save / Load** live in the **Histo→CCF menu** in the menu bar (not a 
      - **Trajectory line**: draw the probe track as a line; the point where it crosses
        the tissue surface is taken as the entry.
 3. The table at the bottom shows the stored coordinates for both tips **and** entries.
-
----
-
-## 4 — Atlas tab: load atlas and assign AP planes
-
-1. (Optional) Set the **Atlas folder** — where atlases are downloaded to and reused
-   from. Leave the default (`~/.brainglobe`) unless you want them elsewhere.
-2. Select **Allen CCFv3 25 µm** (default) and click **Load atlas**.  
-   First run downloads ~400 MB; subsequent runs are instant because the atlas is
-   reused from the folder above (the status line shows where it loaded from).
-3. Set **AP from bregma (µm)** to match a section — **0 = bregma**, negative = posterior,
-   positive = anterior. Click **Preview slice** to see that atlas plane in the viewer.
-4. For each section: set **Assign to section idx**, then click **Assign AP to section**.
-   (Midline / dorsal-surface anchoring is handled automatically by registration — no
-   manual pixel entry needed.)
-5. In **Section ordering**: drag sections in the list to reorder them, set
-   **Section spacing (µm)** (default 80 µm), pick the anchor section, and click
-   **Apply spacing** to propagate AP values across all sections.
 
 ---
 
@@ -98,17 +103,21 @@ Project **Save / Load** live in the **Histo→CCF menu** in the menu bar (not a 
 
 ---
 
-## 6 — View and export
+## 6 — View and export (3D & Export panel, right dock)
+
+These live in the permanent **3D & Export** panel on the right — available at any
+time, not only after registration.
 
 **In-app 3D**  
-Click **View in napari 3D** — the viewer switches to 3D mode and shows the probe trajectory as a colored line.
+Click **View in napari 3D** — opens a separate 3D window with the brain shell, tip
+regions, probe tracks, and (after an ephys alignment) the per-channel positions.
 
 **Plotly HTML**  
 Click **Export Plotly HTML…** → save to e.g. `Desktop\probe_3d.html`.  
 Opens automatically in your browser; rotate the atlas + probe interactively.
 
-**Save / Load (Histo→CCF menu)**  
-**Histo→CCF → Save Project** writes `<slide_name>.histo2ccf.json` next to the image
+**Save / Load (Project menu)**  
+**Project → Save Project** writes `<slide_name>.histo2ccf.json` next to the image
 by default. **Load Project** restores the slide, sections, registration, probes and
 tip/entry, repopulates every tab's fields, and auto-loads the project's atlas in
 the background.

@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 from qtpy.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QRadioButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -115,19 +115,21 @@ class ClickOverlayWidget(QWidget):
             btn.toggled.connect(self._activate_pick_mode)
             btn.clicked.connect(self._activate_pick_mode)
 
+        # Select probe + shank by label (consistent with the Ephys tab) so the
+        # same probe is referred to the same way everywhere.
+        probe_row = QHBoxLayout()
+        probe_row.addWidget(QLabel("Probe:"))
+        self._probe_combo = QComboBox()
+        self._probe_combo.currentIndexChanged.connect(self._refresh_shank_combo)
+        probe_row.addWidget(self._probe_combo, 1)
+        layout.addLayout(probe_row)
+
         shank_row = QHBoxLayout()
         shank_row.addWidget(QLabel("Shank:"))
-        self._shank_spin = QSpinBox()
-        self._shank_spin.setRange(0, 7)
-        shank_row.addWidget(self._shank_spin)
+        self._shank_combo = QComboBox()
+        shank_row.addWidget(self._shank_combo, 1)
         layout.addLayout(shank_row)
-
-        probe_row = QHBoxLayout()
-        probe_row.addWidget(QLabel("Probe idx:"))
-        self._probe_spin = QSpinBox()
-        self._probe_spin.setRange(0, 31)
-        probe_row.addWidget(self._probe_spin)
-        layout.addLayout(probe_row)
+        self._refresh_probe_combo()
 
         clear_btn = QPushButton("Clear all points")
         clear_btn.clicked.connect(self._clear_points)
@@ -191,12 +193,37 @@ class ClickOverlayWidget(QWidget):
     def arm_tip(self) -> None:
         """Select Tip + Marker mode and arm the viewer (e.g. after Add probe)."""
         # Point at the most recently added probe so the tip lands on it.
+        self._refresh_probe_combo()
         n_probes = len(self._state.project.probes)
         if n_probes:
-            self._probe_spin.setValue(min(n_probes - 1, self._probe_spin.maximum()))
+            self._probe_combo.setCurrentIndex(n_probes - 1)
         self._mode_tip.setChecked(True)
         self._entry_marker.setChecked(True)
         self._activate_pick_mode()
+
+    # ------------------------------------------------------------------
+    # Probe / shank selectors
+    # ------------------------------------------------------------------
+
+    def _refresh_probe_combo(self) -> None:
+        """Repopulate the probe combo from the project, keeping the selection."""
+        cur = self._probe_combo.currentIndex()
+        self._probe_combo.blockSignals(True)
+        self._probe_combo.clear()
+        for probe in self._state.project.probes:
+            self._probe_combo.addItem(probe.label)
+        self._probe_combo.blockSignals(False)
+        if 0 <= cur < self._probe_combo.count():
+            self._probe_combo.setCurrentIndex(cur)
+        self._refresh_shank_combo()
+
+    def _refresh_shank_combo(self) -> None:
+        self._shank_combo.clear()
+        p_idx = self._probe_combo.currentIndex()
+        probes = self._state.project.probes
+        if 0 <= p_idx < len(probes):
+            for shank in probes[p_idx].shanks:
+                self._shank_combo.addItem(f"Shank {shank.index}")
 
     def _activate_pick_mode(self, *_args) -> None:
         """Arm the viewer tool that matches the current Tip/Entry selection."""
@@ -321,12 +348,12 @@ class ClickOverlayWidget(QWidget):
     def _store_point(self, x_px: float, y_px: float, mode: str) -> None:
         """Store a clicked coordinate into the project schema."""
         probes = self._state.project.probes
-        p_idx = self._probe_spin.value()
-        s_idx = self._shank_spin.value()
-        if p_idx >= len(probes):
+        p_idx = self._probe_combo.currentIndex()
+        s_idx = self._shank_combo.currentIndex()
+        if p_idx < 0 or p_idx >= len(probes):
             return
         shanks = probes[p_idx].shanks
-        if s_idx >= len(shanks):
+        if s_idx < 0 or s_idx >= len(shanks):
             return
         shank = shanks[s_idx]
         section_idx = self._find_section_for_point(x_px, y_px)
@@ -386,6 +413,7 @@ class ClickOverlayWidget(QWidget):
     def refresh_after_load(self) -> None:
         """Restore tip/entry markers + the table from a freshly-loaded project."""
         self._mask_cache = None
+        self._refresh_probe_combo()
         self._rebuild_markers()
         self._refresh_table()
 

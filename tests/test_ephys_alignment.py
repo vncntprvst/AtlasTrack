@@ -96,6 +96,16 @@ def test_power_image_is_uint8_full_range() -> None:
     assert img.shape == psd.shape
 
 
+def test_power_image_per_freq_normalizes_each_column() -> None:
+    # Column 0 spans a wide range, column 1 a narrow one; per-freq each column
+    # should fill 0..255 independently (so the narrow column's depth structure shows).
+    psd = np.array([[1.0, 100.0], [10.0, 110.0], [100.0, 120.0]])
+    img = power_image(psd, per_freq=True)
+    assert img.shape == psd.shape
+    for c in range(psd.shape[1]):
+        assert img[:, c].min() == 0 and img[:, c].max() == 255
+
+
 # --- region strip -----------------------------------------------------------
 
 class _RegionAtlas:

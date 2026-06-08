@@ -19,6 +19,8 @@ import numpy as np
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor, QPen
 from qtpy.QtWidgets import (
+    QCheckBox,
+    QDialog,
     QDialogButtonBox,
     QGraphicsLineItem,
     QGraphicsPixmapItem,
@@ -31,9 +33,9 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qtpy.QtWidgets import QDialog
 
 from histo_to_ccf.ephys.alignment import apply_depth_alignment, channel_ccf_um, invert_anchors
+from histo_to_ccf.ephys.features import power_image
 from histo_to_ccf.ephys.regions import region_strip_image, regions_at_ccf
 from histo_to_ccf.gui.widgets.atlas_matcher import _to_pixmap
 from histo_to_ccf.gui.workflow import WorkflowState
@@ -126,6 +128,7 @@ class EphysAlignmentDialog(QDialog):
         depths = np.asarray(lfp_result["depths_um"], dtype=float)
         x = np.asarray(lfp_result["x_um"], dtype=float)
         img = np.asarray(lfp_result["image"])  # (n_channels, n_freq), uint8
+        psd = np.asarray(lfp_result.get("psd", img), dtype=float)  # raw PSD for re-norm
         ids = list(lfp_result.get("channel_ids", list(range(len(depths)))))
         self._freqs = np.asarray(lfp_result.get("freqs", []), dtype=float)
 
@@ -140,7 +143,8 @@ class EphysAlignmentDialog(QDialog):
         d = depths[mask]
         order = np.argsort(d)
         self._depths = d[order] - float(d.min()) if d.size else d  # zero at tip
-        self._img_feat = img[mask][order]  # rows ascending feature depth
+        self._psd = psd[mask][order]  # rows ascending feature depth (raw power)
+        self._img_feat = img[mask][order]  # current display map (re-derived on toggle)
         masked_ids = [i for i, m in zip(ids, mask) if m]
         self._channel_ids = [masked_ids[i] for i in order] if masked_ids else []
         self._stream = lfp_result.get("stream_name", "")
@@ -150,6 +154,12 @@ class EphysAlignmentDialog(QDialog):
         if self._tip is not None and self._entry is not None:
             insertion = float(np.linalg.norm(np.array(self._entry) - np.array(self._tip)))
         self._track_max = max(feature_max, insertion, 1.0)
+
+    def _recompute_image(self) -> None:
+        """Rebuild the displayed power map from the raw PSD honouring the toggle."""
+        per_freq = bool(self._per_freq_check.isChecked())
+        self._img_feat = power_image(self._psd, per_freq=per_freq)
+        self._render_lfp_only()
 
     # -- anchors <-> handles --------------------------------------------
 
@@ -302,6 +312,14 @@ class EphysAlignmentDialog(QDialog):
         btn_row.addWidget(rm_btn)
         btn_row.addWidget(clear_btn)
         btn_row.addStretch()
+        self._per_freq_check = QCheckBox("Normalize per frequency")
+        self._per_freq_check.setToolTip(
+            "Scale each frequency column independently so depth-dependent power "
+            "changes (the features you align to regions) stand out, instead of the "
+            "overall 1/f gradient dominating the image."
+        )
+        self._per_freq_check.toggled.connect(self._recompute_image)
+        btn_row.addWidget(self._per_freq_check)
         root.addLayout(btn_row)
 
         hint = QLabel(

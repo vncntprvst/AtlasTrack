@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-08 · version **0.2.4** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-08 · version **0.2.5** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -35,31 +35,35 @@ Windows.
 
 ## Workflow (what the GUI does)
 
-5 tabs, left→right (Save/Load moved to the **Histo→CCF menu**, not a tab):
-1. **Load** — open one or more composite slides; multiple opens are **merged into
-   a single combined image** (see "Multiple slides" below). Auto-detect sections
-   (Otsu + connected components). Auto-estimates min-area. "Equalize under-sized
-   boxes" grows boxes that come out smaller than the slide's median. **Edit boxes**
-   turns detections into draggable napari rectangles (resize/move/Delete/draw-to-
-   add), synced live. Image tools: flip H/V and per-channel levels, scoped to the
-   whole (merged) slide or a **Selected section** chosen from a dropdown.
-2. **Probes** — pick a probe (Neuropixels 1.0, NP 2.0 4-shank, NeuroNexus
-   A1x32-Poly3-10mm-25s-177-OA32LP). "Add probe" auto-arms Tip-marker mode. Click
-   to drop tip; switch to Entry (Marker, or draw a Trajectory line whose
-   tissue-surface crossing = entry).
-3. **Atlas** — choose atlas + storage folder; **AP shown relative to bregma**
+Layout: the **Registration** panel (5 tabs) docks on the **left**; a permanent
+**3D & Export** panel (`VizExportPanelWidget`) docks on the **right**. Project
+Save/Load live in the **Project menu** (inserted first in the menu bar). Tab order
+left→right: **Histology → Atlas → Probes → Register → Ephys**.
+1. **Histology** (was "Load") — open one or more composite slides; multiple opens
+   are **merged into a single combined image** (see "Multiple slides" below).
+   Auto-detect sections (Otsu + connected components). Auto-estimates min-area.
+   "Equalize under-sized boxes" grows boxes smaller than the slide's median. **Edit
+   boxes** turns detections into draggable napari rectangles, synced live. Image
+   tools: flip H/V and per-channel levels, scoped to the whole (merged) slide or a
+   **Selected section** chosen from a dropdown.
+2. **Atlas** — choose atlas + storage folder; **AP shown relative to bregma**
    (0 = bregma). **Open atlas matcher…** (side-by-side / overlay AP matching;
    syncs AP + spacing with this tab on open/close). Assign AP per section, or
-   reorder/space them in the ordering panel (column-first default; drag to reorder;
+   reorder/space them in the ordering panel (spacing persists on the project;
    "Interpolate AP" fills gaps between hand-assigned sections).
-4. **Register** — optionally **Predict planes with DeepSlice** (cross-section-
-   consistent), then per-section 2D B-spline. Residuals table. "Show atlas overlay"
-   warps registered region boundaries onto each section (lazily loads the atlas if
-   needed). Auto-saves the project.
+3. **Probes** — pick a probe (Neuropixels 1.0, NP 2.0 4-shank, NeuroNexus …).
+   "Add probe" auto-arms Tip-marker mode. **Probe + shank are selected by label**
+   (combos, consistent with the Ephys tab). Click to drop tip; switch to Entry
+   (Marker, or draw a Trajectory line whose tissue-surface crossing = entry).
+4. **Register** — optionally **Predict planes with DeepSlice**, then per-section 2D
+   B-spline. Residuals table. "Show atlas overlay" warps registered region
+   boundaries onto each section (lazily loads the atlas). Auto-saves the project.
 5. **Ephys** — refine a registered shank's depth→CCF mapping from LFP features
-   (see "Ephys alignment" below). Point at an Open Ephys recording folder, compute
-   the LFP power map, then drag anchors in the alignment dialog to align power
-   transitions with atlas region boundaries; Apply stores per-channel CCF.
+   (see "Ephys alignment" below).
+
+**3D & Export panel (right dock):** Extra-regions field, **View in napari 3D**,
+**Export Plotly HTML**, **Export HERBS pkl**, **Export per-channel CSV** — always
+available, not gated behind the Register tab.
 
 Save/Load: **Histo→CCF menu** → Save / Save As… / Load Project (`.histo2ccf.json`).
 Load restores the merged slide + sections + registration (CCF coords come back;
@@ -107,14 +111,16 @@ lines. Apply writes `Shank.ephys` (`EphysAlignment`: anchors + per-channel
 
 The alignment dialog: **double-click the LFP map** to drop an anchor at that depth
 (or "Add anchor (mid)"), then drag it; left margin shows top/bottom channel # +
-depth µm (tip at bottom), and the header shows tip/entry CCF. **Apply auto-saves**
-the project (if it has a path) and the ephys per-channel CCF now render as Points
-layers in the napari 3D view (`add_ephys_channel_layers`). Compute does **not**
-cache — it re-reads/filters the recording each time.
+depth µm (tip at bottom), header shows tip/entry CCF; **"Normalize per frequency"**
+toggle (`power_image(per_freq=True)`) scales each frequency column independently so
+depth structure pops. **Apply auto-saves** the project (if it has a path) and the
+ephys per-channel CCF render as Points layers in the napari 3D view
+(`add_ephys_channel_layers`). Compute does **not** cache — it re-reads/filters each
+time.
 
 Open follow-ups: per-channel region CSV export; richer anchor UX (snap to region
-boundary); per-frequency normalisation option for the power map; shank-column
-auto-detection for 4-shank probes is heuristic (sorted unique x → shank index).
+boundary); shank-column auto-detection for 4-shank probes is heuristic (sorted
+unique x → shank index).
 
 ## Architecture notes / hard rules
 
@@ -178,7 +184,7 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **156 passed** (131 non-qt + 25 qt; run qt tests per-process — the
+- `pytest -q` → **157 passed** (132 non-qt + 25 qt; run qt tests per-process — the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
   though every test passes alone). Includes: core pipeline, sectioning/ordering,

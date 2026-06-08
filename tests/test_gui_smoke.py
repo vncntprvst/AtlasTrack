@@ -322,16 +322,19 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
 
     viewer = napari.Viewer(show=False)
     try:
-        panel = _build_panel(viewer)
+        panel, viz_panel = _build_panel(viewer)
         qtbot.addWidget(panel)
-        assert panel is not None
+        qtbot.addWidget(viz_panel)
+        assert panel is not None and viz_panel is not None
         # No empty Tips/Entries marker layers at launch — adding those triggered
         # vispy "Unsupported framebuffer format" shader errors on some GPUs.
         assert "Tips" not in viewer.layers
         assert "Entries" not in viewer.layers
-        # Project save/load moved to a menu (no "Save" tab); the menu exists.
+        # Project save/load live in a "Project" menu (first in the bar).
         titles = [a.text() for a in viewer.window._qt_window.menuBar().actions()]
-        assert any("Histo" in t for t in titles)
+        assert "Project" in titles
+        # 3D/export buttons live on the permanent viz panel, not the Register tab.
+        assert hasattr(viz_panel, "_view_napari3d") and hasattr(viz_panel, "_export_plotly")
     finally:
         viewer.close()
 
@@ -566,6 +569,10 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
     assert "Regions" in dlg._regions_label.text()
     # Channel ids carried through (used for the depth/channel axis labels).
     assert len(dlg._channel_ids) == 16
+
+    # Per-frequency normalization toggle re-renders without raising.
+    dlg._per_freq_check.setChecked(True)
+    assert dlg._img_feat.shape[0] == 16
 
     # Double-click placement adds an anchor at the clicked depth, then clear.
     dlg._add_anchor_at_scene_y(300.0)

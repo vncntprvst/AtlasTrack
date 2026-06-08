@@ -1,4 +1,4 @@
-"""Register button + progress bar + results + 3D/export buttons."""
+"""Register button + progress bar + residuals + section overlay."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,11 +6,9 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
     QCheckBox,
-    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -32,16 +30,8 @@ def _error_dialog(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.critical(parent, title, str(message)[:2000])
 
 
-def _viewer_alive(viewer) -> bool:
-    """True if a napari viewer window is still open (best-effort)."""
-    try:
-        return bool(viewer.window._qt_window.isVisible())
-    except Exception:
-        return False
-
-
 class RegisterPanelWidget(QWidget):
-    """Register button, progress bar, residuals table, and export actions."""
+    """Register button, progress bar, residuals table, and section overlay."""
 
     def __init__(
         self,
@@ -55,8 +45,6 @@ class RegisterPanelWidget(QWidget):
         # Base dir that section.registration.bspline_transform_path resolves
         # against (set when registration runs); needed to reload transforms.
         self._reg_base_dir: Path | None = None
-        # Held so the separate 3D viewer window is not garbage-collected.
-        self._viewer3d = None
         # Persisted AppSettings (for the atlas storage folder); set via apply_settings.
         self._settings = None
         self._build_ui()
@@ -139,39 +127,6 @@ class RegisterPanelWidget(QWidget):
         )
         self._overlay_btn.clicked.connect(self._show_overlay)
         layout.addWidget(self._overlay_btn)
-
-        viz_box = QGroupBox("3D Visualization")
-        viz_layout = QVBoxLayout(viz_box)
-
-        reg_row = QHBoxLayout()
-        reg_row.addWidget(QLabel("Extra regions:"))
-        self._extra_regions = QLineEdit()
-        self._extra_regions.setPlaceholderText("acronyms, comma-sep (e.g. VII, XII)")
-        self._extra_regions.setToolTip(
-            "Atlas structure acronyms to also display in 3D, on top of the brain "
-            "shell and the regions at each shank tip. Example: VII (facial nucleus), "
-            "XII (hypoglossal nucleus)."
-        )
-        reg_row.addWidget(self._extra_regions)
-        viz_layout.addLayout(reg_row)
-
-        plotly_btn = QPushButton("Export Plotly HTML…")
-        plotly_btn.clicked.connect(self._export_plotly)
-        napari_btn = QPushButton("View in napari 3D")
-        napari_btn.clicked.connect(self._view_napari3d)
-        viz_layout.addWidget(plotly_btn)
-        viz_layout.addWidget(napari_btn)
-        layout.addWidget(viz_box)
-
-        export_box = QGroupBox("Export")
-        export_layout = QVBoxLayout(export_box)
-        herbs_btn = QPushButton("Export HERBS pkl…")
-        herbs_btn.clicked.connect(self._export_herbs)
-        ch_btn = QPushButton("Export per-channel CSV…")
-        ch_btn.clicked.connect(self._export_channel_csv)
-        export_layout.addWidget(herbs_btn)
-        export_layout.addWidget(ch_btn)
-        layout.addWidget(export_box)
 
         layout.addStretch()
 
@@ -416,38 +371,17 @@ class RegisterPanelWidget(QWidget):
             )
 
     # ------------------------------------------------------------------
-    # 3D viz
+    # Lazy atlas load (for the section overlay)
     # ------------------------------------------------------------------
-
-    def _export_plotly(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Plotly HTML", "", "HTML files (*.html);;All files (*)"
-        )
-        if not path:
-            return
-        try:
-            from histo_to_ccf.viz.plotly3d import build_figure, save_html
-            fig = build_figure(
-                self._state.project, self._state.atlas,
-                extra_regions=self._extra_region_list(),
-            )
-            out = save_html(fig, path, open_browser=True)
-            self._status.setText(f"Saved → {out.name}")
-        except Exception as exc:
-            _error_dialog(self, "Export failed", str(exc))
-
-    def _extra_region_list(self) -> list[str]:
-        """Parse the comma-separated extra-regions field into acronyms."""
-        return [a.strip() for a in self._extra_regions.text().split(",") if a.strip()]
 
     def _ensure_atlas(self, on_ready) -> None:
         """Ensure ``state.atlas`` is loaded, then call ``on_ready()``.
 
-        After a project reload the atlas is not auto-loaded, so the 3D brain and
-        the section overlay would be empty. This lazily loads the atlas named in
-        the project (from the saved atlas folder) in a background thread and
-        invokes ``on_ready`` once it is available. If it is already loaded, or no
-        atlas name is recorded, ``on_ready`` runs immediately.
+        After a project reload the atlas is not auto-loaded, so the section
+        overlay would be empty. This lazily loads the atlas named in the project
+        (from the saved atlas folder) in a background thread and invokes
+        ``on_ready`` once available. If it is already loaded, or no atlas name is
+        recorded, ``on_ready`` runs immediately.
         """
         if self._state.atlas is not None:
             on_ready()
@@ -473,82 +407,3 @@ class RegisterPanelWidget(QWidget):
             lambda exc: (self._status.setText(f"Atlas load failed: {exc}"), on_ready())
         )
         worker.start()
-
-    def _view_napari3d(self) -> None:
-        self._ensure_atlas(self._render_napari3d)
-
-    def _render_napari3d(self) -> None:
-        try:
-            import napari
-
-            from histo_to_ccf.viz.napari3d import show_3d_scene
-
-            # Open in a SEPARATE viewer window so the main slide/section layers
-            # are never disturbed. Reuse the window if it is still open.
-            if self._viewer3d is None or not _viewer_alive(self._viewer3d):
-                self._viewer3d = napari.Viewer(title="Histo→CCF — 3D")
-            else:
-                self._viewer3d.layers.clear()
-
-            added = show_3d_scene(
-                self._viewer3d,
-                self._state.project,
-                self._state.atlas,
-                extra_regions=self._extra_region_list(),
-            )
-            if self._state.atlas is None:
-                self._status.setText(
-                    "Opened 3D window: probe tracks only. Load an atlas to see the brain."
-                )
-            else:
-                self._status.setText(f"Opened 3D window: brain + {len(added)} layer(s).")
-        except Exception as exc:
-            _error_dialog(self, "3D view failed", str(exc))
-
-    # ------------------------------------------------------------------
-    # Export
-    # ------------------------------------------------------------------
-
-    def _export_herbs(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save HERBS pkl", "", "Pickle files (*.pkl);;All files (*)"
-        )
-        if not path:
-            return
-        try:
-            import numpy as np
-            from histo_to_ccf.io.herbs_writer import write_herbs_pkl
-
-            all_ccf: list[np.ndarray] = []
-            for probe in self._state.project.probes:
-                for shank in probe.shanks:
-                    if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
-                        continue
-                    all_ccf.append(np.linspace(
-                        np.array(shank.entry_ccf_um, dtype=float),
-                        np.array(shank.tip_ccf_um, dtype=float),
-                        128,
-                    ))
-            if not all_ccf:
-                _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
-                return
-            write_herbs_pkl(path, all_ccf)
-            self._status.setText(f"HERBS pkl → {Path(path).name}")
-        except Exception as exc:
-            _error_dialog(self, "HERBS export failed", str(exc))
-
-    def _export_channel_csv(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save per-channel CSV", "", "CSV files (*.csv);;All files (*)"
-        )
-        if not path:
-            return
-        try:
-            from histo_to_ccf.probes.channels import export_channel_csv
-            n = export_channel_csv(self._state.project, path)
-            if n == 0:
-                _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
-            else:
-                self._status.setText(f"Per-channel CSV ({n} rows) → {Path(path).name}")
-        except Exception as exc:
-            _error_dialog(self, "CSV export failed", str(exc))

@@ -23,8 +23,10 @@ def launch() -> None:
         report_launch_failure(exc)
         raise SystemExit(1) from exc
 
-    panel = _build_panel(viewer)
-    viewer.window.add_dock_widget(panel, area="right", name="Histo→CCF", tabify=False)
+    panel, viz_panel = _build_panel(viewer)
+    # Workflow (Registration) on the left; 3D visualization + export on the right.
+    viewer.window.add_dock_widget(panel, area="left", name="Registration", tabify=False)
+    viewer.window.add_dock_widget(viz_panel, area="right", name="3D & Export", tabify=False)
     _hide_layer_panels(viewer)
     _size_main_window(viewer)
     napari.run()
@@ -114,6 +116,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
     from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
     from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+    from histo_to_ccf.gui.widgets.viz_export_panel import VizExportPanelWidget
 
     settings = load_app_settings()
     state = WorkflowState()
@@ -126,7 +129,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     tabs = QTabWidget()
     root.addWidget(tabs)
 
-    # -- Tab 1: Load ---------------------------------------------------------
+    # -- Histology: load slide + detect sections + image tools --------------
     tab_load = QWidget()
     load_layout = QVBoxLayout(tab_load)
     load_layout.setContentsMargins(2, 2, 2, 2)
@@ -139,22 +142,8 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     )
     load_layout.addWidget(slide_loader)
     load_layout.addWidget(image_tools)
-    tabs.addTab(tab_load, "Load")
 
-    # -- Tab 2: Annotate -----------------------------------------------------
-    tab_annotate = QWidget()
-    ann_layout = QVBoxLayout(tab_annotate)
-    ann_layout.setContentsMargins(2, 2, 2, 2)
-    probe_picker = ProbePickerWidget(state)
-    click_overlay = ClickOverlayWidget(state, viewer)
-    # After adding a probe, immediately arm tip-marker mode so the user can
-    # click a tip point without first toggling the Tip/Entry selector.
-    probe_picker.on_probe_added = click_overlay.arm_tip
-    ann_layout.addWidget(probe_picker)
-    ann_layout.addWidget(click_overlay)
-    tabs.addTab(tab_annotate, "Probes")
-
-    # -- Tab 3: Atlas --------------------------------------------------------
+    # -- Atlas: choose atlas + assign AP + section ordering ------------------
     tab_atlas = QWidget()
     atlas_layout = QVBoxLayout(tab_atlas)
     atlas_layout.setContentsMargins(2, 2, 2, 2)
@@ -165,24 +154,45 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     atlas_browser.ordering_panel = ordering
     atlas_layout.addWidget(atlas_browser)
     atlas_layout.addWidget(ordering)
-    tabs.addTab(tab_atlas, "Atlas")
 
-    # -- Tab 4: Register + Results -------------------------------------------
+    # -- Probes: add probe + click tip/entry --------------------------------
+    tab_annotate = QWidget()
+    ann_layout = QVBoxLayout(tab_annotate)
+    ann_layout.setContentsMargins(2, 2, 2, 2)
+    probe_picker = ProbePickerWidget(state)
+    click_overlay = ClickOverlayWidget(state, viewer)
+    # After adding a probe, immediately arm tip-marker mode so the user can
+    # click a tip point without first toggling the Tip/Entry selector.
+    probe_picker.on_probe_added = click_overlay.arm_tip
+    ann_layout.addWidget(probe_picker)
+    ann_layout.addWidget(click_overlay)
+
+    # -- Register + Results -------------------------------------------------
     tab_register = QWidget()
     reg_layout = QVBoxLayout(tab_register)
     reg_layout.setContentsMargins(2, 2, 2, 2)
     register_panel = RegisterPanelWidget(state, viewer)
     register_panel.apply_settings(settings)
     reg_layout.addWidget(register_panel)
-    tabs.addTab(tab_register, "Register")
 
-    # -- Tab 5: Ephys alignment ---------------------------------------------
+    # -- Ephys alignment ----------------------------------------------------
     tab_ephys = QWidget()
     ephys_layout = QVBoxLayout(tab_ephys)
     ephys_layout.setContentsMargins(2, 2, 2, 2)
     ephys_panel = EphysPanelWidget(state, viewer)
     ephys_layout.addWidget(ephys_panel)
+
+    # Tab order: Histology → Atlas → Probes → Register → Ephys.
+    tabs.addTab(tab_load, "Histology")
+    tabs.addTab(tab_atlas, "Atlas")
+    tabs.addTab(tab_annotate, "Probes")
+    tabs.addTab(tab_register, "Register")
     tabs.addTab(tab_ephys, "Ephys")
+
+    # 3D visualization + export live in their own permanent panel (right dock),
+    # not inside the Register tab.
+    viz_panel = VizExportPanelWidget(state, viewer)
+    viz_panel.apply_settings(settings)
 
     # After a project load, redraw the canvas AND repopulate every tab's fields
     # from the loaded project (probes, tip/entry, atlas + AP, ordering, residuals,
@@ -211,13 +221,13 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     tabs.currentChanged.connect(_on_tab_change)
 
-    return container
+    return container, viz_panel
 
 
 def _install_project_menu(
     viewer: "napari.Viewer", state: "WorkflowState", on_loaded=None
 ) -> None:
-    """Add a "Histo→CCF" menu with Save / Save As… / Load Project actions.
+    """Add a "Project" menu (first in the menu bar) with Save / Save As… / Load.
 
     These are file operations (not workflow steps), so they belong in the menu
     bar rather than a docked tab. Save/Load reuse :class:`SavePanelWidget`'s
@@ -226,6 +236,8 @@ def _install_project_menu(
     just redrawing the canvas. Best-effort: if the Qt main window or menu bar is
     unavailable (headless), do nothing.
     """
+    from qtpy.QtWidgets import QMenu
+
     from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
 
     try:
@@ -245,7 +257,13 @@ def _install_project_menu(
     except Exception:
         pass
 
-    menu = menubar.addMenu("Histo→CCF")
+    # Insert "Project" as the first (left-most) menu, before napari's File menu.
+    menu = QMenu("Project", menubar)
+    existing = menubar.actions()
+    if existing:
+        menubar.insertMenu(existing[0], menu)
+    else:
+        menubar.addMenu(menu)
 
     def _save() -> None:
         # Save to the known project path if set, else prompt as Save As.

@@ -53,16 +53,24 @@ def lfp_psd(
     return freqs[mask], pxx[mask].T  # (n_channels, n_freq)
 
 
-def power_image(psd: np.ndarray, *, log: bool = True) -> np.ndarray:
+def power_image(psd: np.ndarray, *, log: bool = True, per_freq: bool = False) -> np.ndarray:
     """Normalise a ``(n_channels, n_freq)`` PSD to a uint8 image for display.
 
     With ``log`` the power is log10-compressed first (LFP power spans orders of
-    magnitude). The result is scaled to span 0-255 across the whole map.
+    magnitude). By default the result is scaled to span 0-255 across the whole
+    map. With ``per_freq`` each frequency column is normalised independently
+    (min-max down the depth axis), which removes the strong 1/f gradient across
+    frequencies and makes depth-dependent power changes — the features that line
+    up with region boundaries — far more visible.
     """
     a = np.asarray(psd, dtype=float)
     if log:
         a = np.log10(a + 1e-12)
-    lo, hi = float(np.nanmin(a)), float(np.nanmax(a))
-    if hi <= lo:
-        hi = lo + 1.0
-    return (np.clip((a - lo) / (hi - lo), 0.0, 1.0) * 255.0).astype(np.uint8)
+    if per_freq:
+        lo = np.nanmin(a, axis=0, keepdims=True)
+        hi = np.nanmax(a, axis=0, keepdims=True)
+    else:
+        lo = float(np.nanmin(a))
+        hi = float(np.nanmax(a))
+    rng = np.where(np.asarray(hi) <= np.asarray(lo), 1.0, np.asarray(hi) - np.asarray(lo))
+    return (np.clip((a - lo) / rng, 0.0, 1.0) * 255.0).astype(np.uint8)
