@@ -184,9 +184,24 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     ephys_layout.addWidget(ephys_panel)
     tabs.addTab(tab_ephys, "Ephys")
 
+    # After a project load, redraw the canvas AND repopulate every tab's fields
+    # from the loaded project (probes, tip/entry, atlas + AP, ordering, residuals,
+    # ephys) — loading the data alone leaves the widgets showing stale defaults.
+    def _on_project_loaded() -> None:
+        _reload_project_display(viewer, state)
+        probe_picker.refresh_after_load()
+        click_overlay.refresh_after_load()
+        atlas_browser.refresh_after_load()
+        ordering.refresh_after_load()
+        register_panel.refresh_after_load()
+        ephys_panel.refresh_after_load()
+        # Auto-load the project's atlas in the background so the overlay / 3D
+        # brain are ready without a manual "Load atlas" click.
+        atlas_browser.auto_load_atlas()
+
     # Project save/load live in the menu bar (see _install_project_menu), not a
     # tab — they are file actions, not part of the left-to-right workflow.
-    _install_project_menu(viewer, state)
+    _install_project_menu(viewer, state, on_loaded=_on_project_loaded)
 
     # Persist settings when the tab changes (cheap enough to do on every switch).
     def _on_tab_change(_idx: int) -> None:
@@ -199,13 +214,17 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     return container
 
 
-def _install_project_menu(viewer: "napari.Viewer", state: "WorkflowState") -> None:
+def _install_project_menu(
+    viewer: "napari.Viewer", state: "WorkflowState", on_loaded=None
+) -> None:
     """Add a "Histo→CCF" menu with Save / Save As… / Load Project actions.
 
     These are file operations (not workflow steps), so they belong in the menu
     bar rather than a docked tab. Save/Load reuse :class:`SavePanelWidget`'s
-    logic via a hidden instance so behaviour stays in one place. Best-effort:
-    if the Qt main window or menu bar is unavailable (headless), do nothing.
+    logic via a hidden instance so behaviour stays in one place. ``on_loaded``
+    runs after a successful load (redraw canvas + repopulate tabs); it defaults to
+    just redrawing the canvas. Best-effort: if the Qt main window or menu bar is
+    unavailable (headless), do nothing.
     """
     from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
 
@@ -214,10 +233,11 @@ def _install_project_menu(viewer: "napari.Viewer", state: "WorkflowState") -> No
     except Exception:
         return
 
+    if on_loaded is None:
+        on_loaded = lambda: _reload_project_display(viewer, state)  # noqa: E731
+
     # A hidden helper widget owns the save/load implementation + file dialogs.
-    helper = SavePanelWidget(
-        state, on_project_loaded=lambda: _reload_project_display(viewer, state)
-    )
+    helper = SavePanelWidget(state, on_project_loaded=on_loaded)
     helper.hide()
     # Keep it alive for the session (parent it to the main window).
     try:

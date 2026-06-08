@@ -9,12 +9,13 @@ dist/
 .eggs/
 pip-wheel-metadata/
 
-# --- Virtual envs / lockfiles ---
+# --- Virtual envs / lockfiles / local files ---
 .venv/
 venv/
 env/
 .python-version
 uv.lock
+.claude
 
 # --- Tooling caches ---
 .pytest_cache/

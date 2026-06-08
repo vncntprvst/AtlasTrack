@@ -132,6 +132,16 @@ class EphysPanelWidget(QWidget):
             self._probe_combo.setCurrentIndex(cur)
         self._refresh_shanks()
 
+    def refresh_after_load(self) -> None:
+        """Repopulate the probe/shank combos + recording path from the project."""
+        self.refresh_probes()
+        # Restore the recording path from any shank that already has an alignment.
+        for probe in self._state.project.probes:
+            for shank in probe.shanks:
+                if shank.ephys is not None and shank.ephys.recording_path:
+                    self._path_edit.setText(shank.ephys.recording_path)
+                    return
+
     def _refresh_shanks(self) -> None:
         self._shank_combo.clear()
         idx = self._probe_combo.currentIndex()

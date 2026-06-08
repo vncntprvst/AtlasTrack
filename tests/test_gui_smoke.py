@@ -576,3 +576,129 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
     assert len(eph.channel_ccf_um) == 16
     assert len(eph.channel_depths_um) == 16
     assert eph.anchors and eph.anchors[0][0] == pytest.approx(1000.0)
+
+
+# ---------------------------------------------------------------------------
+# Reload repopulates tab fields
+# ---------------------------------------------------------------------------
+
+def test_project_section_spacing_round_trips(tmp_path) -> None:
+    from histo_to_ccf.project.io import load_project, save_project
+
+    proj = Project(section_spacing_um=123.0)
+    path = tmp_path / "p.histo2ccf.json"
+    save_project(proj, path)
+    assert load_project(path).section_spacing_um == 123.0
+
+
+def _populated_state() -> WorkflowState:
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM  # noqa: F401
+    from histo_to_ccf.project.schema import (
+        AtlasRef,
+        Point2D,
+        ProbeSpec,
+        ProbeType,
+        RegistrationResult,
+        Shank,
+    )
+
+    state = WorkflowState()
+    state.add_slide("s.png", np.zeros((200, 200), dtype=np.uint8))
+    state.active_slide_idx = 0
+    slide = state.project.slides[0]
+    slide.sections.append(
+        Section(
+            index=0, slide_idx=0, bbox_px=(0, 0, 80, 80), ap_order=0,
+            plane=PlaneParams(ap_um=4000.0),
+            registration=RegistrationResult(anchoring=[0.0] * 9, output_size_px=(80, 80), residual=0.5),
+        )
+    )
+    slide.sections.append(Section(index=1, slide_idx=0, bbox_px=(100, 0, 180, 80), ap_order=1))
+    shank = Shank(
+        index=0,
+        tip_px=Point2D(x_px=40.0, y_px=40.0),
+        entry_px=Point2D(x_px=40.0, y_px=10.0),
+        tip_ccf_um=(4000.0, 2000.0, 5000.0),
+        entry_ccf_um=(4000.0, 2000.0, 1000.0),
+    )
+    state.project.probes.append(
+        ProbeSpec(label="probeA", type=ProbeType(name="NP", n_shanks=1), shanks=[shank])
+    )
+    state.project.atlas = AtlasRef(name="kim_mouse_25um")
+    state.project.section_spacing_um = 120.0
+    return state
+
+
+@pytest.mark.qt
+def test_reload_repopulates_widgets(qtbot) -> None:
+    import napari
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+    from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
+    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _populated_state()
+        probe_picker = ProbePickerWidget(state)
+        click_overlay = ClickOverlayWidget(state, viewer)
+        atlas_browser = AtlasBrowserWidget(state, viewer)
+        ordering = OrderingPanelWidget(state)
+        register_panel = RegisterPanelWidget(state, viewer)
+        ephys_panel = EphysPanelWidget(state, viewer)
+        for w in (probe_picker, click_overlay, atlas_browser, ordering, register_panel, ephys_panel):
+            qtbot.addWidget(w)
+            w.refresh_after_load()
+
+        # Ordering: spacing restored from the project.
+        assert ordering._spacing.value() == 120.0
+
+        # Atlas: combo points at the project's atlas; AP reflects assigned section 0.
+        assert atlas_browser._current_atlas_id() == "kim_mouse_25um"
+        assert atlas_browser._ap_spin.value() == pytest.approx(BREGMA_AP_FROM_ORIGIN_UM - 4000.0)
+
+        # Click overlay: tip + entry restored to the table and markers drawn.
+        assert click_overlay._table.rowCount() == 2
+        assert click_overlay._tip_layer is not None and len(click_overlay._tip_layer.data) == 1
+        assert len(click_overlay._entry_layer.data) == 1
+
+        # Probe picker status + ephys combos reflect the probe.
+        assert "probeA" in probe_picker._status.text()
+        assert ephys_panel._probe_combo.count() == 1
+
+        # Register: residuals table has the one registered section.
+        assert register_panel._residuals_table.rowCount() == 1
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_auto_load_atlas_skips_when_already_loaded(qtbot) -> None:
+    """auto_load_atlas is a no-op when the matching atlas is already loaded or unset."""
+    import napari
+    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from histo_to_ccf.project.schema import AtlasRef
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        widget = AtlasBrowserWidget(state, viewer)
+        qtbot.addWidget(widget)
+
+        # No atlas name recorded -> nothing happens, status untouched.
+        state.project.atlas = AtlasRef(name="")
+        widget._atlas_status.setText("untouched")
+        widget.auto_load_atlas()
+        assert widget._atlas_status.text() == "untouched"
+
+        # Atlas already loaded with the same name -> skip (no "Loading…").
+        state.project.atlas = AtlasRef(name="kim_mouse_25um")
+        state.atlas = _EphysFakeAtlas()
+        state.atlas.atlas_name = "kim_mouse_25um"
+        widget.auto_load_atlas()
+        assert widget._atlas_status.text() == "untouched"
+    finally:
+        viewer.close()

@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-07 · version **0.2.0** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-08 · version **0.2.2** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -63,8 +63,13 @@ Windows.
 
 Save/Load: **Histo→CCF menu** → Save / Save As… / Load Project (`.histo2ccf.json`).
 Load restores the merged slide + sections + registration (CCF coords come back;
-exports work without re-running), re-applies stored flips, and lazily loads the
-atlas for 3D/overlay.
+exports work without re-running), re-applies stored flips, and **auto-loads the
+project's atlas in the background** (overlay / 3D ready without a manual click).
+**Load also repopulates every tab's fields** from the project via per-widget
+`refresh_after_load()` (probes + tip/entry markers/table, atlas selection + AP,
+section ordering list + spacing, residuals, ephys combos) — wired through
+`_on_project_loaded` in `app.py`. Section spacing now persists on the project
+(`Project.section_spacing_um`).
 
 3D / export: **Export Plotly HTML** and **View in napari 3D** (opens a *separate*
 window; lazily loads the atlas so brain volumes show). HERBS pkl + per-channel CSV.
@@ -167,7 +172,7 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **151 passed** (129 non-qt + 22 qt; run qt tests per-process — the
+- `pytest -q` → **154 passed** (130 non-qt + 24 qt; run qt tests per-process — the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
   though every test passes alone). Includes: core pipeline, sectioning/ordering,

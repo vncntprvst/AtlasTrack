@@ -160,3 +160,6 @@ class Project(BaseModel):
     atlas: AtlasRef = Field(default_factory=AtlasRef)
     slides: list[Slide] = []
     probes: list[ProbeSpec] = []
+    # Inter-section AP spacing (µm) chosen in the ordering panel; persisted so it
+    # reloads with the project. ``None`` until the user sets/applies a spacing.
+    section_spacing_um: float | None = None

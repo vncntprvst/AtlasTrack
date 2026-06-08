@@ -44,6 +44,8 @@ class OrderingPanelWidget(QWidget):
         self._spacing.setRange(1.0, 10_000.0)
         self._spacing.setValue(80.0)
         self._spacing.setSingleStep(10.0)
+        # Persist the chosen spacing on the project so it reloads with it.
+        self._spacing.valueChanged.connect(self._store_spacing)
         spacing_row.addWidget(self._spacing)
         layout.addLayout(spacing_row)
 
@@ -143,6 +145,19 @@ class OrderingPanelWidget(QWidget):
     def refresh(self) -> None:
         """Re-read the section list (e.g. after the matcher reorders/assigns AP)."""
         self._refresh_list()
+
+    def refresh_after_load(self) -> None:
+        """Repopulate spacing + the section list from a freshly-loaded project."""
+        spacing = self._state.project.section_spacing_um
+        if spacing is not None:
+            self._spacing.blockSignals(True)
+            self._spacing.setValue(spacing)
+            self._spacing.blockSignals(False)
+        self._refresh_list()
+
+    def _store_spacing(self, value: float) -> None:
+        """Mirror the spacing onto the project so a save captures it."""
+        self._state.project.section_spacing_um = float(value)
 
     # ------------------------------------------------------------------
 

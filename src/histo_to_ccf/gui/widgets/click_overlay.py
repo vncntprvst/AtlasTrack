@@ -55,6 +55,10 @@ class ClickOverlayWidget(QWidget):
         self._tip_layer: "napari.layers.Points | None" = None
         self._entry_layer: "napari.layers.Points | None" = None
         self._traj_layer: "napari.layers.Shapes | None" = None
+        # Suppress the data-changed handlers while we set marker data in bulk
+        # (e.g. when restoring points after a project load) so the last point
+        # isn't re-stored against the currently-selected probe/shank.
+        self._suppress_store = False
         # Per-slide tissue-mask cache for trajectory→surface intersection.
         self._mask_cache: tuple[int, np.ndarray] | None = None
         self._build_ui()
@@ -219,6 +223,8 @@ class ClickOverlayWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _on_tip_data_changed(self, event=None) -> None:
+        if self._suppress_store:
+            return
         if self._tip_layer is None or len(self._tip_layer.data) == 0:
             return
         last = self._tip_layer.data[-1]  # (row, col) image coords
@@ -226,6 +232,8 @@ class ClickOverlayWidget(QWidget):
         self._refresh_table()
 
     def _on_entry_data_changed(self, event=None) -> None:
+        if self._suppress_store:
+            return
         if self._entry_layer is None or len(self._entry_layer.data) == 0:
             return
         last = self._entry_layer.data[-1]
@@ -374,6 +382,40 @@ class ClickOverlayWidget(QWidget):
             self._table.setItem(i, 1, QTableWidgetItem(str(s)))
             self._table.setItem(i, 2, QTableWidgetItem(t))
             self._table.setItem(i, 3, QTableWidgetItem(f"{pt.x_px:.1f}, {pt.y_px:.1f}"))
+
+    def refresh_after_load(self) -> None:
+        """Restore tip/entry markers + the table from a freshly-loaded project."""
+        self._mask_cache = None
+        self._rebuild_markers()
+        self._refresh_table()
+
+    def _rebuild_markers(self) -> None:
+        """Redraw the Tips/Entries point layers from the stored shank coords."""
+        tips: list[list[float]] = []
+        entries: list[list[float]] = []
+        for probe in self._state.project.probes:
+            for shank in probe.shanks:
+                if shank.tip_px is not None:
+                    tips.append([shank.tip_px.y_px, shank.tip_px.x_px])
+                if shank.entry_px is not None:
+                    entries.append([shank.entry_px.y_px, shank.entry_px.x_px])
+        if not tips and not entries:
+            return  # nothing to draw — avoid creating empty layers
+        self._ensure_points_layers()
+        self._suppress_store = True
+        try:
+            if self._tip_layer is not None:
+                self._tip_layer.data = np.array(tips, dtype=float) if tips else np.empty((0, 2))
+            if self._entry_layer is not None:
+                self._entry_layer.data = (
+                    np.array(entries, dtype=float) if entries else np.empty((0, 2))
+                )
+        finally:
+            self._suppress_store = False
+        if self._tip_layer is not None:
+            self._bring_to_front(self._tip_layer)
+        if self._entry_layer is not None:
+            self._bring_to_front(self._entry_layer)
 
     def _clear_points(self) -> None:
         if self._tip_layer is not None:

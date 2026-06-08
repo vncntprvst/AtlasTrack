@@ -246,6 +246,57 @@ class AtlasBrowserWidget(QWidget):
     def set_ap_bregma(self, value: float) -> None:
         self._ap_spin.setValue(value)
 
+    # -- reload ----------------------------------------------------------
+
+    def _active_slide(self):
+        idx = self._state.active_slide_idx
+        if idx is None or idx >= len(self._state.project.slides):
+            return None
+        return self._state.project.slides[idx]
+
+    def _select_atlas_id(self, atlas_id: str) -> None:
+        """Point the combo (or Custom field) at ``atlas_id``."""
+        for i, (_, aid) in enumerate(_QUICK_PICKS):
+            if aid == atlas_id:
+                self._atlas_combo.setCurrentIndex(i)
+                self._custom_id.setVisible(False)
+                return
+        self._atlas_combo.setCurrentIndex(len(_QUICK_PICKS) - 1)  # Custom ID…
+        self._custom_id.setText(atlas_id)
+        self._custom_id.setVisible(True)
+
+    def auto_load_atlas(self) -> None:
+        """Load the project's atlas in the background (after a project load).
+
+        No-op if no atlas is recorded or the matching atlas is already loaded.
+        Reuses :meth:`_load_atlas` (which reads the combo set by
+        :meth:`refresh_after_load`), so the worker + status handling is shared.
+        """
+        atlas_id = self._state.project.atlas.name
+        if not atlas_id:
+            return
+        if getattr(self._state.atlas, "atlas_name", None) == atlas_id:
+            return  # already loaded
+        self._select_atlas_id(atlas_id)
+        self._load_atlas()
+
+    def refresh_after_load(self) -> None:
+        """Repopulate the atlas selection + AP fields from the loaded project."""
+        atlas_id = self._state.project.atlas.name
+        if atlas_id:
+            self._select_atlas_id(atlas_id)
+        slide = self._active_slide()
+        if slide is None:
+            return
+        # Show the AP of the first assigned section (in AP order) as a starting point.
+        sec = next(
+            (s for s in sorted(slide.sections, key=lambda s: s.ap_order) if s.plane is not None),
+            None,
+        )
+        if sec is not None:
+            self._ap_spin.setValue(self._absolute_to_bregma(sec.plane.ap_um))
+            self._sec_spin.setValue(sec.index)
+
     def _assign_ap(self) -> None:
         slide_idx = self._state.active_slide_idx
         if slide_idx is None:

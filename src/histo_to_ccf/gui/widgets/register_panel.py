@@ -190,6 +190,20 @@ class RegisterPanelWidget(QWidget):
     # Registration
     # ------------------------------------------------------------------
 
+    def refresh_after_load(self) -> None:
+        """Repopulate the residuals table from a freshly-loaded project."""
+        # Transform sidecars resolve against the loaded project's folder.
+        if self._state.project_path is not None:
+            self._reg_base_dir = self._state.project_path.parent
+        self._refresh_residuals()
+        n = sum(
+            1 for slide in self._state.project.slides
+            for sec in slide.sections
+            if sec.registration is not None
+        )
+        if n:
+            self._status.setText(f"Loaded project: {n} registered section(s).")
+
     def _run_registration(self) -> None:
         atlas = self._state.atlas
         if atlas is None:

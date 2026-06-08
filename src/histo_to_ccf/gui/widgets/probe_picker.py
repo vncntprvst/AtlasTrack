@@ -95,3 +95,12 @@ class ProbePickerWidget(QWidget):
     def current_probe_index(self) -> int | None:
         probes = self._state.project.probes
         return len(probes) - 1 if probes else None
+
+    def refresh_after_load(self) -> None:
+        """Reflect the loaded project's probes in the status line."""
+        probes = self._state.project.probes
+        if not probes:
+            self._status.setText("")
+            return
+        names = ", ".join(p.label for p in probes)
+        self._status.setText(f"{len(probes)} probe(s) in project: {names}")
