@@ -27,6 +27,23 @@ class ProbeType(BaseModel):
     shank_tip_length_um: float = 175.0
 
 
+class EphysAlignment(BaseModel):
+    """Ephys-based refinement of a shank's depth->CCF mapping.
+
+    The user pins ephys feature depths to histology track depths (``anchors``);
+    that piecewise-linear warp places each channel (at ``channel_depths_um`` from
+    the tip) along the tip->entry line, giving ``channel_ccf_um``. Stored so the
+    alignment can be reviewed/edited and the per-channel CCF reproduced on reload.
+    """
+
+    recording_path: str | None = None
+    stream_name: str | None = None
+    shank_x_um: float | None = None  # which shank column was selected (multi-shank)
+    channel_depths_um: list[float] = []  # µm from tip, one per channel
+    anchors: list[tuple[float, float]] = []  # (feature_depth_um, track_depth_um)
+    channel_ccf_um: list[tuple[float, float, float]] = []  # (AP, ML, DV) per channel
+
+
 class Shank(BaseModel):
     """One shank annotation + its registered CCF coordinates."""
 
@@ -39,6 +56,9 @@ class Shank(BaseModel):
     # Filled by the registration pipeline.
     tip_ccf_um: tuple[float, float, float] | None = None  # (AP, ML, DV)
     entry_ccf_um: tuple[float, float, float] | None = None
+
+    # Filled by the ephys alignment tab (optional).
+    ephys: EphysAlignment | None = None
 
 
 class ProbeSpec(BaseModel):

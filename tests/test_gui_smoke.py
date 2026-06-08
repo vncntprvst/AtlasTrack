@@ -484,3 +484,95 @@ def test_click_overlay_modes_and_nearest_section(qtbot) -> None:
         assert widget._find_section_for_point(20.0, 20.0) == 3  # inside
     finally:
         viewer.close()
+
+
+# ---------------------------------------------------------------------------
+# Ephys alignment tab
+# ---------------------------------------------------------------------------
+
+class _EphysFakeAtlas:
+    """Fake atlas with structure_from_coords + structures for region lookup."""
+
+    def __init__(self) -> None:
+        self.resolution = (25.0, 25.0, 25.0)
+        self.structures = {
+            "A": {"rgb_triplet": [10, 20, 30]},
+            "B": {"rgb_triplet": [40, 50, 60]},
+        }
+
+    def structure_from_coords(self, coords, *, microns=True, as_acronym=True):
+        _ap, dv, _ml = coords
+        if dv < 0 or dv > 6000:
+            return "Outside atlas"
+        return "A" if dv < 3000 else "B"
+
+
+def _fake_lfp_result(n_ch: int = 16, n_freq: int = 20) -> dict:
+    rng = np.arange(n_ch * n_freq, dtype=np.uint8).reshape(n_ch, n_freq)
+    return {
+        "freqs": np.linspace(0, 300, n_freq),
+        "psd": rng.astype(float),
+        "image": rng,
+        "depths_um": np.linspace(0.0, 3000.0, n_ch),
+        "x_um": np.zeros(n_ch),
+        "channel_ids": list(range(n_ch)),
+        "stream_name": "ProbeA-LFP",
+        "derived_from_ap": False,
+    }
+
+
+def _registered_probe_state() -> WorkflowState:
+    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+
+    state = WorkflowState()
+    shank = Shank(
+        index=0,
+        tip_ccf_um=(1000.0, 2000.0, 5000.0),
+        entry_ccf_um=(1000.0, 2000.0, 1000.0),
+    )
+    state.project.probes.append(
+        ProbeSpec(label="probe1", type=ProbeType(name="NP", n_shanks=1), shanks=[shank])
+    )
+    state.atlas = _EphysFakeAtlas()
+    return state
+
+
+@pytest.mark.qt
+def test_ephys_panel_lists_probes(qtbot) -> None:
+    import napari
+    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _registered_probe_state()
+        widget = EphysPanelWidget(state, viewer)
+        qtbot.addWidget(widget)
+        widget.refresh_probes()
+        assert widget._probe_combo.count() == 1
+        assert widget._shank_combo.count() == 1
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
+    from histo_to_ccf.gui.widgets.ephys_align_dialog import EphysAlignmentDialog
+
+    state = _registered_probe_state()
+    dlg = EphysAlignmentDialog(state, 0, 0, _fake_lfp_result())
+    qtbot.addWidget(dlg)
+
+    # Region strip rendered without raising and produced labels.
+    assert "Regions" in dlg._regions_label.text()
+
+    # Add an anchor, then apply -> per-channel CCF stored on the shank.
+    dlg.add_anchor(feature_depth=1000.0, track_depth=1200.0)
+    assert len(dlg.anchors()) == 1
+    dlg._apply()
+
+    eph = state.project.probes[0].shanks[0].ephys
+    assert eph is not None
+    assert eph.stream_name == "ProbeA-LFP"
+    assert len(eph.channel_ccf_um) == 16
+    assert len(eph.channel_depths_um) == 16
+    assert eph.anchors and eph.anchors[0][0] == pytest.approx(1000.0)

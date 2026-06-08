@@ -108,6 +108,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     from histo_to_ccf.gui.workflow import WorkflowState
     from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
     from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
     from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
     from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
     from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
@@ -174,6 +175,14 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     register_panel.apply_settings(settings)
     reg_layout.addWidget(register_panel)
     tabs.addTab(tab_register, "Register")
+
+    # -- Tab 5: Ephys alignment ---------------------------------------------
+    tab_ephys = QWidget()
+    ephys_layout = QVBoxLayout(tab_ephys)
+    ephys_layout.setContentsMargins(2, 2, 2, 2)
+    ephys_panel = EphysPanelWidget(state, viewer)
+    ephys_layout.addWidget(ephys_panel)
+    tabs.addTab(tab_ephys, "Ephys")
 
     # Project save/load live in the menu bar (see _install_project_menu), not a
     # tab — they are file actions, not part of the left-to-right workflow.

@@ -1,0 +1,308 @@
+"""Ephys alignment dialog: warp the LFP power map onto the histology track.
+
+Layout mirrors the IBL ephys-alignment GUI: the LFP depth x frequency power map
+on the left, the atlas region colour strip (with labels) on the right, sharing a
+single vertical *track depth* axis (0 = shank tip at the bottom). The LFP map is
+shown warped into track space by the current anchor set, so when the alignment is
+right its power transitions line up with the region boundaries on the strip.
+
+Anchors are draggable horizontal handles. Each handle pins one LFP *feature
+depth* to a *track depth* (its current y); dragging it re-warps the LFP map.
+"Apply" places every channel on the tip->entry line and stores the per-channel
+CCF coordinates on the shank.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor, QPen
+from qtpy.QtWidgets import (
+    QDialogButtonBox,
+    QGraphicsLineItem,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+from qtpy.QtWidgets import QDialog
+
+from histo_to_ccf.ephys.alignment import apply_depth_alignment, channel_ccf_um, invert_anchors
+from histo_to_ccf.ephys.regions import region_strip_image, regions_at_ccf
+from histo_to_ccf.gui.widgets.atlas_matcher import _to_pixmap
+from histo_to_ccf.gui.workflow import WorkflowState
+
+if TYPE_CHECKING:
+    from histo_to_ccf.project.schema import Shank
+
+_DISPLAY_H = 600  # scene height in pixels (track-depth axis)
+_IMG_W = 360  # LFP map width in pixels
+_GAP = 10
+_STRIP_W = 28
+
+
+class _AnchorLine(QGraphicsLineItem):
+    """A draggable horizontal handle pinning a feature depth to a track depth."""
+
+    def __init__(self, dialog: "EphysAlignmentDialog", feature_depth: float, width: float):
+        super().__init__(0, 0, width, 0)
+        self._dialog = dialog
+        self.feature_depth = feature_depth
+        pen = QPen(QColor(255, 80, 80), 2)
+        self.setPen(pen)
+        self.setFlag(QGraphicsLineItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsLineItem.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsLineItem.ItemIsSelectable, True)
+        self.setZValue(10)
+        self.setCursor(Qt.SizeVerCursor)
+
+    def itemChange(self, change, value):  # noqa: N802 (Qt signature)
+        if change == QGraphicsLineItem.ItemPositionChange:
+            # Constrain to vertical movement, clamped to the scene height.
+            y = max(0.0, min(float(value.y()), float(_DISPLAY_H)))
+            value.setX(0.0)
+            value.setY(y)
+            return value
+        if change == QGraphicsLineItem.ItemPositionHasChanged:
+            self._dialog._on_anchor_moved()
+        return super().itemChange(change, value)
+
+
+class EphysAlignmentDialog(QDialog):
+    """Warp the LFP power map onto a shank's histology track and store CCF."""
+
+    def __init__(
+        self,
+        state: WorkflowState,
+        probe_idx: int,
+        shank_idx: int,
+        lfp_result: dict,
+        on_applied=None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Ephys alignment")
+        self.resize(720, 720)
+        self._state = state
+        self._probe_idx = probe_idx
+        self._shank_idx = shank_idx
+        self._on_applied = on_applied
+        self._handles: list[_AnchorLine] = []
+
+        probe = state.project.probes[probe_idx]
+        self._shank: "Shank" = probe.shanks[shank_idx]
+        self._tip = self._shank.tip_ccf_um
+        self._entry = self._shank.entry_ccf_um
+
+        self._prepare_channels(lfp_result)
+        self._build_ui()
+        self._restore_anchors()
+        self._render()
+
+    # -- data prep -------------------------------------------------------
+
+    def _prepare_channels(self, lfp_result: dict) -> None:
+        """Select this shank's channel column and build the feature-space map."""
+        depths = np.asarray(lfp_result["depths_um"], dtype=float)
+        x = np.asarray(lfp_result["x_um"], dtype=float)
+        img = np.asarray(lfp_result["image"])  # (n_channels, n_freq), uint8
+
+        cols = np.unique(np.round(x, 1))
+        self._shank_x = None
+        if cols.size > 1 and self._shank_idx < cols.size:
+            self._shank_x = float(cols[self._shank_idx])
+            mask = np.isclose(x, self._shank_x, atol=1.0)
+        else:
+            mask = np.ones(depths.shape, dtype=bool)
+
+        d = depths[mask]
+        order = np.argsort(d)
+        self._depths = d[order] - float(d.min()) if d.size else d  # zero at tip
+        self._img_feat = img[mask][order]  # rows ascending feature depth
+        self._stream = lfp_result.get("stream_name", "")
+
+        feature_max = float(self._depths.max()) if self._depths.size else 0.0
+        insertion = 0.0
+        if self._tip is not None and self._entry is not None:
+            insertion = float(np.linalg.norm(np.array(self._entry) - np.array(self._tip)))
+        self._track_max = max(feature_max, insertion, 1.0)
+
+    # -- anchors <-> handles --------------------------------------------
+
+    def _y_to_track(self, y: float) -> float:
+        """Scene y (0 top) -> track depth µm (0 at tip, bottom of view)."""
+        return float(self._track_max * (1.0 - y / _DISPLAY_H))
+
+    def _track_to_y(self, track: float) -> float:
+        return float(_DISPLAY_H * (1.0 - track / self._track_max))
+
+    def anchors(self) -> list[tuple[float, float]]:
+        """Current (feature_depth, track_depth) pairs from the handle positions."""
+        return [(h.feature_depth, self._y_to_track(h.pos().y())) for h in self._handles]
+
+    def add_anchor(self, feature_depth: float, track_depth: float) -> None:
+        line = _AnchorLine(self, feature_depth, _IMG_W + _GAP + _STRIP_W)
+        self._scene.addItem(line)
+        line.setPos(0.0, self._track_to_y(track_depth))
+        self._handles.append(line)
+        self._render_lfp_only()
+
+    def clear_anchors(self) -> None:
+        for h in self._handles:
+            self._scene.removeItem(h)
+        self._handles.clear()
+        self._render_lfp_only()
+
+    def _remove_selected(self) -> None:
+        keep = []
+        for h in self._handles:
+            if h.isSelected():
+                self._scene.removeItem(h)
+            else:
+                keep.append(h)
+        self._handles = keep
+        self._render_lfp_only()
+
+    def _restore_anchors(self) -> None:
+        if self._shank.ephys is not None:
+            for f, t in self._shank.ephys.anchors:
+                self.add_anchor(float(f), float(t))
+
+    # -- rendering -------------------------------------------------------
+
+    def _warp_lfp(self) -> np.ndarray:
+        """LFP map warped into track space: (_DISPLAY_H, n_freq) uint8."""
+        if self._img_feat.size == 0:
+            return np.zeros((_DISPLAY_H, 1), dtype=np.uint8)
+        n_ch, n_freq = self._img_feat.shape
+        inv = invert_anchors(self.anchors())  # track -> feature
+        rows = np.arange(_DISPLAY_H)
+        track = self._track_max * (1.0 - rows / _DISPLAY_H)
+        feat = apply_depth_alignment(track, inv)
+        # feature depth -> source row index in the ascending-depth LFP map.
+        src = np.interp(feat, self._depths, np.arange(n_ch))
+        src = np.clip(np.round(src).astype(int), 0, n_ch - 1)
+        return self._img_feat[src]
+
+    def _region_strip(self):
+        rows = np.arange(_DISPLAY_H)
+        track = self._track_max * (1.0 - rows / _DISPLAY_H)
+        atlas = self._state.atlas
+        if atlas is None or self._tip is None or self._entry is None:
+            return np.zeros((_DISPLAY_H, _STRIP_W, 3), dtype=np.uint8), []
+        ccf = channel_ccf_um(self._tip, self._entry, track, [])  # track == physical depth
+        hits = regions_at_ccf(atlas, ccf)
+        return region_strip_image(hits, _DISPLAY_H, _STRIP_W), hits
+
+    def _render_lfp_only(self) -> None:
+        warped = self._warp_lfp()
+        # Stretch the n_freq-wide map to _IMG_W for display.
+        self._lfp_item.setPixmap(
+            _to_pixmap(warped).scaled(_IMG_W, _DISPLAY_H)
+        )
+
+    def _render(self) -> None:
+        self._render_lfp_only()
+        strip, hits = self._region_strip()
+        self._strip_item.setPixmap(_to_pixmap(strip))
+        self._strip_item.setPos(_IMG_W + _GAP, 0)
+        # Region label summary (distinct regions top->bottom).
+        labels: list[str] = []
+        for acr, _ in hits:
+            if acr and (not labels or labels[-1] != acr):
+                labels.append(acr)
+        self._regions_label.setText("Regions (surface→tip): " + " · ".join(labels[:24]))
+
+    def _on_anchor_moved(self) -> None:
+        self._render_lfp_only()
+
+    # -- UI --------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+
+        info = (
+            f"Probe '{self._state.project.probes[self._probe_idx].label}', "
+            f"shank {self._shank_idx}  ·  stream {self._stream}  ·  "
+            f"{self._depths.size} channels"
+        )
+        if self._tip is None or self._entry is None:
+            info += "  ·  WARNING: shank not registered (no tip/entry CCF)"
+        root.addWidget(QLabel(info))
+
+        self._regions_label = QLabel("")
+        self._regions_label.setWordWrap(True)
+        self._regions_label.setStyleSheet("color: gray; font-size: 11px;")
+        root.addWidget(self._regions_label)
+
+        self._scene = QGraphicsScene(self)
+        self._view = QGraphicsView(self._scene)
+        self._view.setBackgroundBrush(Qt.black)
+        self._lfp_item = QGraphicsPixmapItem()
+        self._strip_item = QGraphicsPixmapItem()
+        self._scene.addItem(self._lfp_item)
+        self._scene.addItem(self._strip_item)
+        self._scene.setSceneRect(0, 0, _IMG_W + _GAP + _STRIP_W, _DISPLAY_H)
+        root.addWidget(self._view, 1)
+
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("Add anchor (mid)")
+        add_btn.setToolTip("Add an anchor pinning the LFP feature at mid-depth.")
+        add_btn.clicked.connect(self._add_mid_anchor)
+        rm_btn = QPushButton("Remove selected")
+        rm_btn.clicked.connect(self._remove_selected)
+        clear_btn = QPushButton("Clear anchors")
+        clear_btn.clicked.connect(self.clear_anchors)
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(rm_btn)
+        btn_row.addWidget(clear_btn)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        hint = QLabel(
+            "Drag the red anchor lines to align LFP power transitions with region "
+            "boundaries. Tip is at the bottom (depth 0)."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray; font-size: 11px;")
+        root.addWidget(hint)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Close)
+        buttons.button(QDialogButtonBox.Apply).clicked.connect(self._apply)
+        buttons.button(QDialogButtonBox.Close).clicked.connect(self.close)
+        root.addWidget(buttons)
+
+    def _add_mid_anchor(self) -> None:
+        mid = self._track_max / 2.0
+        # feature depth currently shown at this track depth (identity if no warp).
+        inv = invert_anchors(self.anchors())
+        feature = float(apply_depth_alignment(np.array([mid]), inv)[0])
+        self.add_anchor(feature, mid)
+
+    # -- apply -----------------------------------------------------------
+
+    def _apply(self) -> None:
+        from histo_to_ccf.project.schema import EphysAlignment
+
+        anchors = self.anchors()
+        ccf = (
+            channel_ccf_um(self._tip, self._entry, self._depths, anchors)
+            if self._tip is not None and self._entry is not None and self._depths.size
+            else np.zeros((0, 3))
+        )
+        self._shank.ephys = EphysAlignment(
+            recording_path=(self._shank.ephys.recording_path if self._shank.ephys else None),
+            stream_name=self._stream or None,
+            shank_x_um=self._shank_x,
+            channel_depths_um=[float(d) for d in self._depths],
+            anchors=[(float(f), float(t)) for f, t in anchors],
+            channel_ccf_um=[tuple(float(v) for v in row) for row in ccf],
+        )
+        if self._on_applied is not None:
+            self._on_applied()
+        self.close()

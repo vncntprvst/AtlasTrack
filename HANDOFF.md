@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-07 · version **0.1.24** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-07 · version **0.2.0** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -35,7 +35,7 @@ Windows.
 
 ## Workflow (what the GUI does)
 
-4 tabs, left→right (Save/Load moved to the **Histo→CCF menu**, not a tab):
+5 tabs, left→right (Save/Load moved to the **Histo→CCF menu**, not a tab):
 1. **Load** — open one or more composite slides; multiple opens are **merged into
    a single combined image** (see "Multiple slides" below). Auto-detect sections
    (Otsu + connected components). Auto-estimates min-area. "Equalize under-sized
@@ -56,6 +56,10 @@ Windows.
    consistent), then per-section 2D B-spline. Residuals table. "Show atlas overlay"
    warps registered region boundaries onto each section (lazily loads the atlas if
    needed). Auto-saves the project.
+5. **Ephys** — refine a registered shank's depth→CCF mapping from LFP features
+   (see "Ephys alignment" below). Point at an Open Ephys recording folder, compute
+   the LFP power map, then drag anchors in the alignment dialog to align power
+   transitions with atlas region boundaries; Apply stores per-channel CCF.
 
 Save/Load: **Histo→CCF menu** → Save / Save As… / Load Project (`.histo2ccf.json`).
 Load restores the merged slide + sections + registration (CCF coords come back;
@@ -75,6 +79,31 @@ out in a single canvas). The user is told this on load. After the merge the rest
 of the pipeline is unchanged — there is effectively one slide. The napari built-in
 **layer list / layer controls panels are hidden** (the workflow panel drives
 everything), so slides are never managed as separate layers.
+
+## Ephys alignment (v0.2)
+
+IBL-style depth refinement of probe shanks from LFP. Pure-core package
+`ephys/` (no Qt): `alignment.py` warps channel *feature depth* (µm from tip) to
+*track depth* via anchor points (piecewise-linear + linear extrapolation) and
+places each channel on the shank's `tip_ccf_um`→`entry_ccf_um` line;
+`features.py` computes the depth×frequency LFP power map (Welch PSD); `regions.py`
+samples the atlas region at each depth; `loader.py` reads Open Ephys LFP via
+**SpikeInterface** (optional `ephys` extra — gated import, `si.read_openephys` /
+`get_neo_streams`). NP 1.0 has a dedicated LFP stream; when none exists LFP is
+derived from the AP stream (band-limit + resample). All the math is unit-tested
+without SpikeInterface installed.
+
+GUI: the **Ephys** tab (`gui/widgets/ephys_panel.py`) picks a probe+shank, loads
+the recording (background `lfp_power_worker`), and opens
+`EphysAlignmentDialog` — LFP power map (warped into track space) beside the atlas
+region colour strip, shared depth axis (tip at the bottom), draggable red anchor
+lines. Apply writes `Shank.ephys` (`EphysAlignment`: anchors + per-channel
+`channel_ccf_um`), which round-trips through the project JSON.
+
+Open follow-ups: surface the ephys per-channel CCF / region assignments in the 3D
+view + a per-channel region CSV export (today the 3D shank still uses tip/entry,
+not the ephys-refined channels); shank-column auto-detection for 4-shank probes is
+heuristic (sorted unique x → shank index).
 
 ## Architecture notes / hard rules
 
@@ -138,7 +167,11 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **131 passed**. Includes: core pipeline, sectioning/ordering,
+- `pytest -q` → **151 passed** (129 non-qt + 22 qt; run qt tests per-process — the
+  napari GL context corrupts across many viewers in one process on this machine,
+  so a single `pytest -q` run can hit a Windows access violation mid-suite even
+  though every test passes alone). Includes: core pipeline, sectioning/ordering,
+  ephys alignment math + LFP features + region strip + schema round-trip,
   probe geometry/channels, transforms, DeepSlice anchoring conversion (permute +
   flip + scale, mocked subprocess), region styling, mesh extraction, and
   `@pytest.mark.qt` GUI smoke tests (full-panel build, edit-boxes, atlas bregma,
@@ -150,8 +183,9 @@ update/roll back the GPU driver.
 
 ## Open items / next steps
 
-1. **Multiple-slide merge** — being implemented now (this session). Opening a
-   second slide merges it into the combined image; user is informed.
+1. **Ephys per-channel CCF in 3D / export** — surface the ephys-refined channels
+   (regions + CCF) in the napari 3D view and a per-channel region CSV (see "Ephys
+   alignment" follow-ups). Done this session: multiple-slide merge, Ephys tab.
 2. Eyeball DeepSlice planes for a **left/right mirror** (flip `_FLIP_ML` if so).
 3. **Push** `newUI` to origin when ready (committed locally, not pushed).
 4. Possible follow-ups discussed but not built: auto-clean DeepSlice AP outliers

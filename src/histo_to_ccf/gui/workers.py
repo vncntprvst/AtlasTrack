@@ -95,6 +95,47 @@ def deepslice_worker(
 
 
 @thread_worker
+def lfp_power_worker(
+    recording_dir: Path,
+    stream_name: str | None = None,
+    *,
+    max_seconds: float = 60.0,
+    fmin: float = 0.0,
+    fmax: float = 300.0,
+) -> dict:
+    """Load an Open Ephys LFP segment and compute its depth x frequency power map.
+
+    Returns a dict with: ``freqs`` (n_freq), ``psd`` (n_channels, n_freq, depth-
+    sorted), ``image`` (uint8 power map), ``depths_um`` (sorted, µm from tip),
+    ``x_um`` (shank column per channel), ``channel_ids``, ``stream_name`` and
+    ``derived_from_ap``. Runs the SpikeInterface load in the background thread.
+    """
+    from histo_to_ccf.ephys.features import lfp_psd, power_image
+    from histo_to_ccf.ephys.loader import load_lfp
+
+    data = load_lfp(recording_dir, stream_name, max_seconds=max_seconds)
+    freqs, psd = lfp_psd(data.traces, data.fs, fmin=fmin, fmax=fmax)
+
+    # Depth = distance from tip: smallest y is the tip end. Sort ascending so the
+    # display can put the tip at the bottom.
+    order = np.argsort(data.channel_depths_um)
+    depths = data.channel_depths_um[order]
+    depths = depths - float(depths.min())  # zero at the tip
+    psd_sorted = psd[order]
+
+    return {
+        "freqs": freqs,
+        "psd": psd_sorted,
+        "image": power_image(psd_sorted),
+        "depths_um": depths,
+        "x_um": data.channel_x_um[order],
+        "channel_ids": [data.channel_ids[i] for i in order],
+        "stream_name": data.stream_name,
+        "derived_from_ap": data.derived_from_ap,
+    }
+
+
+@thread_worker
 def register_worker_progressive(
     project: "Project",
     atlas: "BrainGlobeAtlas",
