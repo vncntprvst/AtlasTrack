@@ -185,7 +185,11 @@ class EphysPanelWidget(QWidget):
             QMessageBox.warning(self, "No recording", "Select an Open Ephys recording folder.")
             return
         self._compute_btn.setEnabled(False)
-        self._status.setText("Loading LFP and computing power map… (first load can be slow)")
+        self._status.setText(
+            "Reading + filtering the recording and computing the power map… "
+            "(nothing is cached — this re-reads the recording each time; deriving "
+            "LFP from an AP stream is slower)."
+        )
         from histo_to_ccf.gui.workers import lfp_power_worker
 
         worker = lfp_power_worker(
@@ -250,4 +254,19 @@ class EphysPanelWidget(QWidget):
         if shank.ephys is not None and rec_path:
             shank.ephys.recording_path = rec_path
         n = len(shank.ephys.channel_ccf_um) if shank.ephys else 0
-        self._status.setText(f"Alignment applied: {n} channels mapped to CCF on shank {shank_idx}.")
+        msg = f"Alignment applied: {n} channels mapped to CCF on shank {shank_idx}."
+        # Auto-save so the per-channel CCF + anchors persist (mirrors the Register
+        # tab). If there's no project path yet, tell the user to Save manually.
+        path = self._state.project_path
+        if path is not None:
+            try:
+                from histo_to_ccf.project.io import save_project
+
+                save_project(self._state.project, path)
+                msg += f"  ·  saved → {path.name}"
+            except Exception as exc:  # noqa: BLE001
+                msg += f"  ·  auto-save failed: {exc}"
+        else:
+            msg += "  ·  use Histo→CCF ▸ Save Project to persist."
+        msg += "  View in napari 3D to see the channels."
+        self._status.setText(msg)

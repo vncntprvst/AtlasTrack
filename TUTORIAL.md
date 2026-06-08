@@ -1,16 +1,25 @@
-# Histo-to-CCF v0.1.0 — Test walkthrough
+# Histo-to-CCF v0.2.3 — Test walkthrough
 
 ## Prerequisites
 
 ```
-uv pip install -e .[deepslice]
+# Install with extras (DeepSlice for atlas-plane prediction, ephys for LFP-based depth refinement):
+uv pip install -e ".[deepslice,ephys]"   
+# or a subset:
+#   uv pip install -e .                   # base only
+#   uv pip install -e ".[deepslice]"      # just DeepSlice
+#   uv pip install -e ".[ephys]"          # just the Ephys tab (SpikeInterface)
 
 # Activate your environment
 .venv\Scripts\activate # Windows
 source .venv/bin/activate # macOS/Linux
 
-histo2ccf version          # should print: histo2ccf 0.1.0
+histo2ccf version          # should print: histo2ccf 0.2.3
 ```
+
+The **`ephys`** extra (§6b) pulls SpikeInterface + neo/probeinterface; the
+**`deepslice`** extra pulls TensorFlow. Both are optional — the base install runs
+the full histology→CCF workflow without them.
 
 You need one composite slide image (multi-section TIFF or JPEG).  
 The repo includes an example: `example data\L07_slide3_2x_whole_overlay.jpg`
@@ -23,7 +32,9 @@ The repo includes an example: `example data\L07_slide3_2x_whole_overlay.jpg`
 histo2ccf gui
 ```
 
-A napari viewer opens with a 5-tab panel on the right: **Load / Annotate / Atlas / Register / Save**.
+A napari viewer opens with a 5-tab panel on the right:
+**Load / Probes / Atlas / Register / Ephys**.
+Project **Save / Load** live in the **Histo→CCF menu** in the menu bar (not a tab).
 
 ---
 
@@ -43,7 +54,7 @@ A napari viewer opens with a 5-tab panel on the right: **Load / Annotate / Atlas
 
 ---
 
-## 3 — Annotate tab: add a probe and click tip + entry
+## 3 — Probes tab: add a probe and click tip + entry
 
 1. **Add probe**: choose probe type (*Neuropixels 1.0*, *Neuropixels 2.0 (4-shank)*,
    or *NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP*), set a label, click **Add probe**.
@@ -96,8 +107,11 @@ Click **View in napari 3D** — the viewer switches to 3D mode and shows the pro
 Click **Export Plotly HTML…** → save to e.g. `Desktop\probe_3d.html`.  
 Opens automatically in your browser; rotate the atlas + probe interactively.
 
-**Save tab**  
-Click **Save project** — writes `<slide_name>.histo2ccf.json` next to the image by default.
+**Save / Load (Histo→CCF menu)**  
+**Histo→CCF → Save Project** writes `<slide_name>.histo2ccf.json` next to the image
+by default. **Load Project** restores the slide, sections, registration, probes and
+tip/entry, repopulates every tab's fields, and auto-loads the project's atlas in
+the background.
 
 To reload a session in Python:
 
@@ -111,6 +125,30 @@ Click **Export HERBS pkl…** — writes a `.pkl` readable by the old pipeline.
 
 **Per-channel CSV**  
 Click **Export per-channel CSV…** — writes `probe, shank, channel, ap_um, ml_um, dv_um` for all 384 channels.
+
+---
+
+## 6b — Ephys tab: refine shank depth from LFP (optional)
+
+Requires the `ephys` extra (`uv pip install -e ".[ephys]"`) and shanks that already
+have CCF tip/entry from registration. This refines the depth→CCF mapping the way
+the IBL ephys-alignment GUI does.
+
+1. Pick the **Probe** and **Shank** to align.
+2. Under **Recording (Open Ephys)**, **Browse…** to the Open Ephys record-node
+   folder. Click **List streams** and leave **Stream** on *Auto* (uses the LFP
+   stream; for Neuropixels 2.0, which has no LFP stream, LFP is derived from the
+   AP stream).
+3. Set **Seconds to analyse** (default 60) and click **Load & compute LFP power**.
+4. Click **Open alignment…**. The dialog shows the depth×frequency **LFP power
+   map** (left) beside the atlas **region colour strip** (right), sharing a depth
+   axis with the tip at the bottom.
+5. Drag the red **anchor lines** so LFP power transitions line up with region
+   boundaries (use **Add anchor (mid)** to create one, **Remove selected** /
+   **Clear anchors** to manage them).
+6. Click **Apply** — each channel is placed on the tip→entry line and the
+   per-channel CCF coordinates (plus the anchors) are stored on the shank and saved
+   with the project.
 
 ---
 

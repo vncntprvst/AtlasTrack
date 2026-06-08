@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-08 · version **0.2.2** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-08 · version **0.2.4** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -105,10 +105,16 @@ region colour strip, shared depth axis (tip at the bottom), draggable red anchor
 lines. Apply writes `Shank.ephys` (`EphysAlignment`: anchors + per-channel
 `channel_ccf_um`), which round-trips through the project JSON.
 
-Open follow-ups: surface the ephys per-channel CCF / region assignments in the 3D
-view + a per-channel region CSV export (today the 3D shank still uses tip/entry,
-not the ephys-refined channels); shank-column auto-detection for 4-shank probes is
-heuristic (sorted unique x → shank index).
+The alignment dialog: **double-click the LFP map** to drop an anchor at that depth
+(or "Add anchor (mid)"), then drag it; left margin shows top/bottom channel # +
+depth µm (tip at bottom), and the header shows tip/entry CCF. **Apply auto-saves**
+the project (if it has a path) and the ephys per-channel CCF now render as Points
+layers in the napari 3D view (`add_ephys_channel_layers`). Compute does **not**
+cache — it re-reads/filters the recording each time.
+
+Open follow-ups: per-channel region CSV export; richer anchor UX (snap to region
+boundary); per-frequency normalisation option for the power map; shank-column
+auto-detection for 4-shank probes is heuristic (sorted unique x → shank index).
 
 ## Architecture notes / hard rules
 
@@ -172,7 +178,7 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **154 passed** (130 non-qt + 24 qt; run qt tests per-process — the
+- `pytest -q` → **156 passed** (131 non-qt + 25 qt; run qt tests per-process — the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
   though every test passes alone). Includes: core pipeline, sectioning/ordering,

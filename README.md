@@ -25,20 +25,41 @@ amount of user input, this app:
    coordinates when probe geometry is supplied.
 6. Plots all probe trajectories together with semi-transparent BrainGlobe
    meshes (Plotly HTML and an in-app napari 3D view).
+7. (Optional, `ephys` extra) Refines each shank's depth→CCF mapping from LFP
+   features: load an Open Ephys recording, align the depth×frequency LFP power
+   map to the atlas region boundaries with draggable anchors, and store
+   per-channel CCF coordinates.
 
 ## Install (target)
 
 ```bash
-uv pip install histo-to-ccf            # or:  pip install histo-to-ccf
-uv pip install histo-to-ccf[deepslice] # enable auto plane prediction
-histo2ccf gui                          # launch the guided workflow
+uv pip install histo-to-ccf                      # or:  pip install histo-to-ccf
+histo2ccf gui                                    # launch the guided workflow
 ```
 
-To install as dev: 
+Optional features live behind **extras**:
+
+- `deepslice` — automatic atlas-plane prediction (pulls TensorFlow).
+- `ephys` — the Ephys-alignment tab: load Open Ephys LFP and refine shank depth
+  (pulls SpikeInterface + neo/probeinterface).
+
 ```bash
-uv pip install -e . # To install without deepslice
-uv pip install -e .[deepslice] # To install with deepslice
+uv pip install "histo-to-ccf[deepslice]"         # one extra
+uv pip install "histo-to-ccf[deepslice,ephys]"   # several, comma-separated
 ```
+
+To install as dev (editable):
+
+```bash
+uv pip install -e .                              # base only
+uv pip install -e ".[deepslice]"                 # with DeepSlice
+uv pip install -e ".[ephys]"                     # with ephys alignment
+uv pip install -e ".[deepslice,ephys,dev]"       # everything + test/lint tools
+```
+
+> **Quote the target** (`".[...]"`) and use **no spaces** between extras —
+> `zsh` and PowerShell otherwise treat `[...]` as a glob and the space splits the
+> argument, e.g. `uv pip install -e .[deepslice, ephys]` fails to parse.
 
 ## Repository layout
 

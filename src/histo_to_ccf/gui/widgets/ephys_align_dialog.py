@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
     QGraphicsLineItem,
     QGraphicsPixmapItem,
     QGraphicsScene,
+    QGraphicsTextItem,
     QGraphicsView,
     QHBoxLayout,
     QLabel,
@@ -44,6 +45,7 @@ _DISPLAY_H = 600  # scene height in pixels (track-depth axis)
 _IMG_W = 360  # LFP map width in pixels
 _GAP = 10
 _STRIP_W = 28
+_LEFT = 78  # left margin for the depth / channel axis labels
 
 
 class _AnchorLine(QGraphicsLineItem):
@@ -63,14 +65,27 @@ class _AnchorLine(QGraphicsLineItem):
 
     def itemChange(self, change, value):  # noqa: N802 (Qt signature)
         if change == QGraphicsLineItem.ItemPositionChange:
-            # Constrain to vertical movement, clamped to the scene height.
+            # Constrain to vertical movement (x pinned to the image left edge),
+            # clamped to the scene height.
             y = max(0.0, min(float(value.y()), float(_DISPLAY_H)))
-            value.setX(0.0)
+            value.setX(float(_LEFT))
             value.setY(y)
             return value
         if change == QGraphicsLineItem.ItemPositionHasChanged:
             self._dialog._on_anchor_moved()
         return super().itemChange(change, value)
+
+
+class _AlignView(QGraphicsView):
+    """Graphics view that adds an anchor where the user double-clicks."""
+
+    def __init__(self, scene, dialog: "EphysAlignmentDialog"):
+        super().__init__(scene)
+        self._dialog = dialog
+
+    def mouseDoubleClickEvent(self, event):  # noqa: N802 (Qt signature)
+        pt = self.mapToScene(event.pos())
+        self._dialog._add_anchor_at_scene_y(pt.y())
 
 
 class EphysAlignmentDialog(QDialog):
@@ -111,6 +126,8 @@ class EphysAlignmentDialog(QDialog):
         depths = np.asarray(lfp_result["depths_um"], dtype=float)
         x = np.asarray(lfp_result["x_um"], dtype=float)
         img = np.asarray(lfp_result["image"])  # (n_channels, n_freq), uint8
+        ids = list(lfp_result.get("channel_ids", list(range(len(depths)))))
+        self._freqs = np.asarray(lfp_result.get("freqs", []), dtype=float)
 
         cols = np.unique(np.round(x, 1))
         self._shank_x = None
@@ -124,6 +141,8 @@ class EphysAlignmentDialog(QDialog):
         order = np.argsort(d)
         self._depths = d[order] - float(d.min()) if d.size else d  # zero at tip
         self._img_feat = img[mask][order]  # rows ascending feature depth
+        masked_ids = [i for i, m in zip(ids, mask) if m]
+        self._channel_ids = [masked_ids[i] for i in order] if masked_ids else []
         self._stream = lfp_result.get("stream_name", "")
 
         feature_max = float(self._depths.max()) if self._depths.size else 0.0
@@ -148,9 +167,19 @@ class EphysAlignmentDialog(QDialog):
     def add_anchor(self, feature_depth: float, track_depth: float) -> None:
         line = _AnchorLine(self, feature_depth, _IMG_W + _GAP + _STRIP_W)
         self._scene.addItem(line)
-        line.setPos(0.0, self._track_to_y(track_depth))
+        line.setPos(float(_LEFT), self._track_to_y(track_depth))
         self._handles.append(line)
         self._render_lfp_only()
+
+    def add_anchor_at_track(self, track_depth: float) -> None:
+        """Add an anchor at a track depth, pinning the LFP feature shown there."""
+        inv = invert_anchors(self.anchors())  # track -> feature
+        feature = float(apply_depth_alignment(np.array([track_depth]), inv)[0])
+        self.add_anchor(feature, track_depth)
+
+    def _add_anchor_at_scene_y(self, y: float) -> None:
+        y = max(0.0, min(float(y), float(_DISPLAY_H)))
+        self.add_anchor_at_track(self._y_to_track(y))
 
     def clear_anchors(self) -> None:
         for h in self._handles:
@@ -210,7 +239,6 @@ class EphysAlignmentDialog(QDialog):
         self._render_lfp_only()
         strip, hits = self._region_strip()
         self._strip_item.setPixmap(_to_pixmap(strip))
-        self._strip_item.setPos(_IMG_W + _GAP, 0)
         # Region label summary (distinct regions top->bottom).
         labels: list[str] = []
         for acr, _ in hits:
@@ -231,7 +259,13 @@ class EphysAlignmentDialog(QDialog):
             f"shank {self._shank_idx}  ·  stream {self._stream}  ·  "
             f"{self._depths.size} channels"
         )
-        if self._tip is None or self._entry is None:
+        if self._tip is not None and self._entry is not None:
+            t, e = self._tip, self._entry
+            info += (
+                f"\nTip CCF (AP,ML,DV): {t[0]:.0f}, {t[1]:.0f}, {t[2]:.0f} µm   ·   "
+                f"Entry CCF: {e[0]:.0f}, {e[1]:.0f}, {e[2]:.0f} µm"
+            )
+        else:
             info += "  ·  WARNING: shank not registered (no tip/entry CCF)"
         root.addWidget(QLabel(info))
 
@@ -241,18 +275,24 @@ class EphysAlignmentDialog(QDialog):
         root.addWidget(self._regions_label)
 
         self._scene = QGraphicsScene(self)
-        self._view = QGraphicsView(self._scene)
+        self._view = _AlignView(self._scene, self)
         self._view.setBackgroundBrush(Qt.black)
         self._lfp_item = QGraphicsPixmapItem()
+        self._lfp_item.setPos(_LEFT, 0)
         self._strip_item = QGraphicsPixmapItem()
+        self._strip_item.setPos(_LEFT + _IMG_W + _GAP, 0)
         self._scene.addItem(self._lfp_item)
         self._scene.addItem(self._strip_item)
-        self._scene.setSceneRect(0, 0, _IMG_W + _GAP + _STRIP_W, _DISPLAY_H)
+        self._scene.setSceneRect(0, 0, _LEFT + _IMG_W + _GAP + _STRIP_W, _DISPLAY_H)
+        self._add_axis_labels()
         root.addWidget(self._view, 1)
 
         btn_row = QHBoxLayout()
         add_btn = QPushButton("Add anchor (mid)")
-        add_btn.setToolTip("Add an anchor pinning the LFP feature at mid-depth.")
+        add_btn.setToolTip(
+            "Add an anchor at mid-depth. Tip: double-click anywhere on the LFP map "
+            "to drop an anchor right there instead."
+        )
         add_btn.clicked.connect(self._add_mid_anchor)
         rm_btn = QPushButton("Remove selected")
         rm_btn.clicked.connect(self._remove_selected)
@@ -265,8 +305,9 @@ class EphysAlignmentDialog(QDialog):
         root.addLayout(btn_row)
 
         hint = QLabel(
-            "Drag the red anchor lines to align LFP power transitions with region "
-            "boundaries. Tip is at the bottom (depth 0)."
+            "Double-click the LFP map to drop a red anchor, then drag it to align an "
+            "LFP power transition with a region boundary on the right. Horizontal axis "
+            "= frequency (0–300 Hz); vertical = depth (tip at the bottom)."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: gray; font-size: 11px;")
@@ -277,12 +318,22 @@ class EphysAlignmentDialog(QDialog):
         buttons.button(QDialogButtonBox.Close).clicked.connect(self.close)
         root.addWidget(buttons)
 
+    def _add_axis_labels(self) -> None:
+        """Depth + channel-number ticks down the left margin (top=surface, bottom=tip)."""
+        top_ch = self._channel_ids[-1] if self._channel_ids else "?"
+        bot_ch = self._channel_ids[0] if self._channel_ids else "?"
+        top = QGraphicsTextItem(f"ch {top_ch}\n{self._track_max:.0f} µm\n(surface)")
+        top.setDefaultTextColor(QColor(220, 220, 220))
+        top.setPos(2, 2)
+        bottom = QGraphicsTextItem(f"ch {bot_ch}\n0 µm\n(tip)")
+        bottom.setDefaultTextColor(QColor(220, 220, 220))
+        bottom.setPos(2, _DISPLAY_H - 48)
+        for it in (top, bottom):
+            it.setZValue(5)
+            self._scene.addItem(it)
+
     def _add_mid_anchor(self) -> None:
-        mid = self._track_max / 2.0
-        # feature depth currently shown at this track depth (identity if no warp).
-        inv = invert_anchors(self.anchors())
-        feature = float(apply_depth_alignment(np.array([mid]), inv)[0])
-        self.add_anchor(feature, mid)
+        self.add_anchor_at_track(self._track_max / 2.0)
 
     # -- apply -----------------------------------------------------------
 

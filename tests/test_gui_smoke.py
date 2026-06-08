@@ -564,6 +564,14 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
 
     # Region strip rendered without raising and produced labels.
     assert "Regions" in dlg._regions_label.text()
+    # Channel ids carried through (used for the depth/channel axis labels).
+    assert len(dlg._channel_ids) == 16
+
+    # Double-click placement adds an anchor at the clicked depth, then clear.
+    dlg._add_anchor_at_scene_y(300.0)
+    assert len(dlg.anchors()) == 1
+    dlg.clear_anchors()
+    assert dlg.anchors() == []
 
     # Add an anchor, then apply -> per-channel CCF stored on the shank.
     dlg.add_anchor(feature_depth=1000.0, track_depth=1200.0)
@@ -576,6 +584,33 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
     assert len(eph.channel_ccf_um) == 16
     assert len(eph.channel_depths_um) == 16
     assert eph.anchors and eph.anchors[0][0] == pytest.approx(1000.0)
+
+
+@pytest.mark.qt
+def test_show_3d_scene_adds_ephys_channel_layer(qtbot) -> None:
+    import napari
+    from histo_to_ccf.project.schema import EphysAlignment, ProbeSpec, ProbeType, Shank
+    from histo_to_ccf.viz.napari3d import show_3d_scene
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        shank = Shank(
+            index=0,
+            tip_ccf_um=(4000.0, 2000.0, 5000.0),
+            entry_ccf_um=(4000.0, 2000.0, 1000.0),
+            ephys=EphysAlignment(
+                channel_ccf_um=[(4000.0, 2000.0, 5000.0), (4000.0, 2000.0, 3000.0)]
+            ),
+        )
+        state.project.probes.append(
+            ProbeSpec(label="probeA", type=ProbeType(name="NP", n_shanks=1), shanks=[shank])
+        )
+        # No atlas -> still draws probe + ephys channel layers.
+        show_3d_scene(viewer, state.project, None)
+        assert any(str(lyr.name).startswith("Ephys channels") for lyr in viewer.layers)
+    finally:
+        viewer.close()
 
 
 # ---------------------------------------------------------------------------

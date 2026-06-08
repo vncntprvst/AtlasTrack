@@ -137,6 +137,35 @@ def test_region_strip_image_shape_and_top_bottom() -> None:
 
 # --- schema round-trip ------------------------------------------------------
 
+def test_derived_lfp_filter_chain_does_not_raise() -> None:
+    """resample -> bandpass(ignore_low_freq_error) -> get_traces works (SI present).
+
+    Guards the AP-derived LFP path: SpikeInterface rejects freq_min < ~1 Hz unless
+    ignore_low_freq_error is set, and return_scaled is deprecated for return_in_uV.
+    """
+    si = pytest.importorskip("spikeinterface.full")
+    import warnings
+
+    fs = 30000.0
+    rng = np.random.default_rng(0)
+    traces = (rng.standard_normal((int(fs * 2), 4)) * 50).astype("float32")
+    rec = si.NumpyRecording([traces], sampling_frequency=fs)
+    rec.set_channel_locations(np.c_[np.zeros(4), np.arange(4) * 20.0])
+
+    lfp_fs = 2500.0
+    rec = si.resample(rec, int(lfp_fs))
+    rec = si.bandpass_filter(rec, freq_min=0.5, freq_max=300.0, ignore_low_freq_error=True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            seg = rec.get_traces(start_frame=0, end_frame=int(lfp_fs), return_in_uV=True)
+        except TypeError:
+            seg = rec.get_traces(start_frame=0, end_frame=int(lfp_fs), return_scaled=True)
+    assert seg.shape == (int(lfp_fs), 4)
+    assert np.isfinite(seg).all()
+
+
 def test_ephys_alignment_persists(tmp_path) -> None:
     from histo_to_ccf.project.io import load_project, save_project
     from histo_to_ccf.project.schema import (

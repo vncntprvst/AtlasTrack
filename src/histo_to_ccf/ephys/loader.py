@@ -92,9 +92,17 @@ def load_lfp(
         if ap is None:
             raise RuntimeError(f"No LFP or AP Neuropixels stream in {recording_dir}")
         rec = si.read_openephys(str(recording_dir), stream_name=ap)
-        rec = si.bandpass_filter(rec, freq_min=0.5, freq_max=300.0)
+        # Decimate the wideband AP stream to ~LFP rate first (resample applies its
+        # own anti-alias low-pass), then band-limit. Doing the filter on the
+        # decimated stream is far cheaper than filtering at 30 kHz.
         if rec.get_sampling_frequency() > lfp_fs:
             rec = si.resample(rec, int(lfp_fs))
+        # ignore_low_freq_error: SpikeInterface rejects freq_min < ~1 Hz by default
+        # (chunk-edge artifacts); we read one central window with a wide margin, so
+        # the bypass is safe here and keeps the LFP drift band.
+        rec = si.bandpass_filter(
+            rec, freq_min=0.5, freq_max=300.0, ignore_low_freq_error=True
+        )
         stream_name = ap
         derived = True
     else:
@@ -104,7 +112,11 @@ def load_lfp(
     n_total = rec.get_num_samples()
     n_keep = min(n_total, int(max_seconds * fs))
     start = max(0, (n_total - n_keep) // 2)  # central window
-    traces = rec.get_traces(start_frame=start, end_frame=start + n_keep, return_scaled=True)
+    # return_in_uV is the new name; older SpikeInterface uses return_scaled.
+    try:
+        traces = rec.get_traces(start_frame=start, end_frame=start + n_keep, return_in_uV=True)
+    except TypeError:
+        traces = rec.get_traces(start_frame=start, end_frame=start + n_keep, return_scaled=True)
 
     try:
         locs = np.asarray(rec.get_channel_locations(), dtype=float)

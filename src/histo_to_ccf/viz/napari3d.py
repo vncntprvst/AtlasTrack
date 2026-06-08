@@ -70,6 +70,40 @@ def add_probe_layers(
     return added
 
 
+def add_ephys_channel_layers(
+    viewer: "napari.Viewer",
+    project: "Project",
+    *,
+    size: float = 60.0,
+) -> list:
+    """Add ephys-aligned per-channel CCF positions as 3D Points layers.
+
+    One layer per probe that has any shank with ``ephys.channel_ccf_um`` filled
+    (from the Ephys tab). Makes the depth refinement visible in 3D — without this
+    the scene only shows the tip→entry line, which the alignment does not move.
+    Returns the added layers.
+    """
+    added = []
+    for p_idx, probe in enumerate(project.probes):
+        color = _PROBE_COLORS[p_idx % len(_PROBE_COLORS)]
+        pts = []
+        for shank in probe.shanks:
+            if shank.ephys is None:
+                continue
+            pts.extend([tuple(float(v) for v in c) for c in shank.ephys.channel_ccf_um])
+        if not pts:
+            continue
+        layer = viewer.add_points(
+            np.array(pts, dtype=float),  # (AP, ML, DV)
+            name=f"Ephys channels {probe.label}",
+            face_color=[color] * len(pts),
+            size=size,
+            ndim=3,
+        )
+        added.append(layer)
+    return added
+
+
 def _solid_colormap(rgb: tuple[int, int, int], name: str):
     """A single-colour napari Colormap (both ends = ``rgb``) for flat shading."""
     from napari.utils.colormaps import Colormap
@@ -200,6 +234,7 @@ def show_3d_scene(
                 added.append(layer)
 
     added += add_probe_layers(viewer, project, line_width=line_width)
+    added += add_ephys_channel_layers(viewer, project)
     switch_to_3d(viewer)
     try:
         viewer.reset_view()
