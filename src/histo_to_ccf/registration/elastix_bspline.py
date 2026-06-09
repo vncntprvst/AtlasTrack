@@ -229,8 +229,20 @@ def refine_with_elastix(
 
     # Combined (affine ∘ B-spline) displacement field on the FIXED grid, mapping
     # fixed → moving — the convention every consumer of `bspline` expects.
-    dfield = itk.transformix_deformation_field(moving_img, transform_params)
-    darr = np.asarray(itk.array_from_image(dfield), dtype=np.float64)  # (H, W, 2)
+    # transformix insists on writing `deformationField.nii`; point it at a temp
+    # dir (an empty OutputDirectory is treated as ".") so it never litters cwd.
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="histo2ccf_elx_") as _td:
+        tx = itk.TransformixFilter.New(moving_img)
+        tx.SetTransformParameterObject(transform_params)
+        tx.SetComputeDeformationField(True)
+        tx.SetOutputDirectory(_td)
+        tx.SetLogToConsole(False)
+        tx.UpdateLargestPossibleRegion()
+        darr = np.array(
+            itk.array_from_image(tx.GetOutputDeformationField()), dtype=np.float64
+        )  # (H, W, 2); copied before the temp dir is removed
 
     disp = sitk.GetImageFromArray(darr, isVector=True)
     disp = sitk.Cast(disp, sitk.sitkVectorFloat64)

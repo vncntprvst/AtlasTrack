@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-09 · version **0.2.8** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-09 · version **0.2.9** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -205,6 +205,36 @@ numbers aren't comparable. Tissue Dice as a QC metric and a **VisuAlign/BigWarp-
 manual landmark warp** (the real fix for damaged/asymmetric sections) are the two
 biggest remaining levers.
 
+## Manual atlas correction (v0.2.9 — drag the overlay)
+
+When automatic registration can't snap a damaged/asymmetric section, the user
+corrects it by hand: **Register tab → "Manual atlas adjustment"** → pick a section
+→ **"Adjust atlas (drag in viewer)"**. That puts the section's atlas-overlay Labels
+layer into napari's built-in **`transform` mode** (drag the body to move; box handles
+to scale / stretch X-Y / rotate). "Apply adjustment" commits; "Reset adjustment"
+clears it.
+
+Data model: napari writes a 3x3 **world** affine to `layer.affine`; we convert it to
+a bbox-independent **section-local** affine (`registration/manual.py`,
+`world_to_section` = conjugate by the bbox origin) and store it on
+`Section.manual_affine` (round-trips through the project JSON). On overlay render /
+project load the stored affine is pushed back onto the layer (`section_to_world`), so
+corrections persist visually.
+
+Composition (the correctness-critical bit): the manual affine `A` maps a *registered*
+atlas position to where it was dragged. For probe -> CCF, a tissue point is fixed and
+the atlas moved, so `RegisteredSectionTransform.apply` first pulls the clicked point
+back with `A^-1` (`manual.invert_apply`) before the registration inverse. `Apply`
+re-maps every probe (`reload_registered_transforms` now threads
+`Section.manual_affine` into `build_registered_transform`) and auto-saves. Live drag
+preview is free (napari renders `layer.affine`); only commit bakes it in.
+
+Tested headless: world<->section round-trip, `A^-1` point map, a translation affine
+shifting the probe CCF by the matching pixels, schema round-trip; plus a qt smoke test
+(enter transform mode, set an affine, apply -> `manual_affine` stored + saved, reset).
+**Open polish:** the adjust picker doesn't yet auto-select the section nearest the
+viewport; per-section "stretch only" vs "move only" lock; an undo.
+
 ## Architecture notes / hard rules
 
 - `src/histo_to_ccf/` layered: `io/`, `atlas/`, `sectioning/`, `landmarks/`,
@@ -267,9 +297,10 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **172 passed** (147 non-qt + 25 qt; elastix engine adds 6 in
-  `test_elastix_bspline.py` — skipped if itk-elastix absent — 4 mask tests in
-  `test_masks.py`, 3 in `test_overlay_extent.py`; run qt tests per-process — the
+- `pytest -q` → **177 passed** (152 non-qt + 25 qt; elastix engine adds 6 in
+  `test_elastix_bspline.py` — skipped if itk-elastix absent — 4 in `test_masks.py`,
+  3 in `test_overlay_extent.py`, 5 in `test_manual_affine.py`, +1 qt manual-adjust;
+  run qt tests per-process — the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
   though every test passes alone). Includes: core pipeline, sectioning/ordering,
@@ -293,11 +324,11 @@ update/roll back the GPU driver.
    border** — the intensity-MI fit doesn't optimise the silhouette, so global scale
    is inconsistent (section 12 atlas slightly too big, section 1 slightly too
    small). Silhouette-based fixes were tried and rejected (shear / fold on
-   asymmetric sections). **Next: manual per-section atlas correction** — let the user
-   move / scale (stretch X-Y) / rotate the atlas overlay, stored as a per-section
-   transform composed with the registration + probe mapping. This is the durable fix
-   the user asked for. (Section detection bboxes are fine — ~0% tissue cut; the
-   "atlas leaving the box" look is the atlas scale, not the box.) Also possible:
+   asymmetric sections). **Manual per-section correction shipped (v0.2.9)** — drag the
+   atlas overlay (see "Manual atlas correction"). (Section detection bboxes are fine —
+   ~0% tissue cut; the "atlas leaving the box" look is the atlas scale, not the box.)
+   Remaining auto levers: a global **similarity pre-align** on the tissue silhouette to
+   make the outer-contour scale consistent across sections (4-DOF, can't fold), and a
    tissue **Dice** QC metric to flag bad sections.
 1. **Ephys per-channel CCF in 3D / export** — surface the ephys-refined channels
    (regions + CCF) in the napari 3D view and a per-channel region CSV (see "Ephys

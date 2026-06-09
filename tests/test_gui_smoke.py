@@ -744,3 +744,55 @@ def test_auto_load_atlas_skips_when_already_loaded(qtbot) -> None:
         assert widget._atlas_status.text() == "untouched"
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_manual_atlas_adjustment(qtbot, tmp_path) -> None:
+    """Drag-on-canvas manual correction stores a section-local affine + re-maps."""
+    import napari
+    import numpy as np
+    from napari.utils.transforms import Affine
+
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _populated_state()
+        state.project_path = tmp_path / "p.histo2ccf.json"
+        panel = RegisterPanelWidget(state, viewer)
+        qtbot.addWidget(panel)
+
+        # Simulate "Show atlas overlay": add the section-0 overlay layer.
+        viewer.add_labels(
+            np.zeros((80, 80), dtype=np.uint8), name="Atlas overlay 0", translate=(0, 0)
+        )
+        panel._populate_adjust_combo()
+        assert panel._adjust_combo.count() == 1  # only section 0 is registered
+
+        # Enter transform mode (what the user gets to drag).
+        panel._adjust_btn.setChecked(True)
+        layer = viewer.layers["Atlas overlay 0"]
+        assert layer.mode == "transform"
+
+        # Simulate a drag: a +4 row / +8 col translation of the overlay.
+        layer.affine = Affine(
+            affine_matrix=np.array([[1.0, 0.0, 4.0], [0.0, 1.0, 8.0], [0.0, 0.0, 1.0]])
+        )
+
+        # Apply.
+        panel._adjust_btn.setChecked(False)
+        sec = state.project.slides[0].sections[0]
+        assert layer.mode == "pan_zoom"
+        assert sec.manual_affine is not None
+        # bbox origin is (0, 0), so section-local affine == the world affine.
+        assert np.allclose(
+            np.array(sec.manual_affine), [[1, 0, 4], [0, 1, 8], [0, 0, 1]], atol=1e-6
+        )
+        assert state.project_path.exists()  # auto-saved
+
+        # Reset clears it and restores identity.
+        panel._reset_adjustment()
+        assert sec.manual_affine is None
+        assert np.allclose(np.asarray(layer.affine.affine_matrix), np.eye(3), atol=1e-6)
+    finally:
+        viewer.close()

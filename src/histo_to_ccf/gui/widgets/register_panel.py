@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QGroupBox,
     QHBoxLayout,
@@ -170,6 +171,30 @@ class RegisterPanelWidget(QWidget):
         self._overlay_btn.clicked.connect(self._show_overlay)
         layout.addWidget(self._overlay_btn)
 
+        # Manual per-section atlas correction (drag in the viewer).
+        adjust_box = QGroupBox("Manual atlas adjustment")
+        av = QVBoxLayout(adjust_box)
+        sec_row = QHBoxLayout()
+        sec_row.addWidget(QLabel("Section:"))
+        self._adjust_combo = QComboBox()
+        self._adjust_combo.setToolTip("Pick a registered section to nudge its atlas overlay.")
+        sec_row.addWidget(self._adjust_combo, 1)
+        av.addLayout(sec_row)
+        self._adjust_btn = QPushButton("Adjust atlas (drag in viewer)")
+        self._adjust_btn.setCheckable(True)
+        self._adjust_btn.setToolTip(
+            "Enter transform mode for this section's atlas overlay: drag the body to "
+            "move it, drag the box handles to scale / stretch / rotate. Click again to "
+            "apply (probes re-map and the project auto-saves)."
+        )
+        self._adjust_btn.toggled.connect(self._on_adjust_toggled)
+        av.addWidget(self._adjust_btn)
+        self._adjust_reset_btn = QPushButton("Reset adjustment")
+        self._adjust_reset_btn.setToolTip("Clear the manual correction for this section.")
+        self._adjust_reset_btn.clicked.connect(self._reset_adjustment)
+        av.addWidget(self._adjust_reset_btn)
+        layout.addWidget(adjust_box)
+
         layout.addStretch()
 
     def _on_elastix_toggled(self, on: bool) -> None:
@@ -211,6 +236,7 @@ class RegisterPanelWidget(QWidget):
         if self._state.project_path is not None:
             self._reg_base_dir = self._state.project_path.parent
         self._refresh_residuals()
+        self._populate_adjust_combo()
         n = sum(
             1 for slide in self._state.project.slides
             for sec in slide.sections
@@ -378,6 +404,9 @@ class RegisterPanelWidget(QWidget):
             _error_dialog(self, "Atlas not loaded", "Load the atlas used for registration.")
             return
         import numpy as np
+        from napari.utils.transforms import Affine
+
+        from histo_to_ccf.registration.manual import section_to_world
         from histo_to_ccf.registration.transforms import (
             annotation_boundaries,
             warp_annotation_to_section,
@@ -419,15 +448,23 @@ class RegisterPanelWidget(QWidget):
             name = f"Atlas overlay {section.index}"
             edge_labels = edges.astype(np.uint8)
             if name in self._viewer.layers:
-                self._viewer.layers[name].data = edge_labels
+                layer = self._viewer.layers[name]
+                layer.data = edge_labels
             else:
-                self._viewer.add_labels(
+                layer = self._viewer.add_labels(
                     edge_labels, name=name, opacity=0.7, translate=(y0, x0)
                 )
+            # Re-apply any stored manual correction so it persists across reloads.
+            if section.manual_affine is not None:
+                world = section_to_world(np.asarray(section.manual_affine), (y0, x0))
+                layer.affine = Affine(affine_matrix=world)
+            else:
+                layer.affine = Affine(affine_matrix=np.eye(3))
             count += 1
 
         if count:
             self._viewer.dims.ndisplay = 2
+            self._populate_adjust_combo()
             self._status.setText(f"Overlaid atlas boundaries on {count} section(s).")
         else:
             _error_dialog(
@@ -435,6 +472,145 @@ class RegisterPanelWidget(QWidget):
                 f"{len(registered)} section(s) are registered but the atlas could not "
                 f"be warped onto them.\n\n{first_error}",
             )
+
+    # ------------------------------------------------------------------
+    # Manual atlas adjustment (drag the overlay in the viewer)
+    # ------------------------------------------------------------------
+
+    def _populate_adjust_combo(self) -> None:
+        """List registered sections in the manual-adjust picker."""
+        current = self._adjust_combo.currentData()
+        self._adjust_combo.blockSignals(True)
+        self._adjust_combo.clear()
+        for slide in self._state.project.slides:
+            for sec in slide.sections:
+                if sec.registration is not None:
+                    self._adjust_combo.addItem(f"Section {sec.index}", sec.index)
+        if current is not None:
+            i = self._adjust_combo.findData(current)
+            if i >= 0:
+                self._adjust_combo.setCurrentIndex(i)
+        self._adjust_combo.blockSignals(False)
+
+    def _adjust_section(self):
+        """The Section currently chosen in the adjust picker, or None."""
+        idx = self._adjust_combo.currentData()
+        if idx is None:
+            return None
+        for slide in self._state.project.slides:
+            for sec in slide.sections:
+                if sec.index == idx:
+                    return sec
+        return None
+
+    def _overlay_layer_for(self, section):
+        name = f"Atlas overlay {section.index}"
+        # napari LayerList has no .get(), so the SIM401 suggestion doesn't apply.
+        if name in self._viewer.layers:  # noqa: SIM401
+            return self._viewer.layers[name]
+        return None
+
+    def _on_adjust_toggled(self, on: bool) -> None:
+        section = self._adjust_section()
+        layer = self._overlay_layer_for(section) if section is not None else None
+        if layer is None:
+            if on:
+                _error_dialog(
+                    self, "Show the overlay first",
+                    "Click 'Show atlas overlay on sections' before adjusting.",
+                )
+            self._adjust_btn.blockSignals(True)
+            self._adjust_btn.setChecked(False)
+            self._adjust_btn.blockSignals(False)
+            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+            return
+
+        if on:
+            self._viewer.layers.selection = {layer}
+            layer.mode = "transform"
+            self._adjust_btn.setText("Apply adjustment")
+            self._status.setText(
+                f"Adjusting section {section.index}: drag to move, box handles to "
+                f"scale / stretch / rotate. Click 'Apply adjustment' when done."
+            )
+        else:
+            self._commit_adjustment(section, layer)
+            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+
+    def _commit_adjustment(self, section, layer) -> None:
+        """Read the layer's world affine, store it section-local, re-map + save."""
+        import numpy as np
+
+        from histo_to_ccf.registration.manual import is_identity, world_to_section
+
+        try:
+            layer.mode = "pan_zoom"
+            x0, y0 = section.bbox_px[0], section.bbox_px[1]
+            world = np.asarray(layer.affine.affine_matrix, dtype=float)
+            section_affine = world_to_section(world, (y0, x0))
+            section.manual_affine = (
+                None if is_identity(section_affine) else section_affine.tolist()
+            )
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "Adjustment failed", str(exc))
+            return
+        self._remap_and_save(section)
+
+    def _reset_adjustment(self) -> None:
+        import numpy as np
+        from napari.utils.transforms import Affine
+
+        section = self._adjust_section()
+        if section is None:
+            return
+        section.manual_affine = None
+        layer = self._overlay_layer_for(section)
+        if layer is not None:
+            layer.mode = "pan_zoom"
+            layer.affine = Affine(affine_matrix=np.eye(3))
+        if self._adjust_btn.isChecked():
+            self._adjust_btn.blockSignals(True)
+            self._adjust_btn.setChecked(False)
+            self._adjust_btn.blockSignals(False)
+            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+        self._remap_and_save(section)
+
+    def _remap_and_save(self, section) -> None:
+        """Re-project probe coords through the manual-corrected transforms, save."""
+        atlas = self._state.atlas
+        base_dir = self._reg_base_dir
+        if base_dir is None and self._state.project_path is not None:
+            base_dir = self._state.project_path.parent
+        remapped = False
+        if atlas is not None:
+            try:
+                from histo_to_ccf.registration.pipeline import (
+                    _apply_to_shank_registered,
+                    reload_registered_transforms,
+                )
+
+                transforms = reload_registered_transforms(
+                    self._state.project, atlas, project_dir=base_dir
+                )
+                for probe in self._state.project.probes:
+                    for shank in probe.shanks:
+                        _apply_to_shank_registered(shank, self._state.project, transforms)
+                remapped = True
+            except Exception as exc:  # noqa: BLE001
+                self._status.setText(f"Section {section.index}: probe re-map failed: {exc}")
+
+        msg = f"Section {section.index} adjustment applied"
+        msg += " (probes re-mapped)" if remapped else ""
+        path = self._ensure_project_path()
+        if path is not None:
+            try:
+                from histo_to_ccf.project.io import save_project
+
+                save_project(self._state.project, path)
+                msg += f"  ·  saved → {path.name}"
+            except Exception as exc:  # noqa: BLE001
+                msg += f"  ·  save failed: {exc}"
+        self._status.setText(msg)
 
     # ------------------------------------------------------------------
     # Lazy atlas load (for the section overlay)

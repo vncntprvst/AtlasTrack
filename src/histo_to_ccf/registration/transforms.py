@@ -63,12 +63,14 @@ SectionTransform = ManualSectionTransform
 
 @dataclass(frozen=True)
 class RegisteredSectionTransform:
-    """The M3 pixel→CCF mapping: optional B-spline ∘ anchoring."""
+    """The M3 pixel→CCF mapping: optional manual affine ∘ B-spline ∘ anchoring."""
 
     anchoring: Anchoring
     output_size_px: tuple[int, int]
     bspline: "sitk.Transform | None"
     atlas_resolution_um: tuple[float, float, float]  # (ap_res, dv_res, ml_res)
+    # Section-local 3x3 manual-correction affine (row, col); None = identity.
+    manual_affine: np.ndarray | None = None
 
     def _section_px_to_slice_px(self, x_px: float, y_px: float) -> tuple[float, float]:
         """Map a histology pixel through the inverse B-spline to slice-px coords.
@@ -92,6 +94,12 @@ class RegisteredSectionTransform:
         return float(slice_x), float(slice_y)
 
     def apply(self, x_px: float, y_px: float) -> tuple[float, float, float]:
+        if self.manual_affine is not None:
+            # The clicked point is in the corrected (dragged) frame; pull it back
+            # into the registered frame before the registration inverse.
+            from histo_to_ccf.registration.manual import invert_apply
+
+            x_px, y_px = invert_apply(self.manual_affine, x_px, y_px)
         sx, sy = self._section_px_to_slice_px(x_px, y_px)
         h, w = self.output_size_px
         su = sx / max(w, 1)
@@ -244,6 +252,7 @@ def build_registered_transform(
     atlas: "BrainGlobeAtlas",
     *,
     project_dir: Path | None = None,
+    manual_affine: list[list[float]] | np.ndarray | None = None,
 ) -> RegisteredSectionTransform:
     """Construct a :class:`RegisteredSectionTransform` from persisted state."""
     from histo_to_ccf.io.ccf_coords import atlas_resolution_um
@@ -257,9 +266,11 @@ def build_registered_transform(
         if project_dir is not None and not path.is_absolute():
             path = project_dir / path
         bspline = sitk.ReadTransform(str(path))
+    ma = None if manual_affine is None else np.asarray(manual_affine, dtype=float).reshape(3, 3)
     return RegisteredSectionTransform(
         anchoring=anchoring,
         output_size_px=tuple(result.output_size_px),  # type: ignore[arg-type]
         bspline=bspline,
         atlas_resolution_um=atlas_resolution_um(atlas),
+        manual_affine=ma,
     )

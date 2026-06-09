@@ -124,6 +124,11 @@ class Section(BaseModel):
     flip_h: bool = False
     flip_v: bool = False
     levels: ChannelLevels | None = None
+    # Manual post-registration correction of the atlas overlay: a 3x3 affine in
+    # section-local (row, col) pixel coordinates (napari convention), mapping a
+    # registered atlas position to where the user dragged it. None = identity.
+    # Composed into the overlay and the probe->CCF mapping.
+    manual_affine: list[list[float]] | None = None
 
 
 class Slide(BaseModel):
