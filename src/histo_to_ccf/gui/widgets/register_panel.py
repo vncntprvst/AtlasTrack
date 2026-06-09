@@ -115,6 +115,15 @@ class RegisterPanelWidget(QWidget):
             "bright labels don't drive the registration (elastix only)."
         )
         params_layout.addWidget(self._use_mask)
+
+        self._prealign = QCheckBox("Silhouette pre-align")
+        self._prealign.setChecked(True)
+        self._prealign.setToolTip(
+            "Before the B-spline, snap the atlas onto each section's tissue with a "
+            "closed-form translation + scale from the silhouettes (4-DOF, can't fold). "
+            "Makes the outer-contour scale consistent across sections (elastix only)."
+        )
+        params_layout.addWidget(self._prealign)
         self._on_elastix_toggled(self._use_elastix.isChecked())
 
         method_lbl = QLabel(
@@ -201,6 +210,7 @@ class RegisterPanelWidget(QWidget):
         """Enable the elastix-only controls only when elastix is selected."""
         self._bending_spin.setEnabled(on)
         self._use_mask.setEnabled(on)
+        self._prealign.setEnabled(on)
 
     def _engine(self) -> str:
         """Resolve the engine string from the checkbox."""
@@ -216,6 +226,7 @@ class RegisterPanelWidget(QWidget):
             self._use_elastix.setChecked(settings.reg_engine != "sitk")
         self._bending_spin.setValue(settings.bending_energy_weight)
         self._use_mask.setChecked(settings.use_tissue_mask)
+        self._prealign.setChecked(settings.prealign_similarity)
         self._on_elastix_toggled(self._use_elastix.isChecked())
 
     def collect_settings(self, settings) -> None:
@@ -225,6 +236,7 @@ class RegisterPanelWidget(QWidget):
         settings.reg_engine = self._engine()
         settings.bending_energy_weight = self._bending_spin.value()
         settings.use_tissue_mask = self._use_mask.isChecked()
+        settings.prealign_similarity = self._prealign.isChecked()
 
     # ------------------------------------------------------------------
     # Registration
@@ -324,6 +336,7 @@ class RegisterPanelWidget(QWidget):
             engine=self._engine(),
             bending_weight=self._bending_spin.value(),
             use_masks=self._use_mask.isChecked(),
+            prealign=self._prealign.isChecked(),
         )
         worker.yielded.connect(self._on_progress)
         worker.returned.connect(self._on_registration_done)
@@ -505,8 +518,7 @@ class RegisterPanelWidget(QWidget):
 
     def _overlay_layer_for(self, section):
         name = f"Atlas overlay {section.index}"
-        # napari LayerList has no .get(), so the SIM401 suggestion doesn't apply.
-        if name in self._viewer.layers:  # noqa: SIM401
+        if name in self._viewer.layers:
             return self._viewer.layers[name]
         return None
 

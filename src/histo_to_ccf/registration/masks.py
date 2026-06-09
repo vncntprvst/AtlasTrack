@@ -97,3 +97,39 @@ def registration_moving_mask(
     if mask.sum() == 0:  # never hand elastix an empty mask
         return np.ones(tissue.shape, dtype=np.uint8)
     return mask.astype(np.uint8)
+
+
+def moment_similarity(
+    fixed_mask: np.ndarray, moving_mask: np.ndarray, *, isotropic: bool = False
+) -> np.ndarray:
+    """Closed-form pre-alignment of two silhouettes (translation + scale, no rotation).
+
+    Matches the **centroid** (translation) and the **per-axis spread** (scale) of
+    ``fixed_mask`` to ``moving_mask`` — a 4-DOF similarity (or isotropic 3-DOF)
+    that *cannot shear or fold*. Returns a 3x3 homogeneous affine in **(x, y)**
+    (col, row) order mapping a fixed-mask pixel to its moving-mask counterpart;
+    identity if either silhouette is degenerate.
+
+    The rotation DOF is intentionally dropped: the atlas plane is already oriented
+    by the anchoring, so residual rotation is small and the principal-axis angle
+    has a sign/180-degree ambiguity that does more harm than good.
+    """
+    fy, fx = np.nonzero(fixed_mask)
+    my, mx = np.nonzero(moving_mask)
+    if fx.size < 8 or mx.size < 8:
+        return np.eye(3)
+    fcx, fcy = float(fx.mean()), float(fy.mean())
+    mcx, mcy = float(mx.mean()), float(my.mean())
+    fsx, fsy = float(fx.std()), float(fy.std())
+    msx, msy = float(mx.std()), float(my.std())
+    if min(fsx, fsy) < 1e-3:
+        return np.eye(3)
+    sx, sy = msx / fsx, msy / fsy
+    if isotropic:
+        s = float(np.sqrt(max(sx * sy, 1e-9)))
+        sx = sy = s
+    return np.array(
+        [[sx, 0.0, mcx - sx * fcx],
+         [0.0, sy, mcy - sy * fcy],
+         [0.0, 0.0, 1.0]]
+    )

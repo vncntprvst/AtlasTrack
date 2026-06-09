@@ -57,6 +57,7 @@ class AppSettings(BaseModel):
     reg_engine: str = "auto"
     bending_energy_weight: float = 20.0  # elastix smoothness penalty
     use_tissue_mask: bool = True  # restrict the metric to tissue (elastix)
+    prealign_similarity: bool = True  # per-section silhouette pre-align (elastix)
 
     @field_validator("bspline_grid")
     @classmethod

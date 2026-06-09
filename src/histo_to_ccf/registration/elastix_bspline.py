@@ -160,6 +160,26 @@ def _itk_mask(mask: np.ndarray):
     return itk.image_from_array(np.ascontiguousarray(mask.astype(np.uint8)))
 
 
+def _affine_xy_to_sitk(matrix_xy: np.ndarray):
+    """3x3 (x, y) homogeneous affine → 2D sitk.AffineTransform (centre at origin)."""
+    import SimpleITK as sitk
+
+    m = np.asarray(matrix_xy, dtype=float).reshape(3, 3)
+    t = sitk.AffineTransform(2)
+    t.SetMatrix([m[0, 0], m[0, 1], m[1, 0], m[1, 1]])
+    t.SetTranslation([m[0, 2], m[1, 2]])
+    return t
+
+
+def _resample(arr: np.ndarray, transform, interpolator) -> np.ndarray:
+    """Resample a 2D array onto its own grid through ``transform`` (output->input)."""
+    import SimpleITK as sitk
+
+    src = sitk.GetImageFromArray(np.ascontiguousarray(arr.astype(np.float32)))
+    out = sitk.Resample(src, src, transform, interpolator, 0.0)
+    return sitk.GetArrayFromImage(out)
+
+
 def refine_with_elastix(
     fixed: np.ndarray,
     moving: np.ndarray,
@@ -172,6 +192,7 @@ def refine_with_elastix(
     moving_mask: np.ndarray | None = None,
     metric: str = "mi",
     deformable: bool = True,
+    prealign: bool = False,
     seed: int = 12345,
 ) -> RegisterResult:
     """Register ``moving`` onto ``fixed`` with a masked, bending-penalized B-spline.
@@ -203,16 +224,35 @@ def refine_with_elastix(
 
     fixed_n = _normalize(fixed)
     moving_n = _normalize(moving)
-    fixed_img = itk.image_from_array(fixed_n)
-    moving_img = itk.image_from_array(moving_n)
 
-    elastix_kwargs = {"log_to_console": False}
-    if use_masks:
+    # Silhouette pre-alignment: a closed-form translation+scale that snaps the
+    # atlas onto THIS section's tissue (4-DOF, can't shear/fold), computed from
+    # the masks. We warp the atlas reference (+ its mask) into the section frame
+    # by S, run the B-spline on the pre-aligned pair for the residual R, and
+    # return CompositeTransform([R, S]) — S applied first, so T(a) = R(S(a)).
+    prealign_sitk = None
+    if prealign or use_masks:
         if fixed_mask is None:
             fixed_mask = atlas_foreground_mask(fixed_n)
         if moving_mask is None:
             moving_mask = histo_foreground_mask(moving_n)
-        fm = _itk_mask(fixed_mask)
+    if prealign and fixed_mask is not None and moving_mask is not None:
+        from histo_to_ccf.registration.masks import moment_similarity
+
+        # Isotropic (area-based) scale is rotation-invariant; an anisotropic
+        # per-axis scale would misread a slightly-rotated section as a stretch.
+        s_xy = moment_similarity(fixed_mask, moving_mask, isotropic=True)
+        prealign_sitk = _affine_xy_to_sitk(s_xy)
+        inv = prealign_sitk.GetInverse()  # section -> atlas, for resampling
+        fixed_n = _resample(fixed_n, inv, sitk.sitkLinear)
+        fixed_mask = _resample(fixed_mask.astype(np.float32), inv, sitk.sitkNearestNeighbor) > 0.5
+
+    fixed_img = itk.image_from_array(np.ascontiguousarray(fixed_n))
+    moving_img = itk.image_from_array(moving_n)
+
+    elastix_kwargs = {"log_to_console": False}
+    if use_masks:
+        fm = _itk_mask(np.asarray(fixed_mask).astype(np.uint8))
         mm = _itk_mask(moving_mask)
         if fm is not None:
             elastix_kwargs["fixed_mask"] = fm
@@ -247,7 +287,9 @@ def refine_with_elastix(
     disp = sitk.GetImageFromArray(darr, isVector=True)
     disp = sitk.Cast(disp, sitk.sitkVectorFloat64)
     dft = sitk.DisplacementFieldTransform(disp)
-    composite = sitk.CompositeTransform([dft])
+    # [R, S]: last-in-list is applied first, so S (pre-align) then R (residual).
+    stack = [dft] if prealign_sitk is None else [dft, prealign_sitk]
+    composite = sitk.CompositeTransform(stack)
 
     residual = _residual_rms(fixed_n, np.asarray(itk.array_from_image(result_image)),
                              fixed_mask if use_masks else None)

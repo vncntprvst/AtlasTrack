@@ -126,6 +126,7 @@ def _refine(
     bending_weight: float,
     use_masks: bool,
     moving_mask: np.ndarray | None = None,
+    prealign: bool = True,
 ):
     """Run the chosen refinement engine, returning a ``RegisterResult``."""
     resolved = _resolve_engine(engine)
@@ -140,6 +141,7 @@ def _refine(
             max_iterations=max_iterations,
             use_masks=use_masks,
             moving_mask=moving_mask,
+            prealign=prealign,
         )
     return refine_with_bspline(
         reference,
@@ -160,6 +162,7 @@ def register_section_image(
     engine: str = "auto",
     bending_weight: float = 20.0,
     use_masks: bool = True,
+    prealign: bool = True,
 ) -> tuple[RegistrationResult, "object"]:
     """Run the M3 registration on one section.
 
@@ -222,6 +225,7 @@ def register_section_image(
         bending_weight=bending_weight,
         use_masks=use_masks,
         moving_mask=moving_mask,
+        prealign=prealign,
     )
 
     reg = RegistrationResult(
@@ -244,6 +248,7 @@ def register_project_with_atlas(
     engine: str = "auto",
     bending_weight: float = 20.0,
     use_masks: bool = True,
+    prealign: bool = True,
 ) -> Project:
     """Drive the full M3 pipeline across every section in ``project``.
 
@@ -278,6 +283,7 @@ def register_project_with_atlas(
                 engine=engine,
                 bending_weight=bending_weight,
                 use_masks=use_masks,
+                prealign=prealign,
             )
 
             import SimpleITK as sitk

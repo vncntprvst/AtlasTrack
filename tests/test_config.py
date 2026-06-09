@@ -18,6 +18,7 @@ def test_defaults() -> None:
     assert s.reg_engine == "auto"
     assert s.bending_energy_weight == 20.0
     assert s.use_tissue_mask is True
+    assert s.prealign_similarity is True
 
 
 def test_engine_validator() -> None:
@@ -46,6 +47,7 @@ def test_round_trip(tmp_path: Path, monkeypatch) -> None:
         reg_engine="elastix",
         bending_energy_weight=35.0,
         use_tissue_mask=False,
+        prealign_similarity=False,
     )
     save_app_settings(settings)
     assert (tmp_path / "settings.json").exists()
@@ -58,6 +60,7 @@ def test_round_trip(tmp_path: Path, monkeypatch) -> None:
     assert loaded.reg_engine == "elastix"
     assert loaded.bending_energy_weight == pytest.approx(35.0)
     assert loaded.use_tissue_mask is False
+    assert loaded.prealign_similarity is False
 
 
 def test_load_with_missing_file(tmp_path: Path, monkeypatch) -> None:
@@ -105,7 +108,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from histo_to_ccf import __version__
-    assert __version__ == "0.2.9"
+    assert __version__ == "0.2.10"
 
 
 @pytest.mark.qt

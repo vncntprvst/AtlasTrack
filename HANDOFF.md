@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-09 · version **0.2.9** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-09 · version **0.2.10** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -205,6 +205,32 @@ numbers aren't comparable. Tissue Dice as a QC metric and a **VisuAlign/BigWarp-
 manual landmark warp** (the real fix for damaged/asymmetric sections) are the two
 biggest remaining levers.
 
+## Silhouette pre-align (v0.2.10 — consistent outer-contour scale)
+
+The atlas-plane-to-crop scale was inconsistent per section (§12 too big, §1 too
+small) because intensity-MI never measures the silhouette. Fix: a **per-section,
+closed-form similarity pre-align** before the B-spline. `masks.moment_similarity`
+matches the atlas-mask and tissue-mask **centroids (translation)** and **area
+(isotropic scale)** — 4-DOF, *cannot shear or fold*. It's computed independently
+for each section from that section's own masks (nothing shared across sections).
+
+**Isotropic on purpose:** area is rotation-invariant, so the scale can't be fooled
+by a slightly-rotated section; an anisotropic per-axis scale *would* misread
+rotation as a stretch (it broke the synthetic MSE test — don't switch it back
+without handling rotation). Rotation DOF is dropped (the anchoring already orients
+the plane; principal-axis angle has a sign/180-degree ambiguity).
+
+Integration (`refine_with_elastix(prealign=True)`, default on): warp the atlas
+reference + its mask into the section frame by `S`, run the B-spline on the
+pre-aligned pair for the residual `R`, return **`CompositeTransform([R, S])`** —
+last-in-list applies first, so `T(a) = R(S(a))`. Everything downstream (inverse,
+overlay clip, persistence, probe map) is unchanged because it's still one
+`sitk.Transform`. Verified on real §1 (was inset → now fills) and §12 (tightened),
++ synthetic round-trip. The external-initial-transform route was a dead end
+(elastix "Not implemented" with the bending-energy metric). Toggle: Register tab
+"Silhouette pre-align" / `AppSettings.prealign_similarity`. Composes *under* the
+manual drag tool (pre-align gets close; drag finishes damaged sections).
+
 ## Manual atlas correction (v0.2.9 — drag the overlay)
 
 When automatic registration can't snap a damaged/asymmetric section, the user
@@ -297,9 +323,10 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **177 passed** (152 non-qt + 25 qt; elastix engine adds 6 in
+- `pytest -q` → **180 passed** (155 non-qt + 25 qt; elastix engine adds 6 in
   `test_elastix_bspline.py` — skipped if itk-elastix absent — 4 in `test_masks.py`,
-  3 in `test_overlay_extent.py`, 5 in `test_manual_affine.py`, +1 qt manual-adjust;
+  3 in `test_overlay_extent.py`, 5 in `test_manual_affine.py`, +1 qt manual-adjust,
+  +2 moment-similarity in `test_masks.py`, +1 pre-align in `test_elastix_bspline.py`;
   run qt tests per-process — the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
@@ -327,9 +354,9 @@ update/roll back the GPU driver.
    asymmetric sections). **Manual per-section correction shipped (v0.2.9)** — drag the
    atlas overlay (see "Manual atlas correction"). (Section detection bboxes are fine —
    ~0% tissue cut; the "atlas leaving the box" look is the atlas scale, not the box.)
-   Remaining auto levers: a global **similarity pre-align** on the tissue silhouette to
-   make the outer-contour scale consistent across sections (4-DOF, can't fold), and a
-   tissue **Dice** QC metric to flag bad sections.
+   **Silhouette pre-align shipped (v0.2.10)** — fixes the per-section scale
+   inconsistency (see "Silhouette pre-align"). Remaining lever: a tissue **Dice** QC
+   metric to flag bad sections.
 1. **Ephys per-channel CCF in 3D / export** — surface the ephys-refined channels
    (regions + CCF) in the napari 3D view and a per-channel region CSV (see "Ephys
    alignment" follow-ups). Done earlier: multiple-slide merge, Ephys tab.

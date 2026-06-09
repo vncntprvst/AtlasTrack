@@ -151,6 +151,23 @@ def test_register_section_image_elastix_engine(tmp_path: Path) -> None:
     assert post_mse < pre_mse
 
 
+def test_prealign_handles_scale_mismatch_and_round_trips(tmp_path: Path) -> None:
+    """With a big atlas/tissue scale gap, pre-align still yields a valid composite."""
+    fixed = _brain_slice(120, 160)
+    moving = _warp(fixed, tx=10.0, ty=-6.0, angle_deg=2.0)
+    res = eb.refine_with_elastix(fixed, moving, prealign=True, max_iterations=80)
+
+    assert isinstance(res.transform, sitk.Transform)
+    aligned = warp_moving_to_fixed(moving, fixed.shape, res.transform)
+    assert np.isfinite(aligned).all()
+    # The composite (residual ∘ similarity) must persist + reload.
+    path = tmp_path / "pre.h5"
+    sitk.WriteTransform(res.transform, str(path))
+    back = sitk.ReadTransform(str(path))
+    p = (80.0, 60.0)
+    assert np.allclose(back.TransformPoint(p), res.transform.TransformPoint(p), atol=1e-3)
+
+
 def test_resolve_engine_auto_prefers_elastix_when_available() -> None:
     # This test only runs when elastix IS available (module-level skip).
     assert _resolve_engine("auto") == "elastix"

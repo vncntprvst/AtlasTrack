@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from histo_to_ccf.registration.masks import (
+    moment_similarity,
     registration_moving_mask,
     section_label_mask,
     section_tissue_mask,
@@ -64,3 +65,26 @@ def test_registration_moving_mask_excludes_labels_keeps_outline() -> None:
 def test_registration_mask_never_empty_on_flat_image() -> None:
     flat = np.zeros((30, 30, 3), dtype=np.uint8)
     assert registration_moving_mask(flat).all()
+
+
+def _disk_mask(h, w, cy, cx, r) -> np.ndarray:
+    yy, xx = np.ogrid[:h, :w]
+    return (yy - cy) ** 2 + (xx - cx) ** 2 < r * r
+
+
+def test_moment_similarity_recovers_scale_and_shift() -> None:
+    fixed = _disk_mask(120, 120, 60, 60, 18)
+    moving = _disk_mask(120, 120, 72, 48, 27)  # +12 row, -12 col, 1.5x
+    s = moment_similarity(fixed, moving)
+    # Maps the fixed centroid (x=60, y=60) onto the moving centroid (x=48, y=72).
+    x, y, _ = s @ np.array([60.0, 60.0, 1.0])
+    assert np.allclose([x, y], [48.0, 72.0], atol=1.0)
+    assert np.isclose(s[0, 0], 1.5, atol=0.05) and np.isclose(s[1, 1], 1.5, atol=0.05)
+
+
+def test_moment_similarity_identity_on_degenerate() -> None:
+    empty = np.zeros((20, 20), dtype=bool)
+    assert np.allclose(moment_similarity(empty, empty), np.eye(3))
+    one = _disk_mask(40, 40, 20, 20, 8)
+    # Same mask -> identity (no shift, unit scale).
+    assert np.allclose(moment_similarity(one, one), np.eye(3), atol=1e-6)
