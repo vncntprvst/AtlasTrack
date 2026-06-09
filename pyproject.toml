@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "histo-to-ccf"
-version = "0.2.5"
+version = "0.2.8"
 description = "Guided registration of histological brain sections to a reference atlas (Allen CCF), with probe trajectory mapping in 3D."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,6 +51,12 @@ ephys = [
     # SpikeInterface (+ neo / probeinterface) for loading Open Ephys LFP and
     # extracting per-channel power. Gated so the base install stays light.
     "spikeinterface>=0.101",
+]
+elastix = [
+    # itk-elastix powers the regularized (bending-energy + masked) registration
+    # engine. Pulls ITK (~150 MB); gated so the base install stays light. When
+    # absent the pipeline falls back to the SimpleITK B-spline.
+    "itk-elastix>=0.20",
 ]
 dev = [
     "pytest>=8.0",

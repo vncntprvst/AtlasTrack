@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-08 · version **0.2.5** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-09 · version **0.2.8** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -56,8 +56,13 @@ left→right: **Histology → Atlas → Probes → Register → Ephys**.
    (combos, consistent with the Ephys tab). Click to drop tip; switch to Entry
    (Marker, or draw a Trajectory line whose tissue-surface crossing = entry).
 4. **Register** — optionally **Predict planes with DeepSlice**, then per-section 2D
-   B-spline. Residuals table. "Show atlas overlay" warps registered region
-   boundaries onto each section (lazily loads the atlas). Auto-saves the project.
+   refinement. **Engine: elastix (regularized) by default** — a bending-energy
+   penalty + tissue mask (ABBA-style) keep atlas boundaries on the tissue; falls
+   back to the plain SimpleITK B-spline when `itk-elastix` is absent. Controls:
+   "Regularized registration (elastix)" toggle, "Smoothness (bending energy)"
+   weight, "Restrict to tissue mask". Residuals table. "Show atlas overlay" warps
+   registered region boundaries onto each section (lazily loads the atlas).
+   Auto-saves the project. (See "Registration engine" below.)
 5. **Ephys** — refine a registered shank's depth→CCF mapping from LFP features
    (see "Ephys alignment" below).
 
@@ -122,6 +127,84 @@ Open follow-ups: per-channel region CSV export; richer anchor UX (snap to region
 boundary); shank-column auto-detection for 4-shank probes is heuristic (sorted
 unique x → shank index).
 
+## Registration engine (v0.2.6 — elastix + regularization)
+
+The per-section refinement has **two interchangeable engines**, both returning a
+`sitk.Transform` (FIXED atlas-slice → MOVING histology) so the entire downstream
+layer — point mapping, the iterative inverse in `registration/transforms.py`, and
+`.h5` persistence — is **unchanged**:
+
+- **`sitk`** (`registration/bspline.py`) — the original affine + 8×8 B-spline,
+  Mattes MI, no mask, no deformation penalty. Kept as the fallback.
+- **`elastix`** (`registration/elastix_bspline.py`, ABBA-style) — affine + B-spline
+  via **itk-elastix** with a **`TransformBendingEnergyPenalty`** (smoothness) and a
+  **tissue mask** on both images. This is the fix for "atlas boundaries flying off
+  the bottom." Optional `elastix` extra (`pip install -e .[elastix]`, pulls ITK
+  ~150 MB).
+
+**Integration trick (don't undo this):** elastix has its own transform format, but
+the rest of the package consumes a `sitk.Transform`. So we run elastix, pull the
+**combined (affine∘bspline) deformation field** via `transformix`, and wrap it as a
+`sitk.DisplacementFieldTransform` inside a `CompositeTransform`. That object
+composes, inverts (via the existing `_invert_displacement` fallback — a DFT has no
+cheap analytic inverse) and round-trips through `.h5` exactly like the native
+B-spline. **Cost:** each sidecar is now a full displacement field (~4 MB for a
+500² crop) instead of a few B-spline coefficients.
+
+**Masks are DILATED, deliberately** (`_MASK_RIM_FRAC = 0.10`). A *tight* tissue
+mask was empirically *worse* — it excludes the brain/background boundary, the
+strongest alignment cue. Dilating keeps the outline + a background rim while still
+excluding far-field junk (the green canvas border, debris, neighbouring-section
+pixels caught in a crop's bbox). Verified on synthetic data: tight mask made MSE
+worse (0.06→0.09); dilated mask recovered it (0.06→0.0034).
+
+Engine selection: `engine="auto"` (default) uses elastix when installed, else
+sitk; explicit `"elastix"` raises if itk-elastix is missing. Plumbed through
+`AppSettings.reg_engine` / `bending_energy_weight` / `use_tissue_mask`,
+`register_section_image`, `register_project_with_atlas`, both `register_worker*`,
+and the Register panel UI.
+
+**Overlay rendering — the dominant fix (v0.2.7).** The "atlas boundaries flying off
+the bottom" was found, by rendering the *real* section-12 overlay, to be mostly a
+**rendering artifact**, not bad registration. `warp_annotation_to_section` warps the
+annotation through an **inverse displacement field** (`_invert_displacement`), which
+**extrapolates nonsense outside the registered tissue** and draws boundary "stripes"
+far off the section — and a displacement-field transform (the elastix engine)
+inverts *worse* than the old `Affine∘BSpline`, which is why v0.2.6 looked worse than
+the original. Fix (v0.2.8): `warp_annotation_to_section` clips the warped labels to
+the **forward-warped atlas extent** (`_warped_atlas_extent` — forward-splat the atlas
+foreground through the transform, then close+fill). This removes the stripes while
+**keeping every region outline inside the brain, including over damaged/dim tissue**.
+(An earlier v0.2.7 attempt clipped to the *tissue* silhouette, which wrongly deleted
+outlines over damage and cut the outer contour at the tissue edge — don't
+reintroduce that.) Internal *folds* in a damaged section are not removed by clipping;
+that's a real registration limit — see manual-landmark follow-up.
+
+**Masks (v0.2.7), `registration/masks.py` (headless, RGB-aware).**
+`section_tissue_mask` (brightest-channel Otsu×0.5 + heavy close + largest component)
+is far better than the old luminance-Otsu. `section_label_mask` flags the bright
+green/magenta **fluorescent labels** (R or G high; DAPI tissue is blue).
+`registration_moving_mask` = dilated tissue **minus** labels → the elastix metric
+mask the pipeline now passes in (`register_section_image` builds it from the RGB crop
+*before* the luminance collapse). This is the requested **saturated-label refinement**
+— it stops the labels (which have no atlas counterpart) from pulling the fit. Also
+added `RequiredRatioOfValidSamples=0.05` to the elastix params so a tight mask
+doesn't abort with "too many samples map outside the moving image", plus `metric`
+("mi"/"meansquares") and `deformable` knobs on `refine_with_elastix`.
+
+**What was tried and rejected (don't redo):** registering the tissue **silhouette**
+(binary mask / distance transform) with mean-squares — a full affine finds a
+degenerate **shear**, and a flexible/stiff B-spline **folds** the asymmetric
+forebrain (worse than intensity+clip). Plain elastix-MI on luminance, label-masked,
+with the overlay clipped, was the best automatic result on section 12. The forebrain
+of that section is genuinely damaged/asymmetric and needs manual correction.
+
+**Caveats / open follow-ups for this engine:** the residual is a normalized-intensity
+RMS over the fixed foreground (lower=better), *not* the old MI metric — old vs new
+numbers aren't comparable. Tissue Dice as a QC metric and a **VisuAlign/BigWarp-style
+manual landmark warp** (the real fix for damaged/asymmetric sections) are the two
+biggest remaining levers.
+
 ## Architecture notes / hard rules
 
 - `src/histo_to_ccf/` layered: `io/`, `atlas/`, `sectioning/`, `landmarks/`,
@@ -184,7 +267,9 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **157 passed** (132 non-qt + 25 qt; run qt tests per-process — the
+- `pytest -q` → **172 passed** (147 non-qt + 25 qt; elastix engine adds 6 in
+  `test_elastix_bspline.py` — skipped if itk-elastix absent — 4 mask tests in
+  `test_masks.py`, 3 in `test_overlay_extent.py`; run qt tests per-process — the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
   though every test passes alone). Includes: core pipeline, sectioning/ordering,
@@ -200,9 +285,23 @@ update/roll back the GPU driver.
 
 ## Open items / next steps
 
+0. **Registration quality** — done: elastix engine (v0.2.6); RGB label-excluding
+   metric mask + sampling robustness (v0.2.7); **forward-warped-atlas-extent overlay
+   clip** (v0.2.8 — fixes "lines flying off" AND preserves outlines over damage).
+   Validated on real sections 1 + 12. **Known remaining limit:** the automatic
+   registration does **not reliably snap the atlas OUTER contour to the tissue
+   border** — the intensity-MI fit doesn't optimise the silhouette, so global scale
+   is inconsistent (section 12 atlas slightly too big, section 1 slightly too
+   small). Silhouette-based fixes were tried and rejected (shear / fold on
+   asymmetric sections). **Next: manual per-section atlas correction** — let the user
+   move / scale (stretch X-Y) / rotate the atlas overlay, stored as a per-section
+   transform composed with the registration + probe mapping. This is the durable fix
+   the user asked for. (Section detection bboxes are fine — ~0% tissue cut; the
+   "atlas leaving the box" look is the atlas scale, not the box.) Also possible:
+   tissue **Dice** QC metric to flag bad sections.
 1. **Ephys per-channel CCF in 3D / export** — surface the ephys-refined channels
    (regions + CCF) in the napari 3D view and a per-channel region CSV (see "Ephys
-   alignment" follow-ups). Done this session: multiple-slide merge, Ephys tab.
+   alignment" follow-ups). Done earlier: multiple-slide merge, Ephys tab.
 2. Eyeball DeepSlice planes for a **left/right mirror** (flip `_FLIP_ML` if so).
 3. **Push** `newUI` to origin when ready (committed locally, not pushed).
 4. Possible follow-ups discussed but not built: auto-clean DeepSlice AP outliers

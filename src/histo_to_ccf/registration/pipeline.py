@@ -102,6 +102,53 @@ def _lookup_manual(
 # ── Registered (M3) pipeline ──────────────────────────────────────────────────
 
 
+def _resolve_engine(engine: str) -> str:
+    """Map ``"auto"`` to the best available engine; validate explicit choices."""
+    from histo_to_ccf.registration.elastix_bspline import ELASTIX_AVAILABLE
+
+    if engine == "auto":
+        return "elastix" if ELASTIX_AVAILABLE else "sitk"
+    if engine == "elastix" and not ELASTIX_AVAILABLE:
+        raise RuntimeError(
+            "engine='elastix' requested but itk-elastix is not installed "
+            "(install the 'elastix' extra)"
+        )
+    return engine
+
+
+def _refine(
+    reference: np.ndarray,
+    moving: np.ndarray,
+    *,
+    engine: str,
+    bspline_grid: tuple[int, int],
+    max_iterations: int,
+    bending_weight: float,
+    use_masks: bool,
+    moving_mask: np.ndarray | None = None,
+):
+    """Run the chosen refinement engine, returning a ``RegisterResult``."""
+    resolved = _resolve_engine(engine)
+    if resolved == "elastix":
+        from histo_to_ccf.registration.elastix_bspline import refine_with_elastix
+
+        return refine_with_elastix(
+            reference,
+            moving,
+            grid_size=bspline_grid,
+            bending_weight=bending_weight,
+            max_iterations=max_iterations,
+            use_masks=use_masks,
+            moving_mask=moving_mask,
+        )
+    return refine_with_bspline(
+        reference,
+        moving,
+        grid_size=bspline_grid,
+        max_iterations=max_iterations,
+    )
+
+
 def register_section_image(
     section_image: np.ndarray,
     atlas: "BrainGlobeAtlas",
@@ -110,6 +157,9 @@ def register_section_image(
     bspline_grid: tuple[int, int] = (8, 8),
     max_iterations: int = 100,
     reference_volume: np.ndarray | None = None,
+    engine: str = "auto",
+    bending_weight: float = 20.0,
+    use_masks: bool = True,
 ) -> tuple[RegistrationResult, "object"]:
     """Run the M3 registration on one section.
 
@@ -120,6 +170,15 @@ def register_section_image(
     raw uint16 volume, no copy); the slice is interpolated into float32 on the
     fly. Otherwise the full volume is cast and the annotation needlessly
     resampled on every call, churning hundreds of MB per section.
+
+    ``engine`` selects the refinement backend:
+
+    - ``"elastix"`` — masked, bending-energy-regularized B-spline (ABBA-style;
+      needs the ``itk-elastix`` extra).
+    - ``"sitk"`` — the plain SimpleITK B-spline.
+    - ``"auto"`` — elastix when installed, else SimpleITK.
+
+    ``bending_weight`` and ``use_masks`` only apply to the elastix engine.
     """
     h, w = section_image.shape[:2]
     out_shape = (int(h), int(w))
@@ -142,15 +201,27 @@ def register_section_image(
         )
 
     moving = section_image
+    moving_mask = None
     if moving.ndim == 3:
+        # Build the metric mask from the RGB crop BEFORE collapsing to luminance,
+        # so the bright fluorescent labels can be excluded (they have no atlas
+        # counterpart and otherwise pull the fit).
+        if use_masks:
+            from histo_to_ccf.registration.masks import registration_moving_mask
+
+            moving_mask = registration_moving_mask(section_image)
         # Use luminance for registration; preserves brain outline.
         moving = moving[..., :3].astype(np.float32).mean(axis=-1)
 
-    result = refine_with_bspline(
+    result = _refine(
         reference,
         moving.astype(np.float32),
-        grid_size=bspline_grid,
+        engine=engine,
+        bspline_grid=bspline_grid,
         max_iterations=max_iterations,
+        bending_weight=bending_weight,
+        use_masks=use_masks,
+        moving_mask=moving_mask,
     )
 
     reg = RegistrationResult(
@@ -170,6 +241,9 @@ def register_project_with_atlas(
     transforms_dir: Path,
     bspline_grid: tuple[int, int] = (8, 8),
     max_iterations: int = 100,
+    engine: str = "auto",
+    bending_weight: float = 20.0,
+    use_masks: bool = True,
 ) -> Project:
     """Drive the full M3 pipeline across every section in ``project``.
 
@@ -201,6 +275,9 @@ def register_project_with_atlas(
                 bspline_grid=bspline_grid,
                 max_iterations=max_iterations,
                 reference_volume=ref_vol,
+                engine=engine,
+                bending_weight=bending_weight,
+                use_masks=use_masks,
             )
 
             import SimpleITK as sitk

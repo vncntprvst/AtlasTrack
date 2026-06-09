@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
     QCheckBox,
+    QDoubleSpinBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -75,9 +76,50 @@ class RegisterPanelWidget(QWidget):
         iter_row.addWidget(self._iter_spin)
         params_layout.addLayout(iter_row)
 
+        # Engine: elastix (masked + bending-energy regularized) vs plain SimpleITK.
+        import importlib.util
+
+        self._elastix_available = importlib.util.find_spec("itk") is not None
+
+        self._use_elastix = QCheckBox("Regularized registration (elastix)")
+        self._use_elastix.setChecked(self._elastix_available)
+        self._use_elastix.setEnabled(self._elastix_available)
+        self._use_elastix.setToolTip(
+            "Use elastix (ABBA-style): a bending-energy penalty keeps the warp "
+            "smooth and a tissue mask stops the fit chasing background/labels, so "
+            "atlas boundaries stay on the tissue.\nUnchecked = plain SimpleITK "
+            "B-spline."
+            + ("" if self._elastix_available else "\nInstall the 'elastix' extra to enable.")
+        )
+        self._use_elastix.toggled.connect(self._on_elastix_toggled)
+        params_layout.addWidget(self._use_elastix)
+
+        bend_row = QHBoxLayout()
+        bend_row.addWidget(QLabel("Smoothness (bending energy):"))
+        self._bending_spin = QDoubleSpinBox()
+        self._bending_spin.setRange(0.0, 500.0)
+        self._bending_spin.setSingleStep(5.0)
+        self._bending_spin.setValue(20.0)
+        self._bending_spin.setToolTip(
+            "Weight of the elastix bending-energy penalty. Higher = smoother / "
+            "stiffer (closer to affine); lower = more local freedom."
+        )
+        bend_row.addWidget(self._bending_spin)
+        params_layout.addLayout(bend_row)
+
+        self._use_mask = QCheckBox("Restrict to tissue mask")
+        self._use_mask.setChecked(True)
+        self._use_mask.setToolTip(
+            "Mask the metric to the section / atlas tissue so background and "
+            "bright labels don't drive the registration (elastix only)."
+        )
+        params_layout.addWidget(self._use_mask)
+        self._on_elastix_toggled(self._use_elastix.isChecked())
+
         method_lbl = QLabel(
-            "Method: per-section 2D B-spline (SimpleITK) onto the atlas plane "
-            "chosen by the AP you assigned. Each section is fit independently."
+            "Method: per-section 2D registration onto the atlas plane chosen by the "
+            "AP you assigned. elastix adds a bending-energy penalty + tissue mask; "
+            "each section is fit independently."
         )
         method_lbl.setWordWrap(True)
         method_lbl.setStyleSheet("color: gray; font-size: 11px;")
@@ -130,16 +172,34 @@ class RegisterPanelWidget(QWidget):
 
         layout.addStretch()
 
+    def _on_elastix_toggled(self, on: bool) -> None:
+        """Enable the elastix-only controls only when elastix is selected."""
+        self._bending_spin.setEnabled(on)
+        self._use_mask.setEnabled(on)
+
+    def _engine(self) -> str:
+        """Resolve the engine string from the checkbox."""
+        return "elastix" if self._use_elastix.isChecked() else "sitk"
+
     def apply_settings(self, settings) -> None:
         """Populate controls from persisted AppSettings."""
         self._settings = settings
         self._grid_spin.setValue(settings.bspline_grid)
         self._iter_spin.setValue(settings.max_iterations)
+        if self._elastix_available:
+            # "auto" and "elastix" both mean "use elastix" in the UI.
+            self._use_elastix.setChecked(settings.reg_engine != "sitk")
+        self._bending_spin.setValue(settings.bending_energy_weight)
+        self._use_mask.setChecked(settings.use_tissue_mask)
+        self._on_elastix_toggled(self._use_elastix.isChecked())
 
     def collect_settings(self, settings) -> None:
         """Write current control values back into settings."""
         settings.bspline_grid = self._grid_spin.value()
         settings.max_iterations = self._iter_spin.value()
+        settings.reg_engine = self._engine()
+        settings.bending_energy_weight = self._bending_spin.value()
+        settings.use_tissue_mask = self._use_mask.isChecked()
 
     # ------------------------------------------------------------------
     # Registration
@@ -235,6 +295,9 @@ class RegisterPanelWidget(QWidget):
             bspline_grid=(self._grid_spin.value(),) * 2,
             max_iterations=self._iter_spin.value(),
             anchorings=anchorings,
+            engine=self._engine(),
+            bending_weight=self._bending_spin.value(),
+            use_masks=self._use_mask.isChecked(),
         )
         worker.yielded.connect(self._on_progress)
         worker.returned.connect(self._on_registration_done)
@@ -342,6 +405,9 @@ class RegisterPanelWidget(QWidget):
             x0, y0, x1, y1 = section.bbox_px
             shape = (y1 - y0, x1 - x0)
             try:
+                # Labels are already clipped to the warped atlas extent inside
+                # warp_annotation_to_section (removes the inverse-extrapolation
+                # stripes while keeping outlines over damaged tissue).
                 labels = warp_annotation_to_section(
                     section.registration, atlas, shape, project_dir=base_dir
                 )

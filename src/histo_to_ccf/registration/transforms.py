@@ -179,10 +179,53 @@ def warp_annotation_to_section(
 
     ann_img = sitk.GetImageFromArray(ann_slice.astype(np.int32))
     reference = sitk.Image(w_sec, h_sec, sitk.sitkInt32)
-    warped = sitk.Resample(
-        ann_img, reference, inverse, sitk.sitkNearestNeighbor, 0.0
+    warped = sitk.GetArrayFromImage(
+        sitk.Resample(ann_img, reference, inverse, sitk.sitkNearestNeighbor, 0.0)
     )
-    return sitk.GetArrayFromImage(warped)
+    # The inverse displacement field extrapolates nonsense OUTSIDE the registered
+    # atlas, painting boundary "stripes" far off the section. Clip the labels to
+    # where the atlas actually lands (forward-warped extent) — this removes the
+    # stripes while KEEPING every region outline inside the brain, including over
+    # damaged/dim tissue (so the user still sees what region it was).
+    extent = _warped_atlas_extent(
+        transform, ann_slice > 0, (h_slice, w_slice), (h_sec, w_sec)
+    )
+    warped[~extent] = 0
+    return warped
+
+
+def _warped_atlas_extent(
+    transform: "sitk.Transform",
+    atlas_foreground: np.ndarray,
+    atlas_shape: tuple[int, int],
+    section_shape: tuple[int, int],
+) -> np.ndarray:
+    """Boolean mask of where the atlas brain lands in section space.
+
+    Forward-splats the atlas-foreground pixels through ``transform``
+    (fixed atlas -> moving section), then closes/fills the splat. Uses ONLY the
+    forward field, so unlike an inverse resample it can't extrapolate coverage
+    into regions the atlas never reached.
+    """
+    import SimpleITK as sitk
+    from scipy import ndimage as ndi
+
+    h_a, w_a = int(atlas_shape[0]), int(atlas_shape[1])
+    h_s, w_s = int(section_shape[0]), int(section_shape[1])
+    field = sitk.TransformToDisplacementField(
+        transform, sitk.sitkVectorFloat64, (w_a, h_a),
+        (0.0, 0.0), (1.0, 1.0), (1.0, 0.0, 0.0, 1.0),
+    )
+    disp = sitk.GetArrayFromImage(field)  # (h_a, w_a, 2): [...,0]=dx, [...,1]=dy
+    ys, xs = np.nonzero(atlas_foreground)
+    sx = np.round(xs + disp[ys, xs, 0]).astype(int)
+    sy = np.round(ys + disp[ys, xs, 1]).astype(int)
+    ok = (sx >= 0) & (sx < w_s) & (sy >= 0) & (sy < h_s)
+    cov = np.zeros((h_s, w_s), dtype=bool)
+    cov[sy[ok], sx[ok]] = True
+    # Fill the small gaps left by local expansion of the warp.
+    cov = ndi.binary_closing(cov, iterations=3)
+    return ndi.binary_fill_holes(cov)
 
 
 def annotation_boundaries(labels: np.ndarray) -> np.ndarray:

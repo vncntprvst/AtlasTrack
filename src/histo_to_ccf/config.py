@@ -52,6 +52,11 @@ class AppSettings(BaseModel):
     bspline_grid: int = 8
     max_iterations: int = 100
     section_spacing_um: float = 80.0
+    # Registration engine: "auto" (elastix if installed, else SimpleITK),
+    # "elastix" (masked + bending-energy regularized), or "sitk".
+    reg_engine: str = "auto"
+    bending_energy_weight: float = 20.0  # elastix smoothness penalty
+    use_tissue_mask: bool = True  # restrict the metric to tissue (elastix)
 
     @field_validator("bspline_grid")
     @classmethod
@@ -62,6 +67,16 @@ class AppSettings(BaseModel):
     @classmethod
     def _clamp_iter(cls, v: int) -> int:
         return max(10, min(v, 500))
+
+    @field_validator("bending_energy_weight")
+    @classmethod
+    def _clamp_bending(cls, v: float) -> float:
+        return max(0.0, min(v, 500.0))
+
+    @field_validator("reg_engine")
+    @classmethod
+    def _valid_engine(cls, v: str) -> str:
+        return v if v in {"auto", "elastix", "sitk"} else "auto"
 
 
 def load_app_settings() -> AppSettings:
