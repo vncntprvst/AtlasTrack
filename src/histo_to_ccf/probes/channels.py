@@ -37,9 +37,9 @@ def channel_ccf_coords(
     Parameters
     ----------
     entry_ccf
-        Where the probe enters the brain surface — (AP, ML, DV) µm.
+        Where the probe enters the brain surface - (AP, ML, DV) µm.
     tip_ccf
-        Physical probe tip — (AP, ML, DV) µm.
+        Physical probe tip - (AP, ML, DV) µm.
     site_depths_from_tip_um
         Distance from the tip to each recording site, shape (n_channels,).
         Larger values = further from tip = closer to entry.

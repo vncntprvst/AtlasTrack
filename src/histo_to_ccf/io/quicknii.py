@@ -49,7 +49,7 @@ class QuickNiiSlice(BaseModel):
 
 
 class QuickNiiDocument(BaseModel):
-    """A QuickNII JSON document — one experiment, many slices."""
+    """A QuickNII JSON document - one experiment, many slices."""
 
     model_config = ConfigDict(populate_by_name=True)
 

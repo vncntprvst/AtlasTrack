@@ -176,10 +176,10 @@ def register_section_image(
 
     ``engine`` selects the refinement backend:
 
-    - ``"elastix"`` — masked, bending-energy-regularized B-spline (ABBA-style;
+    - ``"elastix"`` - masked, bending-energy-regularized B-spline (ABBA-style;
       needs the ``itk-elastix`` extra).
-    - ``"sitk"`` — the plain SimpleITK B-spline.
-    - ``"auto"`` — elastix when installed, else SimpleITK.
+    - ``"sitk"`` - the plain SimpleITK B-spline.
+    - ``"auto"`` - elastix when installed, else SimpleITK.
 
     ``bending_weight`` and ``use_masks`` only apply to the elastix engine.
     """
@@ -199,7 +199,7 @@ def register_section_image(
     # a cryptic error. Fail early with an actionable message instead.
     if float(reference.max()) - float(reference.min()) < 1e-6:
         raise ValueError(
-            "atlas plane is empty (no tissue overlap) — check the section's "
+            "atlas plane is empty (no tissue overlap) - check the section's "
             "AP/anchoring"
         )
 
@@ -259,7 +259,7 @@ def register_project_with_atlas(
     transforms_dir = Path(transforms_dir)
     transforms_dir.mkdir(parents=True, exist_ok=True)
     res_um = atlas_resolution_um(atlas)
-    # Pass the raw (uint16) reference volume — slices are interpolated to float
+    # Pass the raw (uint16) reference volume - slices are interpolated to float
     # per section, so we never copy the whole volume to float32.
     ref_vol = atlas.reference
 
@@ -320,7 +320,7 @@ def _apply_to_shank_registered(
                 if tx is None:
                     return None
                 # Clicked points are in slide-global pixels, but the transform is
-                # defined on the section crop — convert to section-local coords
+                # defined on the section crop - convert to section-local coords
                 # by subtracting the bbox origin.
                 x0, y0 = section.bbox_px[0], section.bbox_px[1]
                 return tx.apply(point.x_px - x0, point.y_px - y0)

@@ -159,7 +159,7 @@ class VizExportPanelWidget(QWidget):
             from histo_to_ccf.viz.napari3d import show_3d_scene
 
             if self._viewer3d is None or not _viewer_alive(self._viewer3d):
-                self._viewer3d = napari.Viewer(title="Histo→CCF — 3D")
+                self._viewer3d = napari.Viewer(title="Histo→CCF - 3D")
             else:
                 self._viewer3d.layers.clear()
 

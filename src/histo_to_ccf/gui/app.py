@@ -1,4 +1,4 @@
-"""napari entrypoint — `launch()` builds the Viewer and docks workflow widgets."""
+"""napari entrypoint - `launch()` builds the Viewer and docks workflow widgets."""
 from __future__ import annotations
 
 import sys
@@ -16,7 +16,7 @@ def launch() -> None:
         viewer = napari.Viewer(title="Histo-to-CCF")
     except Exception as exc:
         # A dead GPU/OpenGL context (bad driver, RDP session, disabled GPU) makes
-        # Viewer creation raise — print an actionable GL diagnosis instead of a
+        # Viewer creation raise - print an actionable GL diagnosis instead of a
         # raw traceback, then exit.
         from histo_to_ccf.gui.gl_diagnostics import report_launch_failure
 
@@ -36,7 +36,7 @@ def _hide_layer_panels(viewer: "napari.Viewer") -> None:
     """Hide napari's built-in 'layer list' + 'layer controls' docks.
 
     The user drives everything through the Histo→CCF workflow panel; the raw
-    layer list/controls only add confusion. Best-effort across napari versions —
+    layer list/controls only add confusion. Best-effort across napari versions -
     silently ignore if the private dock handles are not present.
     """
     try:
@@ -196,7 +196,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     # After a project load, redraw the canvas AND repopulate every tab's fields
     # from the loaded project (probes, tip/entry, atlas + AP, ordering, residuals,
-    # ephys) — loading the data alone leaves the widgets showing stale defaults.
+    # ephys) - loading the data alone leaves the widgets showing stale defaults.
     def _on_project_loaded() -> None:
         _reload_project_display(viewer, state)
         probe_picker.refresh_after_load()
@@ -210,7 +210,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
         atlas_browser.auto_load_atlas()
 
     # Project save/load live in the menu bar (see _install_project_menu), not a
-    # tab — they are file actions, not part of the left-to-right workflow.
+    # tab - they are file actions, not part of the left-to-right workflow.
     _install_project_menu(viewer, state, on_loaded=_on_project_loaded)
 
     # Persist settings when the tab changes (cheap enough to do on every switch).
@@ -356,7 +356,7 @@ def install_discard_handler(
     def _on_pick(event):
         label_val = int(lyr.selected_label)
         if label_val <= 0:
-            return  # clicked background — stay armed
+            return  # clicked background - stay armed
 
         # Disconnect and reset mode BEFORE mutating data to avoid re-entrancy.
         try:
@@ -437,7 +437,7 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
         try:
             # Reproduce a merged slide from its (sorted) source images; a single
             # source loads directly. merge_images is deterministic, so the
-            # combined pixels — and hence the stored section bboxes — line up.
+            # combined pixels - and hence the stored section bboxes - line up.
             if slide.source_paths and len(slide.source_paths) > 1:
                 img = merge_images([load_image(Path(s)) for s in slide.source_paths])
             else:
@@ -539,7 +539,7 @@ def _display_image_for_slide(state: "WorkflowState", slide_idx: int, raw):
         return raw
     slide = state.project.slides[slide_idx]
     if slide.levels is None and not any(s.levels for s in slide.sections):
-        return raw  # nothing to apply — show the raw array as-is
+        return raw  # nothing to apply - show the raw array as-is
     disp = _apply_levels(raw, slide.levels)
     if disp is raw:
         disp = raw.copy()

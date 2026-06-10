@@ -60,8 +60,8 @@ def power_image(psd: np.ndarray, *, log: bool = True, per_freq: bool = False) ->
     magnitude). By default the result is scaled to span 0-255 across the whole
     map. With ``per_freq`` each frequency column is normalised independently
     (min-max down the depth axis), which removes the strong 1/f gradient across
-    frequencies and makes depth-dependent power changes — the features that line
-    up with region boundaries — far more visible.
+    frequencies and makes depth-dependent power changes - the features that line
+    up with region boundaries - far more visible.
     """
     a = np.asarray(psd, dtype=float)
     if log:

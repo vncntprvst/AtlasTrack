@@ -113,7 +113,7 @@ def test_deepslice_anchoring_permutation_and_flips() -> None:
     # Anatomy sanity: AP posterior, DV near the dorsal (top) end.
     assert out[0] > 400  # posterior brainstem section
     assert out[1] < 60   # dorsal surface near the top
-    # u dominated by ML, v by DV — as sample_plane expects.
+    # u dominated by ML, v by DV - as sample_plane expects.
     assert abs(out[5]) == max(abs(out[3]), abs(out[4]), abs(out[5]))  # u → ML
     assert abs(out[7]) == max(abs(out[6]), abs(out[7]), abs(out[8]))  # v → DV
 

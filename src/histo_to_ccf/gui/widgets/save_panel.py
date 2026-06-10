@@ -52,7 +52,7 @@ class SavePanelWidget(QWidget):
         save_btn.clicked.connect(self._save)
         load_btn = QPushButton("Load project…")
         load_btn.setToolTip(
-            "Load a saved .histo2ccf.json — restores slides, sections, AP planes "
+            "Load a saved .histo2ccf.json - restores slides, sections, AP planes "
             "and the registration result (no need to re-run registration)."
         )
         load_btn.clicked.connect(self._load)
@@ -84,7 +84,7 @@ class SavePanelWidget(QWidget):
                 img_path = Path(slides[0].image_path)
                 raw = str(img_path.with_suffix(".histo2ccf.json"))
             else:
-                self._status.setText("No slide loaded — provide a save path.")
+                self._status.setText("No slide loaded - provide a save path.")
                 return
 
         out_path = Path(raw)
@@ -116,7 +116,7 @@ class SavePanelWidget(QWidget):
             if sec.registration is not None
         )
         self._status.setText(
-            f"Loaded {Path(path).name} — {len(project.slides)} slide(s), "
+            f"Loaded {Path(path).name} - {len(project.slides)} slide(s), "
             f"{n_reg} registered section(s)."
         )
         if self._on_project_loaded is not None:

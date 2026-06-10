@@ -7,7 +7,7 @@ faces live on ``.cells_dict['triangle']``. Earlier visualization code assumed
 raised ``'Mesh' object has no attribute 'vertices'`` on export and in 3D view.
 This helper normalizes both shapes.
 
-Pure-core module — no napari / Qt imports (import-linter contract).
+Pure-core module - no napari / Qt imports (import-linter contract).
 """
 from __future__ import annotations
 

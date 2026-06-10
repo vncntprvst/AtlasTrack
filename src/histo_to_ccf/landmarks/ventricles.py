@@ -64,6 +64,6 @@ def detect_ventricles(
                 eccentricity=float(region.eccentricity),
             )
         )
-    # Sort by area descending — lateral ventricles tend to dominate.
+    # Sort by area descending - lateral ventricles tend to dominate.
     out.sort(key=lambda v: -v.area_px)
     return out

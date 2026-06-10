@@ -161,9 +161,9 @@ def register_worker_progressive(
     """Registration pipeline that yields per-section progress dicts.
 
     Each yielded value is a dict with keys:
-        ``current``  int — sections completed so far
-        ``total``    int — total sections to process
-        ``msg``      str — human-readable status line
+        ``current``  int - sections completed so far
+        ``total``    int - total sections to process
+        ``msg``      str - human-readable status line
 
     The final ``return`` value is the updated :class:`Project`.
     """
@@ -217,7 +217,7 @@ def register_worker_progressive(
             anchoring = anchoring_from_plane_params(atlas, section.plane)
 
         # One section failing (e.g. a plane with too little atlas overlap) must
-        # not abort the whole batch — log it and carry on.
+        # not abort the whole batch - log it and carry on.
         try:
             reg, sitk_tf = register_section_image(
                 img,
@@ -231,7 +231,7 @@ def register_worker_progressive(
                 use_masks=use_masks,
                 prealign=prealign,
             )
-        except Exception as exc:  # noqa: BLE001 — reported to the user, batch continues
+        except Exception as exc:  # noqa: BLE001 - reported to the user, batch continues
             failed.append(section.index)
             logger.warning("Section {} failed: {}", section.index, exc)
             yield {

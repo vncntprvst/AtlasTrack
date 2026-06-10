@@ -74,7 +74,7 @@ def warp_points(source: np.ndarray, target: np.ndarray, pts: np.ndarray) -> np.n
 
 
 def invert_points(source: np.ndarray, target: np.ndarray, pts: np.ndarray) -> np.ndarray:
-    """Reverse TPS (target -> source) — maps a corrected-frame point back."""
+    """Reverse TPS (target -> source) - maps a corrected-frame point back."""
     return _rbf(target, source)(np.asarray(pts, dtype=float).reshape(-1, 2))
 
 
@@ -84,7 +84,7 @@ def warp_label_image(
     """Resample a label image through the TPS so ``labels`` move source -> target.
 
     ``corrected[q] = labels[reverseTPS(q)]`` (pull-back), nearest-neighbour, 0
-    outside — i.e. the atlas content originally at ``source`` ends up at ``target``.
+    outside - i.e. the atlas content originally at ``source`` ends up at ``target``.
     """
     from scipy.ndimage import map_coordinates
 

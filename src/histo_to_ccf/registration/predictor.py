@@ -2,7 +2,7 @@
 
 Defines a :class:`PlanePredictor` protocol so we can swap in DeepSlice (M3) or a
 manual predictor (M1) behind the same interface. The pipeline itself never
-imports DeepSlice directly — only the adapter does.
+imports DeepSlice directly - only the adapter does.
 """
 from __future__ import annotations
 
@@ -33,5 +33,5 @@ class ManualPredictor:
         self._params = params
 
     def predict(self, image: np.ndarray, *, section_index: int) -> PlaneParams:
-        del image, section_index  # unused — that's the point
+        del image, section_index  # unused - that's the point
         return self._params

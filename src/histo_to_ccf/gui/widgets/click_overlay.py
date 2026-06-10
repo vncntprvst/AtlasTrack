@@ -5,8 +5,8 @@ Section pixel coordinates stored in the project Shank objects.
 
 Two ways to mark an entry point:
 
-* **Marker** — click the brain surface directly (a cyan point).
-* **Trajectory line** — draw the probe track as a line; the point where that
+* **Marker** - click the brain surface directly (a cyan point).
+* **Trajectory line** - draw the probe track as a line; the point where that
   line first crosses the tissue surface is taken as the entry. Useful when the
   surface itself is hard to click precisely.
 """
@@ -88,7 +88,7 @@ class ClickOverlayWidget(QWidget):
         mode_row.addWidget(self._mode_entry)
         layout.addLayout(mode_row)
 
-        # Selecting a mode immediately arms the matching viewer tool — no extra
+        # Selecting a mode immediately arms the matching viewer tool - no extra
         # button press needed. ``clicked`` fires even when the radio is already
         # checked, so re-arming after a discard/draw action still works.
         for btn in (self._mode_tip, self._mode_entry):
@@ -366,7 +366,7 @@ class ClickOverlayWidget(QWidget):
             shank.entry_section_idx = section_idx
 
     def _find_section_for_point(self, x_px: float, y_px: float) -> int | None:
-        """Return the index of the section containing — or nearest to — a pixel.
+        """Return the index of the section containing - or nearest to - a pixel.
 
         Bounding boxes are often tight, so an entry point may land a little
         outside the box of the section it belongs to. We return the containing
@@ -428,7 +428,7 @@ class ClickOverlayWidget(QWidget):
                 if shank.entry_px is not None:
                     entries.append([shank.entry_px.y_px, shank.entry_px.x_px])
         if not tips and not entries:
-            return  # nothing to draw — avoid creating empty layers
+            return  # nothing to draw - avoid creating empty layers
         self._ensure_points_layers()
         self._suppress_store = True
         try:

@@ -1,7 +1,7 @@
 """PCA-SVD line fitting + small RANSAC for probe trajectory estimation.
 
 All coordinates are (AP, ML, DV) in µm, matching the project schema.
-No scikit-learn dependency — PCA uses ``numpy.linalg.svd``.
+No scikit-learn dependency - PCA uses ``numpy.linalg.svd``.
 """
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ def pca_line_fit(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Returns
     -------
     centroid
-        Shape (3,) — mean of ``points``.
+        Shape (3,) - mean of ``points``.
     direction
-        Shape (3,) unit vector — first principal component (best-fit axis).
+        Shape (3,) unit vector - first principal component (best-fit axis).
     """
     pts = np.asarray(points, dtype=float)
     if pts.ndim != 2 or pts.shape[1] != 3:
@@ -157,7 +157,7 @@ def ordered_endpoints(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Project ``points`` onto the line and return the extreme endpoints.
 
-    Returns ``(shallowest, deepest)`` — i.e. (entry, tip) — where deepest
+    Returns ``(shallowest, deepest)`` - i.e. (entry, tip) - where deepest
     means the point that projects furthest along ``direction`` (toward the
     brain tip).
     """
@@ -195,7 +195,7 @@ def fit_trajectory(
     tip_ccf
         Estimated tip position, shape (3,).
     inlier_mask
-        Boolean array of shape (N,) — True for points used in the final fit.
+        Boolean array of shape (N,) - True for points used in the final fit.
     """
     pts = np.asarray(points, dtype=float)
     if pts.shape[0] < 2:

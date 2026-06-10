@@ -56,9 +56,9 @@ def order_sections(
     ``col`` tags follow that grid. The ``ap_order`` numbering then walks the grid
     either:
 
-    * **column-first** (default) — down column 0 (top→bottom), then column 1,
+    * **column-first** (default) - down column 0 (top→bottom), then column 1,
       etc. This matches how sections are usually laid out on the lab's slides.
-    * **row-first** — across row 0 (left→right), then row 1, etc. (reading
+    * **row-first** - across row 0 (left→right), then row 1, etc. (reading
       order).
     """
     if not sections:

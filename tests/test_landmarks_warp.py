@@ -42,7 +42,7 @@ def test_warp_and_invert_are_inverses() -> None:
     fwd = warp_points(src, dst, q)
     back = invert_points(src, dst, fwd)
     # Two separately-fitted TPS are exact inverses AT the control points and
-    # approximate between them (sub-pixel here) — fine for probe mapping.
+    # approximate between them (sub-pixel here) - fine for probe mapping.
     assert np.allclose(back, q, atol=1.5)
 
 

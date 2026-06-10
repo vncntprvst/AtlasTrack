@@ -1,6 +1,6 @@
 """Resample a 3D atlas at an arbitrary oblique plane.
 
-The plane is expressed in **QuickNII anchoring** format — a 9-vector
+The plane is expressed in **QuickNII anchoring** format - a 9-vector
 ``(ox, oy, oz, ux, uy, uz, vx, vy, vz)`` interpreted in atlas voxel coordinates
 (ASR order: axis0=AP, axis1=DV, axis2=ML):
 
@@ -65,7 +65,7 @@ def coronal_anchoring(
     """Build a coronal-plane anchoring at ``ap_um``, optionally tilted.
 
     The default (zero tilts) coronal plane has:
-        origin at (ap_idx, 0, 0) — top-left of the AP slab
+        origin at (ap_idx, 0, 0) - top-left of the AP slab
         u along +ML (image x increases → lateral right)
         v along +DV (image y increases → ventral)
 

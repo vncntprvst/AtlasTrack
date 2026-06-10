@@ -11,7 +11,7 @@ DeepSlice's QuickNII predictions are written to
 
 Why a separate process: DeepSlice pulls in TensorFlow, whose resident memory
 (~1–2 GB) would otherwise stay allocated in the GUI process for the rest of the
-session and stack on top of the memory-heavy atlas registration — enough to OOM
+session and stack on top of the memory-heavy atlas registration - enough to OOM
 the app on machines with other things open. Running it as its own process means
 all that memory is released the moment this exits, before registration runs.
 """

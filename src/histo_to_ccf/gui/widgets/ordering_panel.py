@@ -98,7 +98,7 @@ class OrderingPanelWidget(QWidget):
         apply_btn.setToolTip(
             "Set every section's AP from the anchor section, stepping by the "
             "spacing above along the AP sequence.\n"
-            "Overwrites any per-section AP you assigned in the Atlas tab — use "
+            "Overwrites any per-section AP you assigned in the Atlas tab - use "
             "this when sections are evenly spaced from one known level."
         )
         apply_btn.clicked.connect(self._apply_spacing)
@@ -173,7 +173,7 @@ class OrderingPanelWidget(QWidget):
             ap_bregma = BREGMA_AP_FROM_ORIGIN_UM - section.plane.ap_um
             ap_str = f"AP {ap_bregma:+.0f} µm"
         else:
-            ap_str = "AP —"
+            ap_str = "AP -"
         return f"Section {section.index}   ·   {ap_str}"
 
     def _apply_spacing(self) -> None:
@@ -276,4 +276,4 @@ class OrderingPanelWidget(QWidget):
             if section is not None:
                 section.ap_order = pos
                 item.setText(self._item_text(section))
-        self._status.setText("Reordered sections — apply spacing to update AP values.")
+        self._status.setText("Reordered sections - apply spacing to update AP values.")

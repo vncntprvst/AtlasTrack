@@ -57,7 +57,7 @@ class ManualSectionTransform:
         return out
 
 
-# Back-compat alias — older code imports SectionTransform.
+# Back-compat alias - older code imports SectionTransform.
 SectionTransform = ManualSectionTransform
 
 
@@ -201,7 +201,7 @@ def warp_annotation_to_section(
     )
     # The inverse displacement field extrapolates nonsense OUTSIDE the registered
     # atlas, painting boundary "stripes" far off the section. Clip the labels to
-    # where the atlas actually lands (forward-warped extent) — this removes the
+    # where the atlas actually lands (forward-warped extent) - this removes the
     # stripes while KEEPING every region outline inside the brain, including over
     # damaged/dim tissue (so the user still sees what region it was).
     extent = _warped_atlas_extent(

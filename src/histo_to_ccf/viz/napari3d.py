@@ -79,7 +79,7 @@ def add_ephys_channel_layers(
     """Add ephys-aligned per-channel CCF positions as 3D Points layers.
 
     One layer per probe that has any shank with ``ephys.channel_ccf_um`` filled
-    (from the Ephys tab). Makes the depth refinement visible in 3D — without this
+    (from the Ephys tab). Makes the depth refinement visible in 3D - without this
     the scene only shows the tip→entry line, which the alignment does not move.
     Returns the added layers.
     """
@@ -224,7 +224,7 @@ def show_3d_scene(
         for acronym, color, opacity in styled_regions(list(CONTEXT_REGIONS) + internal):
             # Context shell additive (see-through); internal nuclei use
             # translucent_no_depth so a region surrounding a shank tip colours
-            # the volume but never writes depth — the probe stays visible inside.
+            # the volume but never writes depth - the probe stays visible inside.
             blending = "additive" if acronym in CONTEXT_REGIONS else "translucent_no_depth"
             layer = _add_region_surface(
                 viewer, atlas, acronym, rgb=hex_to_rgb(color),

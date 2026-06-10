@@ -43,7 +43,7 @@ def estimate_midline_pca(mask: np.ndarray) -> Midline | None:
     centered = pts - centroid
     _u, _s, vh = np.linalg.svd(centered, full_matrices=False)
     # vh rows are principal directions, in decreasing variance order.
-    # Major axis (vh[0]) ≈ ML; minor (vh[1]) ≈ DV — the midline direction.
+    # Major axis (vh[0]) ≈ ML; minor (vh[1]) ≈ DV - the midline direction.
     minor = vh[1]
     # Orient minor so its y component is positive (dorsal → ventral, image-down).
     if minor[1] < 0:
@@ -87,7 +87,7 @@ def refine_by_reflection(
             cval=0.0,
         )
         # Reflect about the vertical line at x = cx (approximate; we ignore
-        # the small centroid shift induced by rotation about image center —
+        # the small centroid shift induced by rotation about image center -
         # the angle window is small so this is OK).
         h, w = rotated.shape
         cx_int = int(round(cx))

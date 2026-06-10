@@ -1,1 +1,1 @@
-"""Persisted project state — Pydantic v2 models, IO, migrations."""
+"""Persisted project state - Pydantic v2 models, IO, migrations."""

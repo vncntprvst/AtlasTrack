@@ -1,4 +1,4 @@
-# Histo_to_CCF — Handoff
+# Histo_to_CCF - Handoff
 
 _Last updated: 2026-06-09 · version **0.2.12** · branch **newUI** (committed, not pushed)_
 
@@ -9,7 +9,7 @@ maps probe (Neuropixels / NeuroNexus) trajectories to CCF coordinates. The core
 pipeline (sectioning → annotate → DeepSlice plane prediction → 2D B-spline →
 per-channel CCF coords → 3D viz / exports) is implemented and **131 tests pass**.
 
-**The GPU/OpenGL launch blocker is RESOLVED** — a reboot cleared the
+**The GPU/OpenGL launch blocker is RESOLVED** - a reboot cleared the
 `QOpenGLFramebufferObject: Unsupported framebuffer format` failure. The GUI
 launches and **end-to-end registration completes without crashing** (TensorFlow
 in the DeepSlice subprocess keeps the memory peak down). If the GL error ever
@@ -23,7 +23,7 @@ recurs, `histo2ccf gl-info` still diagnoses it and a reboot/driver fix is the cu
 ## How to run
 
 ```powershell
-# from repo root, with .venv active (editable install — no reinstall after edits)
+# from repo root, with .venv active (editable install - no reinstall after edits)
 histo2ccf gui            # launch the GUI
 histo2ccf gl-info        # diagnose GPU/OpenGL if the GUI won't start
 histo2ccf version
@@ -39,35 +39,35 @@ Layout: the **Registration** panel (5 tabs) docks on the **left**; a permanent
 **3D & Export** panel (`VizExportPanelWidget`) docks on the **right**. Project
 Save/Load live in the **Project menu** (inserted first in the menu bar). Tab order
 left→right: **Histology → Atlas → Probes → Register → Ephys**.
-1. **Histology** (was "Load") — open one or more composite slides; multiple opens
+1. **Histology** (was "Load") - open one or more composite slides; multiple opens
    are **merged into a single combined image** (see "Multiple slides" below).
    Auto-detect sections (Otsu + connected components). Auto-estimates min-area.
    "Equalize under-sized boxes" grows boxes smaller than the slide's median. **Edit
    boxes** turns detections into draggable napari rectangles, synced live. Image
    tools: flip H/V and per-channel levels, scoped to the whole (merged) slide or a
    **Selected section** chosen from a dropdown.
-2. **Atlas** — choose atlas + storage folder; **AP shown relative to bregma**
+2. **Atlas** - choose atlas + storage folder; **AP shown relative to bregma**
    (0 = bregma). **Open atlas matcher…** (side-by-side / overlay AP matching;
    syncs AP + spacing with this tab on open/close). Assign AP per section, or
    reorder/space them in the ordering panel (spacing persists on the project;
    "Interpolate AP" fills gaps between hand-assigned sections).
-3. **Probes** — pick a probe (Neuropixels 1.0, NP 2.0 4-shank, NeuroNexus …).
+3. **Probes** - pick a probe (Neuropixels 1.0, NP 2.0 4-shank, NeuroNexus …).
    "Add probe" auto-arms Tip-marker mode. **Probe + shank are selected by label**
    (combos, consistent with the Ephys tab). Click to drop tip; switch to Entry
    (Marker, or draw a Trajectory line whose tissue-surface crossing = entry).
-4. **Register** — optionally **Predict planes with DeepSlice**, then per-section 2D
-   refinement. **Engine: elastix (regularized) by default** — a bending-energy
+4. **Register** - optionally **Predict planes with DeepSlice**, then per-section 2D
+   refinement. **Engine: elastix (regularized) by default** - a bending-energy
    penalty + tissue mask (ABBA-style) keep atlas boundaries on the tissue; falls
    back to the plain SimpleITK B-spline when `itk-elastix` is absent. Controls:
    "Regularized registration (elastix)" toggle, "Smoothness (bending energy)"
    weight, "Restrict to tissue mask". Residuals table. "Show atlas overlay" warps
    registered region boundaries onto each section (lazily loads the atlas).
    Auto-saves the project. (See "Registration engine" below.)
-5. **Ephys** — refine a registered shank's depth→CCF mapping from LFP features
+5. **Ephys** - refine a registered shank's depth→CCF mapping from LFP features
    (see "Ephys alignment" below).
 
 **3D & Export panel (right dock):** Extra-regions field, **View in napari 3D**,
-**Export Plotly HTML**, **Export HERBS pkl**, **Export per-channel CSV** — always
+**Export Plotly HTML**, **Export HERBS pkl**, **Export per-channel CSV** - always
 available, not gated behind the Register tab.
 
 Save/Load: **Histo→CCF menu** → Save / Save As… / Load Project (`.histo2ccf.json`).
@@ -76,7 +76,7 @@ exports work without re-running), re-applies stored flips, and **auto-loads the
 project's atlas in the background** (overlay / 3D ready without a manual click).
 **Load also repopulates every tab's fields** from the project via per-widget
 `refresh_after_load()` (probes + tip/entry markers/table, atlas selection + AP,
-section ordering list + spacing, residuals, ephys combos) — wired through
+section ordering list + spacing, residuals, ephys combos) - wired through
 `_on_project_loaded` in `app.py`. Section spacing now persists on the project
 (`Project.section_spacing_um`).
 
@@ -90,7 +90,7 @@ another, so all sections must share **one coordinate space**. Rather than track
 per-slide offsets through clicks/registration/3D (brittle), **opening multiple
 slide images merges them into one combined image** (sections from all slides laid
 out in a single canvas). The user is told this on load. After the merge the rest
-of the pipeline is unchanged — there is effectively one slide. The napari built-in
+of the pipeline is unchanged - there is effectively one slide. The napari built-in
 **layer list / layer controls panels are hidden** (the workflow panel drives
 everything), so slides are never managed as separate layers.
 
@@ -102,14 +102,14 @@ IBL-style depth refinement of probe shanks from LFP. Pure-core package
 places each channel on the shank's `tip_ccf_um`→`entry_ccf_um` line;
 `features.py` computes the depth×frequency LFP power map (Welch PSD); `regions.py`
 samples the atlas region at each depth; `loader.py` reads Open Ephys LFP via
-**SpikeInterface** (optional `ephys` extra — gated import, `si.read_openephys` /
+**SpikeInterface** (optional `ephys` extra - gated import, `si.read_openephys` /
 `get_neo_streams`). NP 1.0 has a dedicated LFP stream; when none exists LFP is
 derived from the AP stream (band-limit + resample). All the math is unit-tested
 without SpikeInterface installed.
 
 GUI: the **Ephys** tab (`gui/widgets/ephys_panel.py`) picks a probe+shank, loads
 the recording (background `lfp_power_worker`), and opens
-`EphysAlignmentDialog` — LFP power map (warped into track space) beside the atlas
+`EphysAlignmentDialog` - LFP power map (warped into track space) beside the atlas
 region colour strip, shared depth axis (tip at the bottom), draggable red anchor
 lines. Apply writes `Shank.ephys` (`EphysAlignment`: anchors + per-channel
 `channel_ccf_um`), which round-trips through the project JSON.
@@ -120,23 +120,23 @@ depth µm (tip at bottom), header shows tip/entry CCF; **"Normalize per frequenc
 toggle (`power_image(per_freq=True)`) scales each frequency column independently so
 depth structure pops. **Apply auto-saves** the project (if it has a path) and the
 ephys per-channel CCF render as Points layers in the napari 3D view
-(`add_ephys_channel_layers`). Compute does **not** cache — it re-reads/filters each
+(`add_ephys_channel_layers`). Compute does **not** cache - it re-reads/filters each
 time.
 
 Open follow-ups: per-channel region CSV export; richer anchor UX (snap to region
 boundary); shank-column auto-detection for 4-shank probes is heuristic (sorted
 unique x → shank index).
 
-## Registration engine (v0.2.6 — elastix + regularization)
+## Registration engine (v0.2.6 - elastix + regularization)
 
 The per-section refinement has **two interchangeable engines**, both returning a
 `sitk.Transform` (FIXED atlas-slice → MOVING histology) so the entire downstream
-layer — point mapping, the iterative inverse in `registration/transforms.py`, and
-`.h5` persistence — is **unchanged**:
+layer - point mapping, the iterative inverse in `registration/transforms.py`, and
+`.h5` persistence - is **unchanged**:
 
-- **`sitk`** (`registration/bspline.py`) — the original affine + 8×8 B-spline,
+- **`sitk`** (`registration/bspline.py`) - the original affine + 8×8 B-spline,
   Mattes MI, no mask, no deformation penalty. Kept as the fallback.
-- **`elastix`** (`registration/elastix_bspline.py`, ABBA-style) — affine + B-spline
+- **`elastix`** (`registration/elastix_bspline.py`, ABBA-style) - affine + B-spline
   via **itk-elastix** with a **`TransformBendingEnergyPenalty`** (smoothness) and a
   **tissue mask** on both images. This is the fix for "atlas boundaries flying off
   the bottom." Optional `elastix` extra (`pip install -e .[elastix]`, pulls ITK
@@ -146,13 +146,13 @@ layer — point mapping, the iterative inverse in `registration/transforms.py`, 
 the rest of the package consumes a `sitk.Transform`. So we run elastix, pull the
 **combined (affine∘bspline) deformation field** via `transformix`, and wrap it as a
 `sitk.DisplacementFieldTransform` inside a `CompositeTransform`. That object
-composes, inverts (via the existing `_invert_displacement` fallback — a DFT has no
+composes, inverts (via the existing `_invert_displacement` fallback - a DFT has no
 cheap analytic inverse) and round-trips through `.h5` exactly like the native
 B-spline. **Cost:** each sidecar is now a full displacement field (~4 MB for a
 500² crop) instead of a few B-spline coefficients.
 
 **Masks are DILATED, deliberately** (`_MASK_RIM_FRAC = 0.10`). A *tight* tissue
-mask was empirically *worse* — it excludes the brain/background boundary, the
+mask was empirically *worse* - it excludes the brain/background boundary, the
 strongest alignment cue. Dilating keeps the outline + a background rim while still
 excluding far-field junk (the green canvas border, debris, neighbouring-section
 pixels caught in a crop's bbox). Verified on synthetic data: tight mask made MSE
@@ -164,21 +164,21 @@ sitk; explicit `"elastix"` raises if itk-elastix is missing. Plumbed through
 `register_section_image`, `register_project_with_atlas`, both `register_worker*`,
 and the Register panel UI.
 
-**Overlay rendering — the dominant fix (v0.2.7).** The "atlas boundaries flying off
+**Overlay rendering - the dominant fix (v0.2.7).** The "atlas boundaries flying off
 the bottom" was found, by rendering the *real* section-12 overlay, to be mostly a
 **rendering artifact**, not bad registration. `warp_annotation_to_section` warps the
 annotation through an **inverse displacement field** (`_invert_displacement`), which
 **extrapolates nonsense outside the registered tissue** and draws boundary "stripes"
-far off the section — and a displacement-field transform (the elastix engine)
+far off the section - and a displacement-field transform (the elastix engine)
 inverts *worse* than the old `Affine∘BSpline`, which is why v0.2.6 looked worse than
 the original. Fix (v0.2.8): `warp_annotation_to_section` clips the warped labels to
-the **forward-warped atlas extent** (`_warped_atlas_extent` — forward-splat the atlas
+the **forward-warped atlas extent** (`_warped_atlas_extent` - forward-splat the atlas
 foreground through the transform, then close+fill). This removes the stripes while
 **keeping every region outline inside the brain, including over damaged/dim tissue**.
 (An earlier v0.2.7 attempt clipped to the *tissue* silhouette, which wrongly deleted
-outlines over damage and cut the outer contour at the tissue edge — don't
+outlines over damage and cut the outer contour at the tissue edge - don't
 reintroduce that.) Internal *folds* in a damaged section are not removed by clipping;
-that's a real registration limit — see manual-landmark follow-up.
+that's a real registration limit - see manual-landmark follow-up.
 
 **Masks (v0.2.7), `registration/masks.py` (headless, RGB-aware).**
 `section_tissue_mask` (brightest-channel Otsu×0.5 + heavy close + largest component)
@@ -187,42 +187,42 @@ green/magenta **fluorescent labels** (R or G high; DAPI tissue is blue).
 `registration_moving_mask` = dilated tissue **minus** labels → the elastix metric
 mask the pipeline now passes in (`register_section_image` builds it from the RGB crop
 *before* the luminance collapse). This is the requested **saturated-label refinement**
-— it stops the labels (which have no atlas counterpart) from pulling the fit. Also
+- it stops the labels (which have no atlas counterpart) from pulling the fit. Also
 added `RequiredRatioOfValidSamples=0.05` to the elastix params so a tight mask
 doesn't abort with "too many samples map outside the moving image", plus `metric`
 ("mi"/"meansquares") and `deformable` knobs on `refine_with_elastix`.
 
 **What was tried and rejected (don't redo):** registering the tissue **silhouette**
-(binary mask / distance transform) with mean-squares — a full affine finds a
+(binary mask / distance transform) with mean-squares - a full affine finds a
 degenerate **shear**, and a flexible/stiff B-spline **folds** the asymmetric
 forebrain (worse than intensity+clip). Plain elastix-MI on luminance, label-masked,
 with the overlay clipped, was the best automatic result on section 12. The forebrain
 of that section is genuinely damaged/asymmetric and needs manual correction.
 
 **Caveats / open follow-ups for this engine:** the residual is a normalized-intensity
-RMS over the fixed foreground (lower=better), *not* the old MI metric — old vs new
+RMS over the fixed foreground (lower=better), *not* the old MI metric - old vs new
 numbers aren't comparable. Tissue Dice as a QC metric and a **VisuAlign/BigWarp-style
 manual landmark warp** (the real fix for damaged/asymmetric sections) are the two
 biggest remaining levers.
 
-## Silhouette pre-align (v0.2.10 — consistent outer-contour scale)
+## Silhouette pre-align (v0.2.10 - consistent outer-contour scale)
 
 The atlas-plane-to-crop scale was inconsistent per section (§12 too big, §1 too
 small) because intensity-MI never measures the silhouette. Fix: a **per-section,
 closed-form similarity pre-align** before the B-spline. `masks.moment_similarity`
 matches the atlas-mask and tissue-mask **centroids (translation)** and **area
-(isotropic scale)** — 4-DOF, *cannot shear or fold*. It's computed independently
+(isotropic scale)** - 4-DOF, *cannot shear or fold*. It's computed independently
 for each section from that section's own masks (nothing shared across sections).
 
 **Isotropic on purpose:** area is rotation-invariant, so the scale can't be fooled
 by a slightly-rotated section; an anisotropic per-axis scale *would* misread
-rotation as a stretch (it broke the synthetic MSE test — don't switch it back
+rotation as a stretch (it broke the synthetic MSE test - don't switch it back
 without handling rotation). Rotation DOF is dropped (the anchoring already orients
 the plane; principal-axis angle has a sign/180-degree ambiguity).
 
 Integration (`refine_with_elastix(prealign=True)`, default on): warp the atlas
 reference + its mask into the section frame by `S`, run the B-spline on the
-pre-aligned pair for the residual `R`, return **`CompositeTransform([R, S])`** —
+pre-aligned pair for the residual `R`, return **`CompositeTransform([R, S])`** -
 last-in-list applies first, so `T(a) = R(S(a))`. Everything downstream (inverse,
 overlay clip, persistence, probe map) is unchanged because it's still one
 `sitk.Transform`. Verified on real §1 (was inset → now fills) and §12 (tightened),
@@ -231,13 +231,13 @@ overlay clip, persistence, probe map) is unchanged because it's still one
 "Silhouette pre-align" / `AppSettings.prealign_similarity`. Composes *under* the
 manual drag tool (pre-align gets close; drag finishes damaged sections).
 
-## Manual atlas correction — two tools (mutually exclusive per section)
+## Manual atlas correction - two tools (mutually exclusive per section)
 
 `Section.manual_affine` (box handles, v0.2.9) **or** `Section.manual_landmarks` (TPS,
-v0.2.11) — landmarks take precedence in `RegisteredSectionTransform.apply` when both
+v0.2.11) - landmarks take precedence in `RegisteredSectionTransform.apply` when both
 somehow exist; the GUI clears the other when you apply one.
 
-### Landmark / thin-plate-spline warp (v0.2.11 — the VisuAlign-style tool)
+### Landmark / thin-plate-spline warp (v0.2.11 - the VisuAlign-style tool)
 
 For *local* distortions a single affine can't fix (e.g. §12's damaged dorsal
 cerebellar midline). **Register tab → pick section → "Place landmarks"** drops 6
@@ -247,7 +247,7 @@ the matching tissue (napari Points `select` mode), then **"Apply landmark warp"*
 
 A thin-plate spline (`scipy RBFInterpolator`, `kernel="thin_plate_spline"`) maps
 **source→target** and is **baked into the overlay label image** (`warp_label_image`,
-pull-back resample) — not the layer affine, since napari affine is linear-only. The
+pull-back resample) - not the layer affine, since napari affine is linear-only. The
 probe→CCF inverse uses a **second TPS fitted target→source** (`invert_points`); the
 two are exact inverses *at* the control points and sub-pixel-approximate between
 (fine for probes). Landmarks persist as section-local (x, y) `source`/`target` lists
@@ -270,14 +270,14 @@ point through add/delete automatically; `layer.data` is the **target**.
   drop position (napari copies the last feature value on add, so we overwrite it).
 - **Delete** key → features drop the row in lock-step (verified). Apply requires >=4.
 
-napari gotcha: `layer.features[col]` is a **read-only** pandas Series — `np.array(...)`
+napari gotcha: `layer.features[col]` is a **read-only** pandas Series - `np.array(...)`
 (copy) before mutating, then reassign `layer.features = {...}`.
 
 **Open polish:** live overlay preview is still on "Apply" (not during drag); no
 source-anchor ghost/vector shown (anchors are invisible features); could seed targets
 from a finer auto-fit.
 
-### Box-handle affine (v0.2.9 — quick global nudge)
+### Box-handle affine (v0.2.9 - quick global nudge)
 
 When automatic registration can't snap a damaged/asymmetric section, the user
 corrects it by hand: **Register tab → "Manual atlas adjustment"** → pick a section
@@ -324,7 +324,7 @@ viewport; per-section "stretch only" vs "move only" lock; an undo.
   Points use `border_color` not `edge_color`; click-to-pick uses a Labels layer in
   `mode='pick'` + `events.selected_label`.
 - **DeepSlice runs in a subprocess** (`registration/deepslice_run.py`). This is the
-  fix for the original "crash after registration" — TensorFlow's ~2 GB is released
+  fix for the original "crash after registration" - TensorFlow's ~2 GB is released
   before the memory-heavy atlas registration. `predict_anchorings` writes
   `section_s<idx>.png` (DeepSlice needs the `_s<n>` token), runs the subprocess,
   parses the QuickNII JSON. **Do not import DeepSlice in the GUI process.**
@@ -336,22 +336,22 @@ viewport; per-section "stretch only" vs "move only" lock; an undo.
 - **Memory**: never cast the whole atlas to float32. `sample_plane(..., out_dtype=
   np.float32)` interpolates uint16→float per section slice. Registration is
   per-section with try/except so one bad section can't abort the batch.
-- **DeepSlice `save_predictions(name)` appends `.json`** — pass a base path, read
+- **DeepSlice `save_predictions(name)` appends `.json`** - pass a base path, read
   back `name.json`.
 - Tip/entry are clicked in **slide-global** pixels but the section transform is on
-  the **section crop** — `_apply_to_shank_registered` subtracts the bbox origin
+  the **section crop** - `_apply_to_shank_registered` subtracts the bbox origin
   (this was the "probe 60 mm outside the brain" bug).
 - 3D region colors use a **curated palette** (`viz/plotly3d.REGION_STYLE`), not the
   muddy native atlas colors; siblings get distinct fallback colors. Context shell
   (Isocortex/CB/BS) is faint + additive blending so probes show through; only
   shank-tip regions are shown by default; extra regions via a text field.
-- **Windows console is cp1252** — keep CLI/diagnostic output ASCII (no `→`, `—`).
+- **Windows console is cp1252** - keep CLI/diagnostic output ASCII (no `→`, `-`).
 
 ## The GPU/OpenGL launch blocker (RESOLVED)
 
 Symptom (now gone): `histo2ccf gui` printed repeated `QOpenGLFramebufferObject:
 Unsupported framebuffer format` and rendered nothing. It was a GPU driver /
-Remote-Desktop / dual-GPU session issue, not a histo2ccf bug — and **a reboot
+Remote-Desktop / dual-GPU session issue, not a histo2ccf bug - and **a reboot
 fixed it**. The GUI launches and registration runs end-to-end.
 
 Diagnostics left in place in case it recurs:
@@ -371,10 +371,10 @@ update/roll back the GPU driver.
 
 - `pytest -q` → **187 passed** (161 non-qt + 26 qt; the qt landmark test now also
   covers warp/relocate/add/delete editing; elastix engine adds 6 in
-  `test_elastix_bspline.py` — skipped if itk-elastix absent — 4 in `test_masks.py`,
+  `test_elastix_bspline.py` - skipped if itk-elastix absent - 4 in `test_masks.py`,
   3 in `test_overlay_extent.py`, 5 in `test_manual_affine.py`, +1 qt manual-adjust,
   +2 moment-similarity in `test_masks.py`, +1 pre-align in `test_elastix_bspline.py`,
-  +6 landmark-TPS in `test_landmarks_warp.py`, +1 qt landmark; run qt per-process — the
+  +6 landmark-TPS in `test_landmarks_warp.py`, +1 qt landmark; run qt per-process - the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
   though every test passes alone). Includes: core pipeline, sectioning/ordering,
@@ -384,27 +384,27 @@ update/roll back the GPU driver.
   `@pytest.mark.qt` GUI smoke tests (full-panel build, edit-boxes, atlas bregma,
   ordering, click-overlay, atlas matcher, project-menu present, flip-restore on
   load, section-scope flip, GL diagnostic never-raises).
-- Can't be tested in CI here: live GL rendering and a real DeepSlice model run —
+- Can't be tested in CI here: live GL rendering and a real DeepSlice model run -
   both **verified manually in the running GUI** (GUI launches, registration
   completes end-to-end without crashing).
 
 ## Open items / next steps
 
-0. **Registration quality** — done: elastix engine (v0.2.6); RGB label-excluding
+0. **Registration quality** - done: elastix engine (v0.2.6); RGB label-excluding
    metric mask + sampling robustness (v0.2.7); **forward-warped-atlas-extent overlay
-   clip** (v0.2.8 — fixes "lines flying off" AND preserves outlines over damage).
+   clip** (v0.2.8 - fixes "lines flying off" AND preserves outlines over damage).
    Validated on real sections 1 + 12. **Known remaining limit:** the automatic
    registration does **not reliably snap the atlas OUTER contour to the tissue
-   border** — the intensity-MI fit doesn't optimise the silhouette, so global scale
+   border** - the intensity-MI fit doesn't optimise the silhouette, so global scale
    is inconsistent (section 12 atlas slightly too big, section 1 slightly too
    small). Silhouette-based fixes were tried and rejected (shear / fold on
-   asymmetric sections). **Manual per-section correction shipped (v0.2.9)** — drag the
-   atlas overlay (see "Manual atlas correction"). (Section detection bboxes are fine —
+   asymmetric sections). **Manual per-section correction shipped (v0.2.9)** - drag the
+   atlas overlay (see "Manual atlas correction"). (Section detection bboxes are fine -
    ~0% tissue cut; the "atlas leaving the box" look is the atlas scale, not the box.)
-   **Silhouette pre-align shipped (v0.2.10)** — fixes the per-section scale
+   **Silhouette pre-align shipped (v0.2.10)** - fixes the per-section scale
    inconsistency (see "Silhouette pre-align"). Remaining lever: a tissue **Dice** QC
    metric to flag bad sections.
-1. **Ephys per-channel CCF in 3D / export** — surface the ephys-refined channels
+1. **Ephys per-channel CCF in 3D / export** - surface the ephys-refined channels
    (regions + CCF) in the napari 3D view and a per-channel region CSV (see "Ephys
    alignment" follow-ups). Done earlier: multiple-slide merge, Ephys tab.
 2. Eyeball DeepSlice planes for a **left/right mirror** (flip `_FLIP_ML` if so).
@@ -412,6 +412,6 @@ update/roll back the GPU driver.
 4. Possible follow-ups discussed but not built: auto-clean DeepSlice AP outliers
    (neighbor smoothing), a globally-coupled (vs per-section) registration, and a
    true Mesa software-GL option (the bundled `opengl32sw.dll` exists but vispy/
-   PyOpenGL need `VISPY_GL_LIB` wiring — not done, and deprioritized in favor of
+   PyOpenGL need `VISPY_GL_LIB` wiring - not done, and deprioritized in favor of
    fixing the driver).
 ```

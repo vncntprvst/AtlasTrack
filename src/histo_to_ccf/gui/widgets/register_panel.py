@@ -314,7 +314,7 @@ class RegisterPanelWidget(QWidget):
             if img is None:
                 continue
             for section in slide.sections:
-                # With DeepSlice, planes are predicted — include every section.
+                # With DeepSlice, planes are predicted - include every section.
                 if not use_deepslice and section.plane is None:
                     continue
                 x0, y0, x1, y1 = section.bbox_px
@@ -387,7 +387,7 @@ class RegisterPanelWidget(QWidget):
         msg = info.get("msg", "")
         pct = int(100 * current / total)
         self._progress.setValue(pct)
-        self._progress.setFormat(f"{current}/{total} — {pct}%")
+        self._progress.setFormat(f"{current}/{total} - {pct}%")
         self._status.setText(msg)
 
     def _ensure_project_path(self) -> "Path | None":
@@ -414,7 +414,7 @@ class RegisterPanelWidget(QWidget):
 
         # Auto-save so the registration (results + transform sidecars) persists
         # and can be reloaded without re-running.
-        msg = f"Done — {n} section(s) registered"
+        msg = f"Done - {n} section(s) registered"
         path = self._ensure_project_path()
         if path is not None:
             try:
@@ -442,8 +442,8 @@ class RegisterPanelWidget(QWidget):
         self._residuals_table.setRowCount(len(rows))
         for i, (idx, ap, res) in enumerate(rows):
             self._residuals_table.setItem(i, 0, QTableWidgetItem(str(idx)))
-            self._residuals_table.setItem(i, 1, QTableWidgetItem(f"{ap:.0f}" if ap == ap else "—"))
-            self._residuals_table.setItem(i, 2, QTableWidgetItem(f"{res:.4f}" if res is not None else "—"))
+            self._residuals_table.setItem(i, 1, QTableWidgetItem(f"{ap:.0f}" if ap == ap else "-"))
+            self._residuals_table.setItem(i, 2, QTableWidgetItem(f"{res:.4f}" if res is not None else "-"))
 
     def _show_overlay(self) -> None:
         """Overlay registered atlas boundaries on each section in the viewer."""
@@ -470,11 +470,11 @@ class RegisterPanelWidget(QWidget):
             if section.registration is not None
         ]
         if not registered:
-            self._status.setText("No registered sections yet — run registration first.")
+            self._status.setText("No registered sections yet - run registration first.")
             return
 
-        # Transform sidecars resolve against the run's base dir, or — after a
-        # project reload — against the loaded project's folder.
+        # Transform sidecars resolve against the run's base dir, or - after a
+        # project reload - against the loaded project's folder.
         base_dir = self._reg_base_dir
         if base_dir is None and self._state.project_path is not None:
             base_dir = self._state.project_path.parent
@@ -502,7 +502,7 @@ class RegisterPanelWidget(QWidget):
                         np.asarray(section.manual_landmarks.target, dtype=float),
                     )
                 edges = annotation_boundaries(labels)
-            except Exception as exc:  # noqa: BLE001 — surface to user below
+            except Exception as exc:  # noqa: BLE001 - surface to user below
                 if first_error is None:
                     first_error = exc
                 continue

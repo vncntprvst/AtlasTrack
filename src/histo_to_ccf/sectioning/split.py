@@ -204,7 +204,7 @@ def estimate_min_area(image: np.ndarray) -> int:
     Strategy
     --------
     1. Drop components larger than 25 % of the slide (background blob).
-    2. Drop the bottom 80 % of components by count — these are tiny noise
+    2. Drop the bottom 80 % of components by count - these are tiny noise
        specks that would otherwise dominate the Otsu histogram and push the
        threshold into the wrong gap (noise vs debris instead of debris vs
        sections).
@@ -246,7 +246,7 @@ def estimate_min_area(image: np.ndarray) -> int:
     if len(all_areas) < 2:
         return max(1_000, int(0.001 * image_area))
 
-    # Step 2: keep only the top 20 % by size — removes the huge pool of tiny
+    # Step 2: keep only the top 20 % by size - removes the huge pool of tiny
     # noise components so Otsu can find the debris/section boundary.
     n_keep = max(2, len(all_areas) // 5)
     significant = np.sort(all_areas)[::-1][:n_keep]

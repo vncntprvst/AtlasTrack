@@ -62,7 +62,7 @@ class Shank(BaseModel):
 
 
 class ProbeSpec(BaseModel):
-    """One probe instance — references a type and carries per-shank annotations."""
+    """One probe instance - references a type and carries per-shank annotations."""
 
     label: str
     type: ProbeType
@@ -148,7 +148,7 @@ class Section(BaseModel):
 
 
 class Slide(BaseModel):
-    """One slide image — typically holds several Sections.
+    """One slide image - typically holds several Sections.
 
     When several source images are opened they are merged into a single combined
     image (so every section shares one coordinate space). ``image_path`` is the
@@ -173,7 +173,7 @@ class AtlasRef(BaseModel):
 
 
 class Project(BaseModel):
-    """Top-level project model — serialized to ``project.json``."""
+    """Top-level project model - serialized to ``project.json``."""
 
     model_config = ConfigDict(validate_assignment=True)
 

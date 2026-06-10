@@ -187,7 +187,7 @@ class EphysPanelWidget(QWidget):
         self._compute_btn.setEnabled(False)
         self._status.setText(
             "Reading + filtering the recording and computing the power map… "
-            "(nothing is cached — this re-reads the recording each time; deriving "
+            "(nothing is cached - this re-reads the recording each time; deriving "
             "LFP from an AP stream is slower)."
         )
         from histo_to_ccf.gui.workers import lfp_power_worker

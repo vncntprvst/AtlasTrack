@@ -241,7 +241,7 @@ class AtlasMatcherDialog(QDialog):
         self._prev_btn.clicked.connect(lambda: self._step_section(-1))
         self._next_btn = QPushButton("Section ▶")
         self._next_btn.clicked.connect(lambda: self._step_section(+1))
-        self._sec_label = QLabel("—")
+        self._sec_label = QLabel("-")
         nav.addWidget(self._prev_btn)
         nav.addWidget(self._sec_label, 1)
         nav.addWidget(self._next_btn)
@@ -475,7 +475,7 @@ class AtlasMatcherDialog(QDialog):
     # -- rendering -------------------------------------------------------
 
     def _update_overlay_only(self) -> None:
-        """Cheap path for the opacity slider — just retint the existing overlay."""
+        """Cheap path for the opacity slider - just retint the existing overlay."""
         self._overlay_pane.set_overlay(
             self._overlay_pane._overlay.pixmap(), self._opacity.value() / 100.0
         )

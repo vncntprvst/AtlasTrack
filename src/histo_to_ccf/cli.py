@@ -1,11 +1,11 @@
-"""histo2ccf — guided histology→atlas registration with probe trajectory mapping.
+"""histo2ccf - guided histology→atlas registration with probe trajectory mapping.
 
 Typical workflow
 ----------------
-1. ``histo2ccf gui``           — launch the interactive napari GUI.
-2. ``histo2ccf split image.tif`` — detect sections in a composite slide.
-3. ``histo2ccf register-one …`` — headless single-section registration.
-4. ``histo2ccf register project.json`` — run the full M3 pipeline on a project.
+1. ``histo2ccf gui``           - launch the interactive napari GUI.
+2. ``histo2ccf split image.tif`` - detect sections in a composite slide.
+3. ``histo2ccf register-one …`` - headless single-section registration.
+4. ``histo2ccf register project.json`` - run the full M3 pipeline on a project.
 
 Run ``histo2ccf <command> --help`` for per-command options.
 """
@@ -56,7 +56,7 @@ def gui() -> None:
     """Launch the interactive napari GUI.
 
     If it fails with 'QOpenGLFramebufferObject: Unsupported framebuffer format',
-    your GPU/OpenGL driver is the problem — run ``histo2ccf gl-info`` to see what
+    your GPU/OpenGL driver is the problem - run ``histo2ccf gl-info`` to see what
     renderer is active and how to fix it.
     """
     from histo_to_ccf.gui.app import launch
@@ -193,7 +193,7 @@ def register_one_cmd(
         int, typer.Option(help="Samples along the tip→entry line in the pkl.")
     ] = 128,
 ) -> None:
-    """Headless single-section registration — the M1 vertical slice.
+    """Headless single-section registration - the M1 vertical slice.
 
     Loads a section from an image, applies a manual plane prediction, maps a
     shank tip and entry from section pixels to CCF µm, and writes both a
@@ -227,7 +227,7 @@ def register_one_cmd(
         img = load_image(image)
         h, w = img.shape[:2]
         bbox_tuple = (0, 0, int(w), int(h))
-        logger.info("no bbox provided — using full image extent {}x{}", w, h)
+        logger.info("no bbox provided - using full image extent {}x{}", w, h)
 
     plane = PlaneParams(
         ap_um=ap_um,

@@ -326,7 +326,7 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
         qtbot.addWidget(panel)
         qtbot.addWidget(viz_panel)
         assert panel is not None and viz_panel is not None
-        # No empty Tips/Entries marker layers at launch — adding those triggered
+        # No empty Tips/Entries marker layers at launch - adding those triggered
         # vispy "Unsupported framebuffer format" shader errors on some GPUs.
         assert "Tips" not in viewer.layers
         assert "Entries" not in viewer.layers

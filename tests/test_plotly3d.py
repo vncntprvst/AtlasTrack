@@ -1,4 +1,4 @@
-"""Tests for viz/plotly3d.py — no network, no real atlas needed."""
+"""Tests for viz/plotly3d.py - no network, no real atlas needed."""
 from __future__ import annotations
 
 from pathlib import Path

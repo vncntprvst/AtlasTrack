@@ -1,4 +1,4 @@
-"""Allen CCF coordinate helpers — physical extents, bregma↔CCF, atlas surface lookup.
+"""Allen CCF coordinate helpers - physical extents, bregma↔CCF, atlas surface lookup.
 
 Ported from legacy/HERBS_to_AllenCCF/probe_visualization.py.
 """

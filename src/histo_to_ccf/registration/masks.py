@@ -6,11 +6,11 @@ Used in two places:
   metric should see brain, not the black border or the bright fluorescent
   *labels* (green / magenta), which have no atlas counterpart and otherwise pull
   the fit. The mask keeps a dilated tissue body (so the brain/background outline
-  — the strongest cue — is preserved) and subtracts the saturated label blobs.
+  - the strongest cue - is preserved) and subtracts the saturated label blobs.
 
 The overlay's far-off boundary "stripes" are clipped to the *warped atlas
 extent* in :func:`histo_to_ccf.registration.transforms.warp_annotation_to_section`,
-not to a tissue mask — clipping to tissue would wrongly delete region outlines
+not to a tissue mask - clipping to tissue would wrongly delete region outlines
 over damaged/dim tissue.
 
 All functions are headless (numpy / scipy / scikit-image only).
@@ -44,7 +44,7 @@ def section_tissue_mask(image: np.ndarray, *, close_iter: int = 12) -> np.ndarra
         return np.ones(g.shape, dtype=bool)
     try:
         thr = float(threshold_otsu(g)) * 0.5
-    except Exception:  # noqa: BLE001 — degenerate histogram
+    except Exception:  # noqa: BLE001 - degenerate histogram
         return np.ones(g.shape, dtype=bool)
 
     m = ndi.binary_fill_holes(g > thr)
@@ -105,7 +105,7 @@ def moment_similarity(
     """Closed-form pre-alignment of two silhouettes (translation + scale, no rotation).
 
     Matches the **centroid** (translation) and the **per-axis spread** (scale) of
-    ``fixed_mask`` to ``moving_mask`` — a 4-DOF similarity (or isotropic 3-DOF)
+    ``fixed_mask`` to ``moving_mask`` - a 4-DOF similarity (or isotropic 3-DOF)
     that *cannot shear or fold*. Returns a 3x3 homogeneous affine in **(x, y)**
     (col, row) order mapping a fixed-mask pixel to its moving-mask counterpart;
     identity if either silhouette is degenerate.

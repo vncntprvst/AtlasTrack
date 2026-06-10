@@ -4,12 +4,12 @@ The histology gives a shank's tip and entry in CCF µm. A channel at *feature
 depth* ``d`` (distance from the tip along the shank, as read from the probe
 geometry) maps, with no alignment, to the point ``tip + (entry - tip) * d / L``
 where ``L`` is the insertion length. Ephys features (LFP power transitions) let
-the user pin a feature depth to a *track depth* — an anchor point. The set of
+the user pin a feature depth to a *track depth* - an anchor point. The set of
 anchors defines a piecewise-linear warp ``feature -> track`` (IBL-style), with
 linear extrapolation beyond the extreme anchors so channels above/below the
 anchored span still get a sensible position.
 
-This module is pure numpy — no atlas, no Qt — so it is trivially testable.
+This module is pure numpy - no atlas, no Qt - so it is trivially testable.
 """
 from __future__ import annotations
 

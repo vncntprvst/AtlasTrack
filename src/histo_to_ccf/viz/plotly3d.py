@@ -22,8 +22,8 @@ CONTEXT_REGIONS = ["Isocortex", "CB", "BS"]
 DEFAULT_REGIONS = CONTEXT_REGIONS
 
 # Curated region styling: acronym -> (hex colour, opacity). Hand-picked so that
-# distinct structures — including separate nuclei within one parent (e.g. VII /
-# XII / IRN in the brainstem) — are clearly separable. The native atlas colours
+# distinct structures - including separate nuclei within one parent (e.g. VII /
+# XII / IRN in the brainstem) - are clearly separable. The native atlas colours
 # are intentionally NOT used (too muddy / too similar between siblings).
 REGION_STYLE: dict[str, tuple[str, float]] = {
     "Isocortex": ("#d4c8a8", 0.07),
@@ -38,7 +38,7 @@ REGION_STYLE: dict[str, tuple[str, float]] = {
     "MOp": ("#6090d0", 0.13),
 }
 
-# Qualitative fallback palette for regions not in REGION_STYLE — kept mutually
+# Qualitative fallback palette for regions not in REGION_STYLE - kept mutually
 # distinct so sibling nuclei never collide on colour.
 _FALLBACK_COLORS = [
     "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
@@ -273,7 +273,7 @@ def build_figure(
         internal = resolve_regions(
             project, atlas, extra_regions=extra_regions, show_tip_regions=show_tip_regions
         )
-        # Context shell first, then tip/extra regions — each with its style.
+        # Context shell first, then tip/extra regions - each with its style.
         for acronym, color, opacity in styled_regions(list(context_regions) + internal):
             mesh = _mesh_for_region(atlas, acronym, color=color, opacity=opacity)
             if mesh is not None:

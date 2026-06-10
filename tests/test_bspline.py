@@ -9,7 +9,7 @@ from histo_to_ccf.registration.bspline import refine_with_bspline, warp_moving_t
 
 
 def _make_fixed(h: int = 128, w: int = 192) -> np.ndarray:
-    """A synthetic 'atlas slice' — an ellipse with two darker holes."""
+    """A synthetic 'atlas slice' - an ellipse with two darker holes."""
     img = np.zeros((h, w), dtype=np.float32)
     rr, cc = ellipse(h // 2, w // 2, h // 2 - 6, w // 2 - 12, shape=img.shape)
     img[rr, cc] = 1.0
@@ -37,7 +37,7 @@ def test_bspline_recovers_small_warp() -> None:
     fixed = _make_fixed()
     moving = _affine_warp(fixed, tx=4.0, ty=-3.0, angle_deg=3.0)
 
-    # Pre-registration MSE — the baseline we must beat by a wide margin.
+    # Pre-registration MSE - the baseline we must beat by a wide margin.
     pre_mse = float(np.mean((fixed - moving) ** 2))
 
     result = refine_with_bspline(

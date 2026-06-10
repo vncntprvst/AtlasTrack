@@ -48,7 +48,7 @@ def merge_images(images: list[np.ndarray], *, gap_px: int = 40) -> np.ndarray:
     and separated by ``gap_px`` of background. Grayscale and colour inputs are
     mixed by promoting everything to RGB when any input is colour. The layout is
     a pure function of the input order, so a project that records its source
-    paths (sorted) can reproduce the exact same combined image on reload — which
+    paths (sorted) can reproduce the exact same combined image on reload - which
     keeps section bounding boxes valid.
 
     This is how the app supports "multiple slides": rather than tracking per-slide

@@ -1,4 +1,4 @@
-# Histo-to-CCF v0.2.3 — Test walkthrough
+# Histo-to-CCF v0.2.3 - Test walkthrough
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ histo2ccf version          # should print: histo2ccf 0.2.3
 ```
 
 The **`ephys`** extra (§6b) pulls SpikeInterface + neo/probeinterface; the
-**`deepslice`** extra pulls TensorFlow. Both are optional — the base install runs
+**`deepslice`** extra pulls TensorFlow. Both are optional - the base install runs
 the full histology→CCF workflow without them.
 
 You need one composite slide image (multi-section TIFF or JPEG).  
@@ -26,21 +26,21 @@ The repo includes an example: `example data\L07_slide3_2x_whole_overlay.jpg`
 
 ---
 
-## 1 — Launch
+## 1 - Launch
 
 ```
 histo2ccf gui
 ```
 
 A napari viewer opens with the **Registration** panel (5 tabs) docked on the
-**left** — **Histology / Atlas / Probes / Register / Ephys** — and a permanent
+**left** - **Histology / Atlas / Probes / Register / Ephys** - and a permanent
 **3D & Export** panel docked on the **right** (3D view + Plotly/HERBS/CSV export,
 always available). Project **Save / Load** live in the **Project menu** (first in
 the menu bar, not a tab).
 
 ---
 
-## 2 — Histology tab: load the slide and detect sections
+## 2 - Histology tab: load the slide and detect sections
 
 1. Click **Open slide…** → select your image.  
    The slide appears as a gray layer in the viewer.
@@ -56,18 +56,18 @@ the menu bar, not a tab).
 
 ---
 
-## 3 — Atlas tab: load atlas and assign AP planes
+## 3 - Atlas tab: load atlas and assign AP planes
 
-1. (Optional) Set the **Atlas folder** — where atlases are downloaded to and reused
+1. (Optional) Set the **Atlas folder** - where atlases are downloaded to and reused
    from. Leave the default (`~/.brainglobe`) unless you want them elsewhere.
 2. Select **Allen CCFv3 25 µm** (default) and click **Load atlas**.  
    First run downloads ~400 MB; subsequent runs are instant because the atlas is
    reused from the folder above (the status line shows where it loaded from).
-3. Set **AP from bregma (µm)** to match a section — **0 = bregma**, negative = posterior,
+3. Set **AP from bregma (µm)** to match a section - **0 = bregma**, negative = posterior,
    positive = anterior. Click **Open atlas matcher…** to compare your section against
    atlas slices side-by-side / overlaid and assign the AP.
 4. For each section: set **Assign to section idx**, then click **Assign AP to section**.
-   (Midline / dorsal-surface anchoring is handled automatically by registration — no
+   (Midline / dorsal-surface anchoring is handled automatically by registration - no
    manual pixel entry needed.)
 5. In **Section ordering**: drag sections in the list to reorder them, set
    **Section spacing (µm)** (persists with the project), pick the anchor section, and
@@ -75,13 +75,13 @@ the menu bar, not a tab).
 
 ---
 
-## 4 — Probes tab: add a probe and click tip + entry
+## 4 - Probes tab: add a probe and click tip + entry
 
 1. **Add probe**: choose probe type (*Neuropixels 1.0*, *Neuropixels 2.0 (4-shank)*,
    or *NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP*), set a label, click **Add probe**.
-   Select the probe (by label) and shank from the dropdowns — the same labels are
+   Select the probe (by label) and shank from the dropdowns - the same labels are
    used in the Ephys tab.
-2. **Pick points** — just select a mode and click; no extra button:
+2. **Pick points** - just select a mode and click; no extra button:
    - Select **Tip** mode, then click the shank tip in the viewer on the section where
      the probe ends. The marker stays on top of the image automatically.
    - Select **Entry** mode for the brain-surface entry point. Two ways to set it:
@@ -92,24 +92,24 @@ the menu bar, not a tab).
 
 ---
 
-## 5 — Register tab: run the registration
+## 5 - Register tab: run the registration
 
 1. Confirm **B-spline grid** (8) and **Max iterations** (100).  
    For a quick first test use grid = 6 and iterations = 60.
 2. Click **Register all sections**.  
    The progress bar fills section-by-section; status shows the residual as each finishes.  
    Typical runtime: ~30 s per section on CPU.
-3. After completion the residuals table populates — lower MI metric = better alignment.
+3. After completion the residuals table populates - lower MI metric = better alignment.
 
 ---
 
-## 6 — View and export (3D & Export panel, right dock)
+## 6 - View and export (3D & Export panel, right dock)
 
-These live in the permanent **3D & Export** panel on the right — available at any
+These live in the permanent **3D & Export** panel on the right - available at any
 time, not only after registration.
 
 **In-app 3D**  
-Click **View in napari 3D** — opens a separate 3D window with the brain shell, tip
+Click **View in napari 3D** - opens a separate 3D window with the brain shell, tip
 regions, probe tracks, and (after an ephys alignment) the per-channel positions.
 
 **Plotly HTML**  
@@ -130,14 +130,14 @@ p = load_project(r"path\to\project.json")
 ```
 
 **HERBS pkl** (legacy compatibility)  
-Click **Export HERBS pkl…** — writes a `.pkl` readable by the old pipeline.
+Click **Export HERBS pkl…** - writes a `.pkl` readable by the old pipeline.
 
 **Per-channel CSV**  
-Click **Export per-channel CSV…** — writes `probe, shank, channel, ap_um, ml_um, dv_um` for all 384 channels.
+Click **Export per-channel CSV…** - writes `probe, shank, channel, ap_um, ml_um, dv_um` for all 384 channels.
 
 ---
 
-## 6b — Ephys tab: refine shank depth from LFP (optional)
+## 6b - Ephys tab: refine shank depth from LFP (optional)
 
 Requires the `ephys` extra (`uv pip install -e ".[ephys]"`) and shanks that already
 have CCF tip/entry from registration. This refines the depth→CCF mapping the way
@@ -155,13 +155,13 @@ the IBL ephys-alignment GUI does.
 5. Drag the red **anchor lines** so LFP power transitions line up with region
    boundaries (use **Add anchor (mid)** to create one, **Remove selected** /
    **Clear anchors** to manage them).
-6. Click **Apply** — each channel is placed on the tip→entry line and the
+6. Click **Apply** - each channel is placed on the tip→entry line and the
    per-channel CCF coordinates (plus the anchors) are stored on the shank and saved
    with the project.
 
 ---
 
-## 7 — Headless / CLI path (no GUI)
+## 7 - Headless / CLI path (no GUI)
 
 ```
 # Detect sections and write a sidecar JSON

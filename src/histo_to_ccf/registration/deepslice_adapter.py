@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 class DeepSlicePredictor:
     """Predict per-section atlas planes by running DeepSlice on an image folder.
 
-    Unlike :class:`ManualPredictor`, this predictor is *batch* — it must see
+    Unlike :class:`ManualPredictor`, this predictor is *batch* - it must see
     a whole folder of sections to apply :func:`propagate_angles` and
     :func:`enforce_index_order`. Use :meth:`predict_folder` once per slide,
     then :meth:`predict_single` looks up the cached result for each section.
@@ -75,7 +75,7 @@ class DeepSlicePredictor:
         return {}
 
     def predict(self, image: np.ndarray, *, section_index: int) -> PlaneParams:
-        """Implements PlanePredictor — but only after predict_folder ran.
+        """Implements PlanePredictor - but only after predict_folder ran.
 
         The image argument is ignored; we keyed by section_index via the
         folder run. If you need a real per-image API, call DeepSlice directly.
@@ -107,7 +107,7 @@ def _parse_section_index(filename: str) -> int | None:
 
 
 # DeepSlice/QuickNII "ABA_Mouse_CCFv3" 25 µm volume, in its native voxel order
-# (ML, AP, DV) — i.e. dimensions 456 × 528 × 320. Expressed below in our
+# (ML, AP, DV) - i.e. dimensions 456 × 528 × 320. Expressed below in our
 # (AP, DV, ML) order for scaling against a brainglobe atlas of the same family.
 _QUICKNII_DIMS_APDVML = (528, 320, 456)
 

@@ -68,7 +68,7 @@ class AtlasBrowserWidget(QWidget):
         self._custom_id.setVisible(False)
         layout.addWidget(self._custom_id)
 
-        # Atlas storage folder — atlases download once and are reused from here,
+        # Atlas storage folder - atlases download once and are reused from here,
         # which is why a previously-fetched atlas loads almost instantly.
         layout.addWidget(QLabel("Atlas folder:"))
         dir_row = QHBoxLayout()

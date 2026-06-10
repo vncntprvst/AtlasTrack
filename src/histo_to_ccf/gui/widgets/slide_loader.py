@@ -1,4 +1,4 @@
-"""Slide loader dock widget — load image, auto-detect sections, edit results."""
+"""Slide loader dock widget - load image, auto-detect sections, edit results."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
@@ -234,7 +234,7 @@ class SlideLoaderWidget(QWidget):
         slide.image_path = sources[0]
         slide.sections.clear()
         # The combined image is rebuilt from raw sources, so any prior flips /
-        # levels no longer apply — clear them to stay consistent with reload.
+        # levels no longer apply - clear them to stay consistent with reload.
         slide.flip_h = False
         slide.flip_v = False
         slide.levels = None
@@ -245,7 +245,7 @@ class SlideLoaderWidget(QWidget):
             f"({combined.shape[1]}×{combined.shape[0]} px). "
         )
         if had_sections:
-            note += "Existing sections were cleared — click 'Detect sections' again."
+            note += "Existing sections were cleared - click 'Detect sections' again."
         self._info_merge(note)
         self._after_image_changed(combined, slide_idx)
 
@@ -262,7 +262,7 @@ class SlideLoaderWidget(QWidget):
     def _after_image_changed(self, img, slide_idx: int) -> None:
         """Shared post-load work: estimate min area and refresh the viewer."""
         self._status.setText(
-            f"Loaded {img.shape[1]}×{img.shape[0]} px — estimating min area…"
+            f"Loaded {img.shape[1]}×{img.shape[0]} px - estimating min area…"
         )
         # Auto-estimate in a worker so the UI stays responsive for large images.
         worker = self._estimate_worker(img)
@@ -344,7 +344,7 @@ class SlideLoaderWidget(QWidget):
             return
         from histo_to_ccf.gui.app import install_discard_handler
         install_discard_handler(self._state, slide_idx, self._viewer)
-        self._status.setText("Ready — click near a box in the viewer to discard it.")
+        self._status.setText("Ready - click near a box in the viewer to discard it.")
 
     # ------------------------------------------------------------------
     # Manual draw
@@ -352,7 +352,7 @@ class SlideLoaderWidget(QWidget):
 
     def _start_draw(self) -> None:
         if self._viewer is None:
-            self._status.setText("Viewer not available — cannot draw.")
+            self._status.setText("Viewer not available - cannot draw.")
             return
         slide_idx = self._state.active_slide_idx
         if slide_idx is None:
@@ -412,7 +412,7 @@ class SlideLoaderWidget(QWidget):
 
     def _edit_boxes(self) -> None:
         if self._viewer is None:
-            self._status.setText("Viewer not available — cannot edit boxes.")
+            self._status.setText("Viewer not available - cannot edit boxes.")
             return
         slide_idx = self._state.active_slide_idx
         if slide_idx is None:

@@ -6,7 +6,7 @@ The plain SimpleITK B-spline in :mod:`bspline` minimizes Mattes mutual
 information with *no* deformation penalty and *no* tissue mask. On real
 fluorescence sections that lets the warp chase bright labels and background,
 so atlas boundaries drift well outside the tissue (the "lines off the bottom"
-artefact). elastix — the engine ABBA uses — fixes this with two levers:
+artefact). elastix - the engine ABBA uses - fixes this with two levers:
 
 1. a **bending-energy penalty** (``TransformBendingEnergyPenalty``) that keeps
    the B-spline smooth, and
@@ -20,7 +20,7 @@ package consumes a :class:`SimpleITK.Transform` (point mapping, the iterative
 inverse in :mod:`transforms`, and ``.h5`` persistence). So we run elastix, pull
 the **combined deformation field** (affine + B-spline baked into one field via
 transformix), and wrap it as a :class:`SimpleITK.DisplacementFieldTransform`
-inside a ``CompositeTransform``. That object *is* a ``sitk.Transform`` — it
+inside a ``CompositeTransform``. That object *is* a ``sitk.Transform`` - it
 composes, inverts (via the existing displacement-inversion fallback) and
 round-trips through ``.h5`` exactly like the native B-spline, so nothing
 downstream changes.
@@ -39,7 +39,7 @@ try:  # itk-elastix is an optional extra
     import itk
 
     ELASTIX_AVAILABLE = True
-except Exception:  # noqa: BLE001 — any import failure means "not available"
+except Exception:  # noqa: BLE001 - any import failure means "not available"
     itk = None  # type: ignore[assignment]
     ELASTIX_AVAILABLE = False
 
@@ -54,8 +54,8 @@ def _normalize(image: np.ndarray) -> np.ndarray:
 
 
 # Tissue masks are DILATED by this fraction of the smaller image dimension. A
-# tight tissue mask would exclude the brain/background boundary — the strongest
-# alignment cue — and actually hurt the fit. Dilating keeps that outline (plus a
+# tight tissue mask would exclude the brain/background boundary - the strongest
+# alignment cue - and actually hurt the fit. Dilating keeps that outline (plus a
 # background rim) while still excluding far-field junk: the canvas border, debris
 # and neighbouring-section pixels that fall inside a crop's bbox.
 _MASK_RIM_FRAC = 0.10
@@ -114,12 +114,12 @@ def _parameter_object(
     """Build the affine→B-spline elastix parameter object with a bending penalty.
 
     When ``deformable`` is False only the affine stage is added (a low-DOF global
-    correction that cannot overfit) — useful when the only error is a global
+    correction that cannot overfit) - useful when the only error is a global
     scale/shift of the atlas plane.
     """
     po = itk.ParameterObject.New()
 
-    # Cap the resolution pyramid so the coarsest level stays ~>=16 px — small
+    # Cap the resolution pyramid so the coarsest level stays ~>=16 px - small
     # section crops (or the tiny atlas slices in tests) can't survive 4 levels.
     h, w = image_shape
     n_res = max(1, min(4, int(np.floor(np.log2(max(min(h, w), 1) / 16.0))) + 1))
@@ -229,7 +229,7 @@ def refine_with_elastix(
     # atlas onto THIS section's tissue (4-DOF, can't shear/fold), computed from
     # the masks. We warp the atlas reference (+ its mask) into the section frame
     # by S, run the B-spline on the pre-aligned pair for the residual R, and
-    # return CompositeTransform([R, S]) — S applied first, so T(a) = R(S(a)).
+    # return CompositeTransform([R, S]) - S applied first, so T(a) = R(S(a)).
     prealign_sitk = None
     if prealign or use_masks:
         if fixed_mask is None:
@@ -268,7 +268,7 @@ def refine_with_elastix(
     )
 
     # Combined (affine ∘ B-spline) displacement field on the FIXED grid, mapping
-    # fixed → moving — the convention every consumer of `bspline` expects.
+    # fixed → moving - the convention every consumer of `bspline` expects.
     # transformix insists on writing `deformationField.nii`; point it at a temp
     # dir (an empty OutputDirectory is treated as ".") so it never litters cwd.
     import tempfile

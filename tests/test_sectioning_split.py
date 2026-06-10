@@ -154,7 +154,7 @@ def test_real_slide_yields_expected_sections() -> None:
         / "L07_slide3_2x_whole_overlay.jpg"
     )
     image = load_image(slide)
-    # Auto-split is a HINT — it correctly localizes most sections without manual
+    # Auto-split is a HINT - it correctly localizes most sections without manual
     # tuning, but anatomical gaps (cerebellum vs brainstem in caudal coronal
     # slices) can fragment a section into 2 blobs, and slide labels can leak in.
     # The GUI exposes the masks as an editable Labels layer for the user to
@@ -168,7 +168,7 @@ def test_real_slide_yields_expected_sections() -> None:
     rows = {o.row for o in ordered}
     assert 2 <= len(rows) <= 4, f"got {len(rows)} rows (expected 3)"
 
-    # Sanity: section bounding boxes are roughly comparable in size — none
+    # Sanity: section bounding boxes are roughly comparable in size - none
     # is wildly larger than the others (that would indicate a merged blob).
     areas = sorted(s.area_px for s in sections)
     assert areas[-1] / areas[0] < 6.0, "largest section is suspiciously bigger than smallest"

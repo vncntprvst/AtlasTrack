@@ -24,7 +24,7 @@ class ProbeLayout:
     the parametric fields (``tip_to_first_site_um`` … ``col_pitch_um``).
     Irregular layouts (e.g. the NeuroNexus Poly3, whose centre column is longer
     than its flanking columns) instead supply ``explicit_depths_um`` and
-    ``explicit_offsets_um`` — per-site arrays in channel order (tip → base) that
+    ``explicit_offsets_um`` - per-site arrays in channel order (tip → base) that
     override the parametric computation.
     """
 
