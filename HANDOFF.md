@@ -1,6 +1,6 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-09 · version **0.2.12** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-09 · version **0.2.13** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -60,7 +60,9 @@ left→right: **Histology → Atlas → Probes → Register → Ephys**.
    penalty + tissue mask (ABBA-style) keep atlas boundaries on the tissue; falls
    back to the plain SimpleITK B-spline when `itk-elastix` is absent. Controls:
    "Regularized registration (elastix)" toggle, "Smoothness (bending energy)"
-   weight, "Restrict to tissue mask". Residuals table. "Show atlas overlay" warps
+   weight, "Restrict to tissue mask", **"Snap atlas contour to tissue"** (the
+   automatic outer-contour fix, any engine - see below). Residuals table. "Show
+   atlas overlay" warps
    registered region boundaries onto each section (lazily loads the atlas).
    Auto-saves the project. (See "Registration engine" below.)
 5. **Ephys** - refine a registered shank's depth→CCF mapping from LFP features
@@ -231,6 +233,59 @@ overlay clip, persistence, probe map) is unchanged because it's still one
 "Silhouette pre-align" / `AppSettings.prealign_similarity`. Composes *under* the
 manual drag tool (pre-align gets close; drag finishes damaged sections).
 
+## Automatic outer-contour snap (v0.2.13 - the real fix for "lines off the bottom")
+
+The intensity B-spline (elastix MI) aligns *interior* structure but never
+optimises the silhouette, so the atlas **outer contour** is left wherever the
+affine pre-align put it - a few percent off the tissue, the classic "atlas lines
+just outside the bottom of the section." Measured on the real example slide (15
+sections, silhouette Dice = warped-atlas-extent vs section tissue mask) the match
+**plateaus at ~0.89 no matter how the B-spline or pre-align is tuned** - because
+MI doesn't see the boundary, and a PCA rotation/anisotropic pre-align only moved
+it 0.896 -> 0.897 (the anchoring already orients sections). A free mean-squares
+B-spline on the silhouettes folds (empirically reconfirmed: min Jacobian < 0 on
+every section). So the engine now adds a **fold-proof boundary snap** as a final
+step (`registration/boundary_snap.py`, headless):
+
+- Sample points on the warped-atlas boundary; push each toward the nearest tissue
+  edge (tissue **signed distance field** + its gradient).
+- **Drop** any push larger than `_DROP_FRAC` (0.06) of the diagonal - *exclude* it,
+  don't pin it (pinning beside a 50 px-snapped neighbour creases the field and
+  folds it). This is what protects genuinely **damaged/asymmetric** tissue: where
+  the atlas has no matching edge, the atlas is left alone there (§12's torn
+  cerebellar midline stays put; only the intact bottom contour snaps).
+- Pin a ring of **interior anchors** (zero displacement) so it's a boundary
+  correction, not a global drift.
+- Fit a **smoothed thin-plate spline** (`RBFInterpolator`, smoothing escalates
+  2000 -> 4000 -> 8000) and **verify the forward field's min Jacobian > 0.02**;
+  if every level still folds, return `None` (keep the un-snapped fit). Empirically
+  fold-free at smoothing 2000 (worst Jacobian +0.11 across the slide).
+
+Result on the real slide: **mean silhouette Dice 0.894 -> 0.942, every section
+improved**, including damaged §12 (0.742 -> 0.79, gently). Rendered overlays
+confirm it visually (the bottom-corner "fly-off" on §7/§12 is pulled onto the
+tissue; the damaged region is untouched) - see `example data/reg_eval/` for the
+before/after PNGs this was validated against.
+
+**Integration (one `sitk.Transform`, nothing downstream changes):** the snap is a
+`sitk.DisplacementFieldTransform` in the section (moving) frame mapping
+*where the registered atlas landed* -> *tissue*. `register_section_image` composes
+it as `CompositeTransform([snap, registration])` then **`FlattenTransform()`** -
+the elastix engine already returns a composite, and HDF5 rejects a *nested*
+composite ("Composite Transform can only be 1st transform in a file"), so it must
+be flattened to persist. Verified: `.h5` write/read is exact (0.0000 px), the
+iterative inverse used by probe->CCF round-trips (0.0014 px). The whole thing is
+**best-effort**: any failure logs and keeps the un-snapped registration, so it can
+never break a section. Toggle: Register tab **"Snap atlas contour to tissue"** /
+`AppSettings.boundary_snap` (default on). Unlike the elastix-only knobs it works
+with **any engine** (it's a post-fit step), so it's not gated on the elastix
+checkbox. Threaded through `register_section_image`, `register_project_with_atlas`,
+both `register_worker*`, and the panel.
+
+This is the automatic equivalent of the manual landmark drag - for most sections
+it removes the need for any manual correction; the manual tools remain for the
+genuinely damaged ones the snap deliberately leaves alone.
+
 ## Manual atlas correction - two tools (mutually exclusive per section)
 
 `Section.manual_affine` (box handles, v0.2.9) **or** `Section.manual_landmarks` (TPS,
@@ -369,7 +424,9 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **187 passed** (161 non-qt + 26 qt; the qt landmark test now also
+- `pytest -q` → **191 passed** (165 non-qt + 26 qt; +4 in `test_boundary_snap.py`
+  for the outer-contour snap - improves silhouette Dice, never folds, drops
+  damage-region mismatches, persists through `.h5`; the qt landmark test now also
   covers warp/relocate/add/delete editing; elastix engine adds 6 in
   `test_elastix_bspline.py` - skipped if itk-elastix absent - 4 in `test_masks.py`,
   3 in `test_overlay_extent.py`, 5 in `test_manual_affine.py`, +1 qt manual-adjust,
@@ -402,8 +459,14 @@ update/roll back the GPU driver.
    atlas overlay (see "Manual atlas correction"). (Section detection bboxes are fine -
    ~0% tissue cut; the "atlas leaving the box" look is the atlas scale, not the box.)
    **Silhouette pre-align shipped (v0.2.10)** - fixes the per-section scale
-   inconsistency (see "Silhouette pre-align"). Remaining lever: a tissue **Dice** QC
-   metric to flag bad sections.
+   inconsistency (see "Silhouette pre-align"). **Automatic outer-contour snap
+   shipped (v0.2.13)** - the actual fix for "atlas lines off the bottom" and for
+   the inconsistent outer-contour fit: silhouette Dice 0.894 -> 0.942 across the
+   real slide, every section improved, fold-proof, damaged tissue left alone (see
+   "Automatic outer-contour snap"). This removes the need for manual correction on
+   most sections. Remaining lever: surface the per-section silhouette **Dice as a QC
+   metric** in the residuals table to flag the few sections still worth a manual
+   look.
 1. **Ephys per-channel CCF in 3D / export** - surface the ephys-refined channels
    (regions + CCF) in the napari 3D view and a per-channel region CSV (see "Ephys
    alignment" follow-ups). Done earlier: multiple-slide merge, Ephys tab.

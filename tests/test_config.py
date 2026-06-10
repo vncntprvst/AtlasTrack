@@ -108,7 +108,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from histo_to_ccf import __version__
-    assert __version__ == "0.2.12"
+    assert __version__ == "0.2.13"
 
 
 @pytest.mark.qt
@@ -124,14 +124,16 @@ def test_register_panel_with_settings(qtbot) -> None:
         widget = RegisterPanelWidget(state, viewer)
         qtbot.addWidget(widget)
 
-        settings = AppSettings(bspline_grid=6, max_iterations=50)
+        settings = AppSettings(bspline_grid=6, max_iterations=50, boundary_snap=False)
         widget.apply_settings(settings)
         assert widget._grid_spin.value() == 6
         assert widget._iter_spin.value() == 50
+        assert widget._boundary_snap.isChecked() is False
 
         out = AppSettings()
         widget.collect_settings(out)
         assert out.bspline_grid == 6
         assert out.max_iterations == 50
+        assert out.boundary_snap is False
     finally:
         viewer.close()

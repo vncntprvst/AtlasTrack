@@ -58,6 +58,7 @@ class AppSettings(BaseModel):
     bending_energy_weight: float = 20.0  # elastix smoothness penalty
     use_tissue_mask: bool = True  # restrict the metric to tissue (elastix)
     prealign_similarity: bool = True  # per-section silhouette pre-align (elastix)
+    boundary_snap: bool = True  # snap atlas outer contour onto tissue after fit
 
     @field_validator("bspline_grid")
     @classmethod

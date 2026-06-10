@@ -149,6 +149,7 @@ def test_registration_reduces_mse() -> None:
         anchoring=_ANCHORING,
         bspline_grid=(6, 6),
         max_iterations=80,
+        boundary_snap=False,
     )
 
     aligned = warp_moving_to_fixed(section_image, reference_slice.shape, sitk_transform)

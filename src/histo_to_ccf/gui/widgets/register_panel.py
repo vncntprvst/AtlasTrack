@@ -124,6 +124,16 @@ class RegisterPanelWidget(QWidget):
             "Makes the outer-contour scale consistent across sections (elastix only)."
         )
         params_layout.addWidget(self._prealign)
+
+        self._boundary_snap = QCheckBox("Snap atlas contour to tissue")
+        self._boundary_snap.setChecked(True)
+        self._boundary_snap.setToolTip(
+            "After the fit, pull the atlas outer contour onto the section's tissue "
+            "border with a smoothed, fold-proof landmark warp (the automatic "
+            "version of the manual landmark drag). Large mismatches over damaged "
+            "tissue are left alone. Works with any engine."
+        )
+        params_layout.addWidget(self._boundary_snap)
         self._on_elastix_toggled(self._use_elastix.isChecked())
 
         method_lbl = QLabel(
@@ -265,6 +275,7 @@ class RegisterPanelWidget(QWidget):
         self._bending_spin.setValue(settings.bending_energy_weight)
         self._use_mask.setChecked(settings.use_tissue_mask)
         self._prealign.setChecked(settings.prealign_similarity)
+        self._boundary_snap.setChecked(settings.boundary_snap)
         self._on_elastix_toggled(self._use_elastix.isChecked())
 
     def collect_settings(self, settings) -> None:
@@ -275,6 +286,7 @@ class RegisterPanelWidget(QWidget):
         settings.bending_energy_weight = self._bending_spin.value()
         settings.use_tissue_mask = self._use_mask.isChecked()
         settings.prealign_similarity = self._prealign.isChecked()
+        settings.boundary_snap = self._boundary_snap.isChecked()
 
     # ------------------------------------------------------------------
     # Registration
@@ -375,6 +387,7 @@ class RegisterPanelWidget(QWidget):
             bending_weight=self._bending_spin.value(),
             use_masks=self._use_mask.isChecked(),
             prealign=self._prealign.isChecked(),
+            boundary_snap=self._boundary_snap.isChecked(),
         )
         worker.yielded.connect(self._on_progress)
         worker.returned.connect(self._on_registration_done)

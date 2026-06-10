@@ -70,6 +70,7 @@ def register_worker(
     bending_weight: float = 20.0,
     use_masks: bool = True,
     prealign: bool = True,
+    boundary_snap: bool = True,
 ) -> "Project":
     """Run the full registration pipeline in a background thread (no progress)."""
     from histo_to_ccf.registration.pipeline import register_project_with_atlas
@@ -85,6 +86,7 @@ def register_worker(
         bending_weight=bending_weight,
         use_masks=use_masks,
         prealign=prealign,
+        boundary_snap=boundary_snap,
     )
 
 
@@ -157,6 +159,7 @@ def register_worker_progressive(
     bending_weight: float = 20.0,
     use_masks: bool = True,
     prealign: bool = True,
+    boundary_snap: bool = True,
 ):
     """Registration pipeline that yields per-section progress dicts.
 
@@ -230,6 +233,7 @@ def register_worker_progressive(
                 bending_weight=bending_weight,
                 use_masks=use_masks,
                 prealign=prealign,
+                boundary_snap=boundary_snap,
             )
         except Exception as exc:  # noqa: BLE001 - reported to the user, batch continues
             failed.append(section.index)

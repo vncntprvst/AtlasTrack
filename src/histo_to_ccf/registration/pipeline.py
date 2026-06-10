@@ -163,6 +163,7 @@ def register_section_image(
     bending_weight: float = 20.0,
     use_masks: bool = True,
     prealign: bool = True,
+    boundary_snap: bool = True,
 ) -> tuple[RegistrationResult, "object"]:
     """Run the M3 registration on one section.
 
@@ -228,13 +229,58 @@ def register_section_image(
         prealign=prealign,
     )
 
+    transform = result.transform
+    if boundary_snap:
+        transform = _apply_boundary_snap(
+            transform, reference, section_image, out_shape
+        )
+
     reg = RegistrationResult(
         anchoring=list(anchoring.as_tuple()),
         output_size_px=(out_shape[0], out_shape[1]),
         bspline_transform_path=None,
         residual=result.residual_rms,
     )
-    return reg, result.transform
+    return reg, transform
+
+
+def _apply_boundary_snap(
+    transform: "object",
+    reference: np.ndarray,
+    section_image: np.ndarray,
+    out_shape: tuple[int, int],
+) -> "object":
+    """Compose the outer-contour snap onto ``transform`` (no-op if it can't help).
+
+    Snaps the warped atlas silhouette onto the section tissue silhouette - the
+    automatic equivalent of the manual landmark drag. Returns the original
+    transform unchanged when the snap is degenerate or would fold (see
+    :mod:`registration.boundary_snap`). One failed snap must never break a
+    section's registration, so any error is swallowed and the un-snapped
+    transform is kept.
+    """
+    try:
+        from histo_to_ccf.registration.boundary_snap import (
+            boundary_snap_transform,
+            compose_snap,
+        )
+        from histo_to_ccf.registration.masks import section_tissue_mask
+        from histo_to_ccf.registration.transforms import _warped_atlas_extent
+
+        ref = np.asarray(reference, dtype=np.float32)
+        lo, hi = float(ref.min()), float(ref.max())
+        if hi - lo < 1e-6:
+            return transform
+        atlas_fg = (ref - lo) / (hi - lo) > 0.02
+        extent = _warped_atlas_extent(transform, atlas_fg, ref.shape, out_shape)
+        tissue = section_tissue_mask(section_image)
+        snap = boundary_snap_transform(extent, tissue)
+        if snap is None:
+            return transform
+        return compose_snap(transform, snap)
+    except Exception as exc:  # noqa: BLE001 - snap is best-effort; keep registration
+        logger.warning("boundary snap skipped: {}", exc)
+        return transform
 
 
 def register_project_with_atlas(
@@ -249,6 +295,7 @@ def register_project_with_atlas(
     bending_weight: float = 20.0,
     use_masks: bool = True,
     prealign: bool = True,
+    boundary_snap: bool = True,
 ) -> Project:
     """Drive the full M3 pipeline across every section in ``project``.
 
@@ -284,6 +331,7 @@ def register_project_with_atlas(
                 bending_weight=bending_weight,
                 use_masks=use_masks,
                 prealign=prealign,
+                boundary_snap=boundary_snap,
             )
 
             import SimpleITK as sitk

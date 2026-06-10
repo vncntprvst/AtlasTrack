@@ -141,7 +141,7 @@ def test_register_section_image_elastix_engine(tmp_path: Path) -> None:
 
     reg, transform = register_section_image(
         section_image, atlas, anchoring=_ANCHORING, engine="elastix",
-        bspline_grid=(8, 8), max_iterations=80,
+        bspline_grid=(8, 8), max_iterations=80, boundary_snap=False,
     )
     assert isinstance(transform, sitk.Transform)
     assert np.isfinite(reg.residual)
