@@ -212,6 +212,11 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # Project save/load live in the menu bar (see _install_project_menu), not a
     # tab - they are file actions, not part of the left-to-right workflow.
     _install_project_menu(viewer, state, on_loaded=_on_project_loaded)
+    # A "Registration" menu hosts the parameters dialog (kept out of the panel),
+    # and napari's default menus are hidden - the user only wants Project +
+    # Registration in the bar.
+    _install_registration_menu(viewer, register_panel)
+    _keep_only_menus(viewer, {"Project", "Registration"})
 
     # Persist settings when the tab changes (cheap enough to do on every switch).
     def _on_tab_change(_idx: int) -> None:
@@ -286,6 +291,45 @@ def _install_project_menu(
     menu.addSeparator()
     load_action = menu.addAction("Load Project…")
     load_action.triggered.connect(helper._load)
+
+
+def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
+    """Add a "Registration" menu whose "Parameters…" opens the params dialog.
+
+    The registration parameters were moved out of the Register panel (the
+    defaults are good); this is where to bring them back up when needed.
+    Best-effort: no-op if the Qt menu bar is unavailable (headless).
+    """
+    from qtpy.QtWidgets import QMenu
+
+    try:
+        menubar = viewer.window._qt_window.menuBar()
+    except Exception:
+        return
+
+    menu = QMenu("Registration", menubar)
+    menubar.addMenu(menu)
+    params_action = menu.addAction("Parameters…")
+    params_action.triggered.connect(register_panel.open_parameters_dialog)
+
+
+def _keep_only_menus(viewer: "napari.Viewer", keep: set[str]) -> None:
+    """Hide every top-level menu-bar menu except those whose title is in ``keep``.
+
+    napari adds File / View / Plugins / Window / Help; the user only wants Project
+    and Registration. Hiding (not removing) is reversible and robust to napari
+    re-adding menus. Best-effort: no-op if the menu bar is unavailable.
+    """
+    try:
+        menubar = viewer.window._qt_window.menuBar()
+    except Exception:
+        return
+
+    for action in menubar.actions():
+        sub = action.menu()
+        title = (sub.title() if sub is not None else action.text()).replace("&", "")
+        if title not in keep:
+            action.setVisible(False)
 
 
 # ---------------------------------------------------------------------------

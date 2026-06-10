@@ -8,6 +8,7 @@ from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -59,9 +60,26 @@ class RegisterPanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        # Registration parameters
+        # Registration parameters live in a dialog opened from the Registration
+        # menu ("Parameters…"), not inline - the defaults are good, so the panel
+        # stays focused on "Register all sections" and the results below.
+        self._params_dialog = None
         params_box = QGroupBox("Registration parameters")
         params_layout = QVBoxLayout(params_box)
+
+        # DeepSlice plane prediction is the FIRST thing registration does (predict a
+        # consistent set of atlas planes), so it sits at the top of the parameters
+        # dialog; on by default since the user runs it almost every time.
+        self._use_deepslice = QCheckBox("Predict planes with DeepSlice")
+        self._use_deepslice.setChecked(True)
+        self._use_deepslice.setToolTip(
+            "Run DeepSlice on all section images first to predict a consistent set "
+            "of atlas planes across the series (with angle propagation and AP "
+            "ordering), then refine each with the B-spline. No manual AP needed.\n"
+            "First run downloads the DeepSlice model and is slow."
+        )
+        params_layout.addWidget(self._use_deepslice)
+
         grid_row = QHBoxLayout()
         grid_row.addWidget(QLabel("B-spline grid (N×N):"))
         self._grid_spin = QSpinBox()
@@ -149,16 +167,8 @@ class RegisterPanelWidget(QWidget):
             "a 2D B-spline warps the histology onto it (mutual-information metric)."
         )
         params_layout.addWidget(method_lbl)
-
-        self._use_deepslice = QCheckBox("Predict planes with DeepSlice")
-        self._use_deepslice.setToolTip(
-            "Run DeepSlice on all section images first to predict a consistent set "
-            "of atlas planes across the series (with angle propagation and AP "
-            "ordering), then refine each with the B-spline. No manual AP needed.\n"
-            "First run downloads the DeepSlice model and is slow."
-        )
-        params_layout.addWidget(self._use_deepslice)
-        layout.addWidget(params_box)
+        # Held for the Parameters… dialog; intentionally NOT added to the panel.
+        self._params_box = params_box
 
         self._reg_btn = QPushButton("Register all sections")
         self._reg_btn.setFixedHeight(34)
@@ -199,6 +209,10 @@ class RegisterPanelWidget(QWidget):
         self._adjust_combo.setToolTip("Pick a registered section to nudge its atlas overlay.")
         sec_row.addWidget(self._adjust_combo, 1)
         av.addLayout(sec_row)
+
+        # Tool 1 - box transform, in its own outlined group.
+        box_group = QGroupBox("Box transform")
+        bg = QVBoxLayout(box_group)
         self._adjust_btn = QPushButton("Adjust atlas (drag in viewer)")
         self._adjust_btn.setCheckable(True)
         self._adjust_btn.setToolTip(
@@ -207,7 +221,12 @@ class RegisterPanelWidget(QWidget):
             "apply (probes re-map and the project auto-saves)."
         )
         self._adjust_btn.toggled.connect(self._on_adjust_toggled)
-        av.addWidget(self._adjust_btn)
+        bg.addWidget(self._adjust_btn)
+        av.addWidget(box_group)
+
+        # Tool 2 - landmark TPS warp, grouped: place, edit (move/add), apply.
+        lm_group = QGroupBox("Landmarks")
+        lg = QVBoxLayout(lm_group)
         self._place_lm_btn = QPushButton("Place landmarks")
         self._place_lm_btn.setToolTip(
             "Drop draggable correspondence points on the atlas overlay (6 around the "
@@ -218,7 +237,7 @@ class RegisterPanelWidget(QWidget):
             "• 'Add points' on, then click = add; select a point + Delete = remove"
         )
         self._place_lm_btn.clicked.connect(self._place_landmarks)
-        av.addWidget(self._place_lm_btn)
+        lg.addWidget(self._place_lm_btn)
 
         lm_row = QHBoxLayout()
         self._lm_move_btn = QPushButton("Move points")
@@ -234,13 +253,19 @@ class RegisterPanelWidget(QWidget):
         self._lm_add_btn.setToolTip("Click in the viewer to add a landmark. Select a point + Delete removes it.")
         self._lm_add_btn.toggled.connect(self._on_lm_add_toggled)
         lm_row.addWidget(self._lm_add_btn)
-        av.addLayout(lm_row)
+        lg.addLayout(lm_row)
 
         self._apply_lm_btn = QPushButton("Apply landmark warp")
         self._apply_lm_btn.setToolTip("Warp the atlas through the dragged landmarks, re-map probes, save.")
         self._apply_lm_btn.clicked.connect(self._apply_landmarks)
-        av.addWidget(self._apply_lm_btn)
+        lg.addWidget(self._apply_lm_btn)
+        av.addWidget(lm_group)
 
+        # Reset applies to either tool - set it apart below a divider.
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFrameShadow(QFrame.Sunken)
+        av.addWidget(divider)
         self._adjust_reset_btn = QPushButton("Reset adjustment")
         self._adjust_reset_btn.setToolTip("Clear the manual correction (box or landmarks) for this section.")
         self._adjust_reset_btn.clicked.connect(self._reset_adjustment)
@@ -253,6 +278,25 @@ class RegisterPanelWidget(QWidget):
         self._lm_ctrl_drag = False  # set while Ctrl is held during a drag
 
         layout.addStretch()
+
+    def open_parameters_dialog(self) -> None:
+        """Show the registration-parameters group in a (lazily-built) dialog.
+
+        Wired to the menu-bar "Registration → Parameters…" action. The parameter
+        widgets are reparented into the dialog once and persist there, so the
+        values the user sets are the same widgets the registration run reads.
+        """
+        if self._params_dialog is None:
+            from qtpy.QtWidgets import QDialog, QVBoxLayout
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Registration parameters")
+            lay = QVBoxLayout(dlg)
+            lay.addWidget(self._params_box)
+            self._params_dialog = dlg
+        self._params_dialog.show()
+        self._params_dialog.raise_()
+        self._params_dialog.activateWindow()
 
     def _on_elastix_toggled(self, on: bool) -> None:
         """Enable the elastix-only controls only when elastix is selected."""
@@ -558,10 +602,16 @@ class RegisterPanelWidget(QWidget):
         current = self._adjust_combo.currentData()
         self._adjust_combo.blockSignals(True)
         self._adjust_combo.clear()
-        for slide in self._state.project.slides:
-            for sec in slide.sections:
-                if sec.registration is not None:
-                    self._adjust_combo.addItem(f"Section {sec.index}", sec.index)
+        # Ordered by section index so the picker reads in sequence (0, 1, 2, …)
+        # rather than the slide's detection order.
+        indices = sorted(
+            sec.index
+            for slide in self._state.project.slides
+            for sec in slide.sections
+            if sec.registration is not None
+        )
+        for idx in indices:
+            self._adjust_combo.addItem(f"Section {idx}", idx)
         if current is not None:
             i = self._adjust_combo.findData(current)
             if i >= 0:

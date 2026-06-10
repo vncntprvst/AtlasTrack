@@ -108,7 +108,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from histo_to_ccf import __version__
-    assert __version__ == "0.2.13"
+    assert __version__ == "0.2.14"
 
 
 @pytest.mark.qt
@@ -135,5 +135,13 @@ def test_register_panel_with_settings(qtbot) -> None:
         assert out.bspline_grid == 6
         assert out.max_iterations == 50
         assert out.boundary_snap is False
+
+        # DeepSlice is on by default and the registration parameters are NOT shown
+        # inline - they live in a dialog opened on demand.
+        assert widget._use_deepslice.isChecked() is True
+        assert widget._params_box.parent() is not widget
+        widget.open_parameters_dialog()
+        assert widget._params_dialog is not None
+        assert widget._params_box.parent() is widget._params_dialog
     finally:
         viewer.close()

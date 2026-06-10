@@ -330,9 +330,14 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
         # vispy "Unsupported framebuffer format" shader errors on some GPUs.
         assert "Tips" not in viewer.layers
         assert "Entries" not in viewer.layers
-        # Project save/load live in a "Project" menu (first in the bar).
-        titles = [a.text() for a in viewer.window._qt_window.menuBar().actions()]
-        assert "Project" in titles
+        # Only "Project" and "Registration" menus are visible; napari's defaults
+        # (File / View / Plugins / Window / Help) are hidden.
+        visible = [
+            (a.menu().title() if a.menu() else a.text()).replace("&", "")
+            for a in viewer.window._qt_window.menuBar().actions()
+            if a.isVisible()
+        ]
+        assert set(visible) == {"Project", "Registration"}, visible
         # 3D/export buttons live on the permanent viz panel, not the Register tab.
         assert hasattr(viz_panel, "_view_napari3d") and hasattr(viz_panel, "_export_plotly")
     finally:

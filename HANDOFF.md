@@ -1,6 +1,6 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-09 · version **0.2.13** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-10 · version **0.2.14** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -36,9 +36,11 @@ Windows.
 ## Workflow (what the GUI does)
 
 Layout: the **Registration** panel (5 tabs) docks on the **left**; a permanent
-**3D & Export** panel (`VizExportPanelWidget`) docks on the **right**. Project
-Save/Load live in the **Project menu** (inserted first in the menu bar). Tab order
-left→right: **Histology → Atlas → Probes → Register → Ephys**.
+**3D & Export** panel (`VizExportPanelWidget`) docks on the **right**. The menu bar
+shows only two menus (v0.2.14): **Project** (Save / Save As… / Load) and
+**Registration** (Parameters…); napari's default File/View/Plugins/Window/Help menus
+are **hidden** (`_keep_only_menus`, best-effort - they're set invisible, not removed).
+Tab order left→right: **Histology → Atlas → Probes → Register → Ephys**.
 1. **Histology** (was "Load") - open one or more composite slides; multiple opens
    are **merged into a single combined image** (see "Multiple slides" below).
    Auto-detect sections (Otsu + connected components). Auto-estimates min-area.
@@ -55,16 +57,22 @@ left→right: **Histology → Atlas → Probes → Register → Ephys**.
    "Add probe" auto-arms Tip-marker mode. **Probe + shank are selected by label**
    (combos, consistent with the Ephys tab). Click to drop tip; switch to Entry
    (Marker, or draw a Trajectory line whose tissue-surface crossing = entry).
-4. **Register** - optionally **Predict planes with DeepSlice**, then per-section 2D
-   refinement. **Engine: elastix (regularized) by default** - a bending-energy
-   penalty + tissue mask (ABBA-style) keep atlas boundaries on the tissue; falls
-   back to the plain SimpleITK B-spline when `itk-elastix` is absent. Controls:
-   "Regularized registration (elastix)" toggle, "Smoothness (bending energy)"
-   weight, "Restrict to tissue mask", **"Snap atlas contour to tissue"** (the
-   automatic outer-contour fix, any engine - see below). Residuals table. "Show
-   atlas overlay" warps
-   registered region boundaries onto each section (lazily loads the atlas).
-   Auto-saves the project. (See "Registration engine" below.)
+4. **Register** - the panel is deliberately lean (v0.2.14): just **"Register all
+   sections"**, the progress/status, the residuals table, "Show atlas overlay", and
+   the manual adjustment group. **All registration parameters** are **no longer shown
+   inline** - the defaults are good, so they live in a dialog opened from
+   **Registration menu → Parameters…** (`register_panel.open_parameters_dialog`
+   reparents the same widgets into the dialog, so what you set is what the run reads).
+   In that dialog, **"Predict planes with DeepSlice"** sits at the **top** (it's the
+   first thing registration does), followed by B-spline grid, max iterations,
+   "Regularized registration (elastix)", "Smoothness (bending energy)", "Restrict to
+   tissue mask", "Silhouette pre-align", "Snap atlas contour to tissue". All toggles
+   default **on**. **Engine: elastix (regularized) by default** -
+   a bending-energy penalty + tissue mask (ABBA-style) keep atlas boundaries on the
+   tissue; falls back to plain SimpleITK B-spline when `itk-elastix` is absent. "Show
+   atlas overlay" warps registered region boundaries onto each section (lazily loads
+   the atlas). Auto-saves the project. (See "Registration engine" + "Automatic
+   outer-contour snap" below.)
 5. **Ephys** - refine a registered shank's depth→CCF mapping from LFP features
    (see "Ephys alignment" below).
 
@@ -287,6 +295,12 @@ it removes the need for any manual correction; the manual tools remain for the
 genuinely damaged ones the snap deliberately leaves alone.
 
 ## Manual atlas correction - two tools (mutually exclusive per section)
+
+UI (v0.2.14): the "Manual atlas adjustment" group has the **Section** picker
+(ordered by section index, not slide detection order), then two **outlined
+sub-groups** - "Box transform" (the Adjust-atlas button) and "Landmarks" (Place /
+Move / Add / Apply) - with **"Reset adjustment" set apart below a divider** since
+it clears either tool.
 
 `Section.manual_affine` (box handles, v0.2.9) **or** `Section.manual_landmarks` (TPS,
 v0.2.11) - landmarks take precedence in `RegisteredSectionTransform.apply` when both
