@@ -111,6 +111,19 @@ class ChannelLevels(BaseModel):
     high: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0])
 
 
+class ManualLandmarks(BaseModel):
+    """User-dragged correspondence points for a thin-plate-spline atlas warp.
+
+    ``source`` = auto-placed landmark positions on the registered atlas overlay;
+    ``target`` = where the user dragged each. Both are section-local (x, y) pixel
+    coordinates. The TPS maps source -> target (overlay) / target -> source (probe
+    mapping). Mutually exclusive with ``Section.manual_affine`` (landmarks win).
+    """
+
+    source: list[list[float]]
+    target: list[list[float]]
+
+
 class Section(BaseModel):
     """One brain section extracted from a slide image."""
 
@@ -129,6 +142,9 @@ class Section(BaseModel):
     # registered atlas position to where the user dragged it. None = identity.
     # Composed into the overlay and the probe->CCF mapping.
     manual_affine: list[list[float]] | None = None
+    # Thin-plate-spline correction from dragged landmarks (richer, non-rigid).
+    # Takes precedence over manual_affine when present.
+    manual_landmarks: ManualLandmarks | None = None
 
 
 class Slide(BaseModel):

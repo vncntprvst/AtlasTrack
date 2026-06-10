@@ -1,6 +1,6 @@
 # Histo_to_CCF — Handoff
 
-_Last updated: 2026-06-09 · version **0.2.10** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-09 · version **0.2.12** · branch **newUI** (committed, not pushed)_
 
 ## TL;DR
 
@@ -231,7 +231,53 @@ overlay clip, persistence, probe map) is unchanged because it's still one
 "Silhouette pre-align" / `AppSettings.prealign_similarity`. Composes *under* the
 manual drag tool (pre-align gets close; drag finishes damaged sections).
 
-## Manual atlas correction (v0.2.9 — drag the overlay)
+## Manual atlas correction — two tools (mutually exclusive per section)
+
+`Section.manual_affine` (box handles, v0.2.9) **or** `Section.manual_landmarks` (TPS,
+v0.2.11) — landmarks take precedence in `RegisteredSectionTransform.apply` when both
+somehow exist; the GUI clears the other when you apply one.
+
+### Landmark / thin-plate-spline warp (v0.2.11 — the VisuAlign-style tool)
+
+For *local* distortions a single affine can't fix (e.g. §12's damaged dorsal
+cerebellar midline). **Register tab → pick section → "Place landmarks"** drops 6
+border + 3 interior draggable points (`landmarks_warp.auto_landmarks`: ray-march the
+warped-atlas extent for the ring, vertical midline for the interior). Drag each onto
+the matching tissue (napari Points `select` mode), then **"Apply landmark warp"**.
+
+A thin-plate spline (`scipy RBFInterpolator`, `kernel="thin_plate_spline"`) maps
+**source→target** and is **baked into the overlay label image** (`warp_label_image`,
+pull-back resample) — not the layer affine, since napari affine is linear-only. The
+probe→CCF inverse uses a **second TPS fitted target→source** (`invert_points`); the
+two are exact inverses *at* the control points and sub-pixel-approximate between
+(fine for probes). Landmarks persist as section-local (x, y) `source`/`target` lists
+and re-warp on overlay render / reload. `_place_landmarks` continues from stored
+landmarks if present (drag, re-apply), else auto-places fresh. Validated on real §12
+(smooth local deformation, rest pinned) + headless math/probe/schema tests + a qt
+smoke test of apply/reset.
+
+**Editing the points (v0.2.12).** Each landmark carries its **atlas anchor (source)
+in the napari Points `features`** (`sy`/`sx`, world coords) so it travels with the
+point through add/delete automatically; `layer.data` is the **target**.
+`_on_landmark_data` (on `layer.events.data`) keeps them in sync:
+- **plain drag** → moves the target only = warp (anchor in features unchanged);
+- **Ctrl+drag** *or* **"Move points"** toggle → also shifts the anchor by the same
+  delta = relocate, displacement preserved. Ctrl is read by a thin
+  `mouse_drag_callbacks` generator (`_landmark_drag_modifier`) that just sets
+  `self._lm_ctrl_drag`; the built-in drag still does the actual point move, so there's
+  no conflict. (Modifiers aren't on `events.data`, hence the flag + a toggle fallback.)
+- **"Add points"** toggle → Points `add` mode; new rows get their anchor set to the
+  drop position (napari copies the last feature value on add, so we overwrite it).
+- **Delete** key → features drop the row in lock-step (verified). Apply requires >=4.
+
+napari gotcha: `layer.features[col]` is a **read-only** pandas Series — `np.array(...)`
+(copy) before mutating, then reassign `layer.features = {...}`.
+
+**Open polish:** live overlay preview is still on "Apply" (not during drag); no
+source-anchor ghost/vector shown (anchors are invisible features); could seed targets
+from a finer auto-fit.
+
+### Box-handle affine (v0.2.9 — quick global nudge)
 
 When automatic registration can't snap a damaged/asymmetric section, the user
 corrects it by hand: **Register tab → "Manual atlas adjustment"** → pick a section
@@ -323,11 +369,12 @@ update/roll back the GPU driver.
 
 ## State of testing
 
-- `pytest -q` → **180 passed** (155 non-qt + 25 qt; elastix engine adds 6 in
+- `pytest -q` → **187 passed** (161 non-qt + 26 qt; the qt landmark test now also
+  covers warp/relocate/add/delete editing; elastix engine adds 6 in
   `test_elastix_bspline.py` — skipped if itk-elastix absent — 4 in `test_masks.py`,
   3 in `test_overlay_extent.py`, 5 in `test_manual_affine.py`, +1 qt manual-adjust,
-  +2 moment-similarity in `test_masks.py`, +1 pre-align in `test_elastix_bspline.py`;
-  run qt tests per-process — the
+  +2 moment-similarity in `test_masks.py`, +1 pre-align in `test_elastix_bspline.py`,
+  +6 landmark-TPS in `test_landmarks_warp.py`, +1 qt landmark; run qt per-process — the
   napari GL context corrupts across many viewers in one process on this machine,
   so a single `pytest -q` run can hit a Windows access violation mid-suite even
   though every test passes alone). Includes: core pipeline, sectioning/ordering,

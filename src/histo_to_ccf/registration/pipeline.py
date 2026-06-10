@@ -351,5 +351,6 @@ def reload_registered_transforms(
             out[(slide_idx, section.index)] = build_registered_transform(
                 section.registration, atlas, project_dir=project_dir,
                 manual_affine=section.manual_affine,
+                manual_landmarks=section.manual_landmarks,
             )
     return out

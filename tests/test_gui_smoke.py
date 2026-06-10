@@ -796,3 +796,70 @@ def test_manual_atlas_adjustment(qtbot, tmp_path) -> None:
         assert np.allclose(np.asarray(layer.affine.affine_matrix), np.eye(3), atol=1e-6)
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_landmark_warp_apply_and_reset(qtbot, tmp_path) -> None:
+    """Place/apply/reset landmark correction stores ManualLandmarks + cleans up."""
+    import napari
+    import numpy as np
+
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _populated_state()
+        state.project_path = tmp_path / "p.histo2ccf.json"
+        panel = RegisterPanelWidget(state, viewer)
+        qtbot.addWidget(panel)
+
+        # Stand in for "Show overlay" + "Place landmarks" (atlas-independent path):
+        # build the landmarks layer the way _place_landmarks does (source in features).
+        viewer.add_labels(np.zeros((80, 80), dtype=np.uint8), name="Atlas overlay 0",
+                          translate=(0, 0))
+        src = np.array([[10, 10], [70, 10], [40, 40], [10, 70], [70, 70]], float)  # (x,y)
+        data = src[:, ::-1].copy()  # (row, col); target == source initially
+        lm = viewer.add_points(data, name="Atlas landmarks 0", size=12,
+                               features={"sy": src[:, 1], "sx": src[:, 0]})
+        panel._landmark_idx = 0
+        panel._lm_prev_data = np.asarray(lm.data, dtype=float).copy()
+        lm.events.data.connect(panel._on_landmark_data)
+        panel._populate_adjust_combo()
+        sec = state.project.slides[0].sections[0]
+
+        # (1) Plain drag = warp: move centre target +12 in x, source unchanged.
+        d = np.asarray(lm.data, dtype=float); d[2, 1] += 12.0; lm.data = d
+        assert np.asarray(lm.features["sx"])[2] == pytest.approx(40.0)  # anchor stayed
+
+        # (2) Ctrl/move drag = relocate: anchor follows the point.
+        panel._lm_move_btn.setChecked(True)
+        d = np.asarray(lm.data, dtype=float); d[0, 0] += 5.0; lm.data = d  # move row(y) of pt0
+        assert np.asarray(lm.features["sy"])[0] == pytest.approx(15.0)  # anchor moved with it
+        panel._lm_move_btn.setChecked(False)
+
+        # (3) Add a point: its anchor is set to where it was dropped.
+        lm.add(np.array([[33.0, 44.0]]))  # (row, col)
+        assert len(lm.data) == 6
+        assert np.asarray(lm.features["sx"])[-1] == pytest.approx(44.0)
+        assert np.asarray(lm.features["sy"])[-1] == pytest.approx(33.0)
+
+        # (4) Delete a point: features stay aligned.
+        lm.selected_data = {1}
+        lm.remove_selected()
+        assert len(lm.data) == 5 and len(lm.features["sx"]) == 5
+
+        panel._apply_landmarks()
+        assert sec.manual_landmarks is not None
+        assert sec.manual_affine is None  # mutually exclusive
+        assert len(sec.manual_landmarks.target) == 5
+        # The warped centre point's target moved +12 in x relative to its anchor.
+        tgt = np.array(sec.manual_landmarks.target)
+        srcs = np.array(sec.manual_landmarks.source)
+        assert np.any(np.isclose(tgt[:, 0] - srcs[:, 0], 12.0, atol=1e-6))
+        assert state.project_path.exists()
+
+        panel._reset_adjustment()
+        assert sec.manual_landmarks is None
+        assert "Atlas landmarks 0" not in viewer.layers
+    finally:
+        viewer.close()

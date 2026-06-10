@@ -71,6 +71,9 @@ class RegisteredSectionTransform:
     atlas_resolution_um: tuple[float, float, float]  # (ap_res, dv_res, ml_res)
     # Section-local 3x3 manual-correction affine (row, col); None = identity.
     manual_affine: np.ndarray | None = None
+    # Landmark TPS correction (section-local (x, y) source/target arrays); takes
+    # precedence over manual_affine when present.
+    manual_landmarks: tuple[np.ndarray, np.ndarray] | None = None
 
     def _section_px_to_slice_px(self, x_px: float, y_px: float) -> tuple[float, float]:
         """Map a histology pixel through the inverse B-spline to slice-px coords.
@@ -94,9 +97,15 @@ class RegisteredSectionTransform:
         return float(slice_x), float(slice_y)
 
     def apply(self, x_px: float, y_px: float) -> tuple[float, float, float]:
-        if self.manual_affine is not None:
-            # The clicked point is in the corrected (dragged) frame; pull it back
-            # into the registered frame before the registration inverse.
+        # The clicked point is in the corrected (dragged) frame; pull it back into
+        # the registered frame before the registration inverse. Landmarks (TPS)
+        # take precedence over the box-handle affine.
+        if self.manual_landmarks is not None:
+            from histo_to_ccf.registration.landmarks_warp import invert_points
+
+            src, dst = self.manual_landmarks
+            x_px, y_px = invert_points(src, dst, [(x_px, y_px)])[0]
+        elif self.manual_affine is not None:
             from histo_to_ccf.registration.manual import invert_apply
 
             x_px, y_px = invert_apply(self.manual_affine, x_px, y_px)
@@ -253,8 +262,13 @@ def build_registered_transform(
     *,
     project_dir: Path | None = None,
     manual_affine: list[list[float]] | np.ndarray | None = None,
+    manual_landmarks: "object | None" = None,
 ) -> RegisteredSectionTransform:
-    """Construct a :class:`RegisteredSectionTransform` from persisted state."""
+    """Construct a :class:`RegisteredSectionTransform` from persisted state.
+
+    ``manual_landmarks`` is a ``Section.manual_landmarks``-like object (with
+    ``source``/``target`` lists) or ``None``.
+    """
     from histo_to_ccf.io.ccf_coords import atlas_resolution_um
 
     anchoring = Anchoring.from_iterable(result.anchoring)
@@ -267,10 +281,17 @@ def build_registered_transform(
             path = project_dir / path
         bspline = sitk.ReadTransform(str(path))
     ma = None if manual_affine is None else np.asarray(manual_affine, dtype=float).reshape(3, 3)
+    lm = None
+    if manual_landmarks is not None:
+        lm = (
+            np.asarray(manual_landmarks.source, dtype=float).reshape(-1, 2),
+            np.asarray(manual_landmarks.target, dtype=float).reshape(-1, 2),
+        )
     return RegisteredSectionTransform(
         anchoring=anchoring,
         output_size_px=tuple(result.output_size_px),  # type: ignore[arg-type]
         bspline=bspline,
         atlas_resolution_um=atlas_resolution_um(atlas),
         manual_affine=ma,
+        manual_landmarks=lm,
     )

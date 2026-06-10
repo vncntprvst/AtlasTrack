@@ -198,11 +198,49 @@ class RegisterPanelWidget(QWidget):
         )
         self._adjust_btn.toggled.connect(self._on_adjust_toggled)
         av.addWidget(self._adjust_btn)
+        self._place_lm_btn = QPushButton("Place landmarks")
+        self._place_lm_btn.setToolTip(
+            "Drop draggable correspondence points on the atlas overlay (6 around the "
+            "border + 3 inside). Drag each onto the matching tissue feature for a "
+            "thin-plate-spline warp that fixes LOCAL distortions a box transform can't.\n"
+            "• drag = warp (pull the atlas to the tissue)\n"
+            "• Ctrl+drag (or 'Move points' on) = relocate the landmark, no warp\n"
+            "• 'Add points' on, then click = add; select a point + Delete = remove"
+        )
+        self._place_lm_btn.clicked.connect(self._place_landmarks)
+        av.addWidget(self._place_lm_btn)
+
+        lm_row = QHBoxLayout()
+        self._lm_move_btn = QPushButton("Move points")
+        self._lm_move_btn.setCheckable(True)
+        self._lm_move_btn.setToolTip(
+            "Relocate landmarks (move the point + its atlas anchor together, no warp). "
+            "Same as holding Ctrl while dragging."
+        )
+        self._lm_move_btn.toggled.connect(self._on_lm_move_toggled)
+        lm_row.addWidget(self._lm_move_btn)
+        self._lm_add_btn = QPushButton("Add points")
+        self._lm_add_btn.setCheckable(True)
+        self._lm_add_btn.setToolTip("Click in the viewer to add a landmark. Select a point + Delete removes it.")
+        self._lm_add_btn.toggled.connect(self._on_lm_add_toggled)
+        lm_row.addWidget(self._lm_add_btn)
+        av.addLayout(lm_row)
+
+        self._apply_lm_btn = QPushButton("Apply landmark warp")
+        self._apply_lm_btn.setToolTip("Warp the atlas through the dragged landmarks, re-map probes, save.")
+        self._apply_lm_btn.clicked.connect(self._apply_landmarks)
+        av.addWidget(self._apply_lm_btn)
+
         self._adjust_reset_btn = QPushButton("Reset adjustment")
-        self._adjust_reset_btn.setToolTip("Clear the manual correction for this section.")
+        self._adjust_reset_btn.setToolTip("Clear the manual correction (box or landmarks) for this section.")
         self._adjust_reset_btn.clicked.connect(self._reset_adjustment)
         av.addWidget(self._adjust_reset_btn)
         layout.addWidget(adjust_box)
+        # Active landmark-edit state. Source (atlas anchor) per point lives in the
+        # Points layer `features` (travels through add/delete); `data` is the target.
+        self._landmark_idx: int | None = None
+        self._lm_prev_data = None  # for per-move delta tracking
+        self._lm_ctrl_drag = False  # set while Ctrl is held during a drag
 
         layout.addStretch()
 
@@ -453,6 +491,16 @@ class RegisterPanelWidget(QWidget):
                 labels = warp_annotation_to_section(
                     section.registration, atlas, shape, project_dir=base_dir
                 )
+                # Landmark TPS warp is baked into the label image; the box-handle
+                # affine rides on the layer's affine (live, free). Mutually exclusive.
+                if section.manual_landmarks is not None:
+                    from histo_to_ccf.registration.landmarks_warp import warp_label_image
+
+                    labels = warp_label_image(
+                        labels,
+                        np.asarray(section.manual_landmarks.source, dtype=float),
+                        np.asarray(section.manual_landmarks.target, dtype=float),
+                    )
                 edges = annotation_boundaries(labels)
             except Exception as exc:  # noqa: BLE001 — surface to user below
                 if first_error is None:
@@ -468,7 +516,9 @@ class RegisterPanelWidget(QWidget):
                     edge_labels, name=name, opacity=0.7, translate=(y0, x0)
                 )
             # Re-apply any stored manual correction so it persists across reloads.
-            if section.manual_affine is not None:
+            if section.manual_landmarks is not None:
+                layer.affine = Affine(affine_matrix=np.eye(3))  # warp is in the data
+            elif section.manual_affine is not None:
                 world = section_to_world(np.asarray(section.manual_affine), (y0, x0))
                 layer.affine = Affine(affine_matrix=world)
             else:
@@ -576,15 +626,202 @@ class RegisterPanelWidget(QWidget):
         if section is None:
             return
         section.manual_affine = None
+        section.manual_landmarks = None
         layer = self._overlay_layer_for(section)
         if layer is not None:
             layer.mode = "pan_zoom"
             layer.affine = Affine(affine_matrix=np.eye(3))
+        # Drop any landmark points layer.
+        lm_name = f"Atlas landmarks {section.index}"
+        if lm_name in self._viewer.layers:
+            self._viewer.layers.remove(lm_name)
         if self._adjust_btn.isChecked():
             self._adjust_btn.blockSignals(True)
             self._adjust_btn.setChecked(False)
             self._adjust_btn.blockSignals(False)
             self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+        # Restore the un-corrected overlay for this section.
+        self._rerender_section_overlay(section)
+        self._remap_and_save(section)
+
+    # ------------------------------------------------------------------
+    # Landmark (thin-plate-spline) correction
+    # ------------------------------------------------------------------
+
+    def _warp_labels_for(self, section, *, apply_landmarks: bool):
+        """Warped atlas label image for a section (optionally with the TPS)."""
+        import numpy as np
+
+        from histo_to_ccf.registration.transforms import warp_annotation_to_section
+
+        if self._state.atlas is None:
+            return None
+        base_dir = self._reg_base_dir
+        if base_dir is None and self._state.project_path is not None:
+            base_dir = self._state.project_path.parent
+        x0, y0, x1, y1 = section.bbox_px
+        labels = warp_annotation_to_section(
+            section.registration, self._state.atlas, (y1 - y0, x1 - x0), project_dir=base_dir
+        )
+        if apply_landmarks and section.manual_landmarks is not None:
+            from histo_to_ccf.registration.landmarks_warp import warp_label_image
+
+            labels = warp_label_image(
+                labels,
+                np.asarray(section.manual_landmarks.source, dtype=float),
+                np.asarray(section.manual_landmarks.target, dtype=float),
+            )
+        return labels
+
+    def _rerender_section_overlay(self, section) -> None:
+        """Redraw one section's atlas-overlay layer from its current correction."""
+        import numpy as np
+        from napari.utils.transforms import Affine
+
+        from histo_to_ccf.registration.transforms import annotation_boundaries
+
+        labels = self._warp_labels_for(section, apply_landmarks=True)
+        if labels is None:
+            return
+        edges = annotation_boundaries(labels).astype(np.uint8)
+        x0, y0 = section.bbox_px[0], section.bbox_px[1]
+        name = f"Atlas overlay {section.index}"
+        if name in self._viewer.layers:
+            layer = self._viewer.layers[name]
+            layer.data = edges
+            layer.translate = (y0, x0)
+            layer.affine = Affine(affine_matrix=np.eye(3))
+        else:
+            self._viewer.add_labels(edges, name=name, opacity=0.7, translate=(y0, x0))
+
+    def _landmark_layer(self):
+        if self._landmark_idx is None:
+            return None
+        name = f"Atlas landmarks {self._landmark_idx}"
+        if name in self._viewer.layers:
+            return self._viewer.layers[name]
+        return None
+
+    def _place_landmarks(self) -> None:
+        import numpy as np
+
+        from histo_to_ccf.registration.landmarks_warp import auto_landmarks
+
+        section = self._adjust_section()
+        if section is None or section.registration is None:
+            _error_dialog(self, "No registered section", "Pick a registered section first.")
+            return
+        labels = self._warp_labels_for(section, apply_landmarks=False)
+        if labels is None:
+            _error_dialog(self, "Atlas not loaded", "Click 'Show atlas overlay' first.")
+            return
+        # Continue from stored landmarks if present, else auto-place fresh ones.
+        if section.manual_landmarks is not None:
+            source = np.asarray(section.manual_landmarks.source, dtype=float)
+            targets = np.asarray(section.manual_landmarks.target, dtype=float)
+        else:
+            source = auto_landmarks(labels > 0)
+            targets = source.copy()
+        self._landmark_idx = section.index
+
+        x0, y0 = section.bbox_px[0], section.bbox_px[1]
+        # napari (row, col) world coords. data = target; features carry source.
+        data = np.column_stack([targets[:, 1] + y0, targets[:, 0] + x0])
+        feats = {"sy": source[:, 1] + y0, "sx": source[:, 0] + x0}
+        name = f"Atlas landmarks {section.index}"
+        if name in self._viewer.layers:
+            self._viewer.layers.remove(name)
+        layer = self._viewer.add_points(
+            data, name=name, size=16, face_color="red", border_color="white", features=feats
+        )
+        layer.mode = "select"
+        self._viewer.layers.selection = {layer}
+        self._viewer.dims.ndisplay = 2
+        self._lm_prev_data = np.asarray(layer.data, dtype=float).copy()
+        layer.events.data.connect(self._on_landmark_data)
+        layer.mouse_drag_callbacks.append(self._landmark_drag_modifier)
+        self._lm_move_btn.setChecked(False)
+        self._lm_add_btn.setChecked(False)
+        self._status.setText(
+            f"Section {section.index}: drag landmarks onto the tissue (warp); Ctrl+drag "
+            f"or 'Move points' to relocate; 'Add points' + click to add, Delete to remove. "
+            f"Then 'Apply landmark warp'."
+        )
+
+    # --- landmark editing callbacks -----------------------------------
+
+    def _landmark_drag_modifier(self, layer, event):
+        """Record whether Ctrl is held for the duration of a drag (re-anchor)."""
+        self._lm_ctrl_drag = "Control" in event.modifiers
+        yield
+        # keep the flag set through the drag; it's consumed by _on_landmark_data
+
+    def _on_lm_move_toggled(self, on: bool) -> None:
+        layer = self._landmark_layer()
+        if layer is not None and not self._lm_add_btn.isChecked():
+            layer.mode = "select"
+
+    def _on_lm_add_toggled(self, on: bool) -> None:
+        layer = self._landmark_layer()
+        if layer is not None:
+            layer.mode = "add" if on else "select"
+
+    def _on_landmark_data(self, event=None) -> None:
+        """Keep each point's source (atlas anchor, in `features`) in sync on edits."""
+        import numpy as np
+
+        layer = self._landmark_layer()
+        if layer is None:
+            return
+        data = np.asarray(layer.data, dtype=float)
+        prev = self._lm_prev_data
+        sy = np.array(layer.features.get("sy", []), dtype=float)  # copy (Series is read-only)
+        sx = np.array(layer.features.get("sx", []), dtype=float)
+
+        if prev is None or len(data) > len(prev):
+            # Added point(s) (appended at the end): anchor each where it was dropped.
+            n_new = len(data) if prev is None else len(data) - len(prev)
+            if sy.shape[0] != len(data):  # features not yet grown to match
+                sy = np.resize(sy, len(data))
+                sx = np.resize(sx, len(data))
+            sy[-n_new:] = data[-n_new:, 0]
+            sx[-n_new:] = data[-n_new:, 1]
+            layer.features = {"sy": sy, "sx": sx}
+        elif len(data) == len(prev):
+            # A move. Relocate (Ctrl / 'Move points') shifts the anchor too, so the
+            # displacement is unchanged; a plain drag moves only the target = warp.
+            if (self._lm_ctrl_drag or self._lm_move_btn.isChecked()) and sy.shape[0] == len(data):
+                delta = data - prev
+                layer.features = {"sy": sy + delta[:, 0], "sx": sx + delta[:, 1]}
+        # deletes keep features aligned automatically (napari drops the row).
+        self._lm_prev_data = data.copy()
+
+    def _apply_landmarks(self) -> None:
+        import numpy as np
+
+        from histo_to_ccf.project.schema import ManualLandmarks
+
+        section = self._adjust_section()
+        if section is None:
+            return
+        layer = self._landmark_layer()
+        if layer is None or self._landmark_idx != section.index:
+            _error_dialog(self, "No landmarks", "Click 'Place landmarks' first.")
+            return
+        x0, y0 = section.bbox_px[0], section.bbox_px[1]
+        data = np.asarray(layer.data, dtype=float)  # (row, col) world = target
+        sy = np.asarray(layer.features["sy"], dtype=float)
+        sx = np.asarray(layer.features["sx"], dtype=float)
+        if len(data) < 4:
+            _error_dialog(self, "Too few landmarks", "Keep at least 4 landmark points.")
+            return
+        target = np.column_stack([data[:, 1] - x0, data[:, 0] - y0])  # (x, y) section-local
+        source = np.column_stack([sx - x0, sy - y0])
+        section.manual_landmarks = ManualLandmarks(
+            source=source.tolist(), target=target.tolist()
+        )
+        section.manual_affine = None  # landmarks take precedence
+        self._rerender_section_overlay(section)
         self._remap_and_save(section)
 
     def _remap_and_save(self, section) -> None:
