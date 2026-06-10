@@ -1,4 +1,4 @@
-# Histo-to-CCF v0.2.3 - Test walkthrough
+# Histo-to-CCF v0.2.14 - Test walkthrough
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ uv pip install -e ".[deepslice,ephys]"
 .venv\Scripts\activate # Windows
 source .venv/bin/activate # macOS/Linux
 
-histo2ccf version          # should print: histo2ccf 0.2.3
+histo2ccf version          # should print: histo2ccf 0.2.14
 ```
 
 The **`ephys`** extra (§6b) pulls SpikeInterface + neo/probeinterface; the
@@ -35,19 +35,24 @@ histo2ccf gui
 A napari viewer opens with the **Registration** panel (5 tabs) docked on the
 **left** - **Histology / Atlas / Probes / Register / Ephys** - and a permanent
 **3D & Export** panel docked on the **right** (3D view + Plotly/HERBS/CSV export,
-always available). Project **Save / Load** live in the **Project menu** (first in
-the menu bar, not a tab).
+always available). The menu bar has two menus: **Project** (Save / Load / Close —
+*Close* clears the current project to start fresh without restarting) and
+**Registration** (Parameters… — the registration settings, kept out of the panel).
 
 ---
 
 ## 2 - Histology tab: load the slide and detect sections
 
-1. Click **Open slide…** → select your image.  
+1. Click **Open slide…** → select your image. You can select **several images at
+   once** (or open more later); they are merged into one combined canvas, stacked
+   top-to-bottom, so all sections share one coordinate space.  
    The slide appears as a gray layer in the viewer.
 2. Optionally adjust **Min area px** (default 5000) and **Closing r** (try 0 first).
 3. Click **Detect sections**.  
    Yellow rectangles appear around the detected brain sections.  
-   Status should read e.g. *"Detected 14 section(s)"*.
+   Status should read e.g. *"Detected 14 section(s)"*. Detection is **slide-aware**:
+   sections are numbered column-by-column **within each source image**, so the
+   ordering never runs a column across two stacked slides.
 
 **Image tools** (same tab):
 
@@ -94,12 +99,32 @@ the menu bar, not a tab).
 
 ## 5 - Register tab: run the registration
 
-1. Confirm **B-spline grid** (8) and **Max iterations** (100).  
-   For a quick first test use grid = 6 and iterations = 60.
+The panel is intentionally lean - just **Register all sections**, the progress
+bar, the residuals table, **Show atlas overlay**, and the manual-adjustment tools.
+
+1. (Optional) Open **Registration menu → Parameters…** to review the settings.
+   The defaults are good and all toggles are **on**:
+   - **Predict planes with DeepSlice** (top) - predicts a consistent set of atlas
+     planes first, so you don't need to assign AP by hand. (Needs the `deepslice`
+     extra; first run downloads the model and is slow.)
+   - **Regularized registration (elastix)**, **Smoothness (bending energy)**,
+     **Restrict to tissue mask** - the ABBA-style engine that keeps atlas
+     boundaries on the tissue (needs the `elastix` extra; falls back to a plain
+     SimpleITK B-spline otherwise).
+   - **Silhouette pre-align** and **Snap atlas contour to tissue** - make the
+     atlas outer contour follow the tissue border automatically.
+   - **B-spline grid** (8) and **Max iterations** (100); for a quick first test
+     try grid = 6, iterations = 60.
 2. Click **Register all sections**.  
-   The progress bar fills section-by-section; status shows the residual as each finishes.  
-   Typical runtime: ~30 s per section on CPU.
-3. After completion the residuals table populates - lower MI metric = better alignment.
+   The progress bar fills section-by-section; status shows the residual as each
+   finishes. Typical runtime: ~30 s per section on CPU.
+3. After completion the residuals table populates (residual = normalized-intensity
+   RMS over the tissue; lower = better). Click **Show atlas overlay on sections**
+   to see the registered region boundaries warped onto each section.
+4. **If a section needs a touch-up** (usually only damaged/asymmetric ones), use
+   **Manual atlas adjustment**: pick the section, then either **Box transform**
+   (drag the overlay / box handles) or **Landmarks** (place + drag correspondence
+   points). **Reset adjustment** clears it. Both re-map probes and auto-save.
 
 ---
 
@@ -192,5 +217,5 @@ histo2ccf register project.histo2ccf.json --atlas allen_mouse_25um
 | Atlas loaded | Status shows resolution; AP range updates |
 | Registration completes | All residuals shown, no error dialog |
 | Plotly HTML opens | Probe line visible inside semi-transparent brain |
-| HERBS pkl | Readable by `legacy/HERBS_to_AllenCCF/herbs_probe_mapping.py` |
+| HERBS pkl | Written for the HERBS post-processing format |
 | Per-channel CSV | 384 rows × 6 columns for NP 1.0 |

@@ -1,6 +1,6 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-10 · version **0.2.14** · branch **newUI** (committed, not pushed)_
+_Last updated: 2026-06-10 · version **0.2.15** · branch **main** (newUI merged in)_
 
 ## TL;DR
 
@@ -15,10 +15,10 @@ launches and **end-to-end registration completes without crashing** (TensorFlow
 in the DeepSlice subprocess keeps the memory peak down). If the GL error ever
 recurs, `histo2ccf gl-info` still diagnoses it and a reboot/driver fix is the cure.
 
-> Work on `newUI` is **committed but not pushed** (ahead of `origin/newUI`).
-> Recent commits: atlas-matcher dialog, Save/Load → menu, flip restore + lazy
-> atlas on load, layer panels hidden, section-scope picker + working levels,
-> Annotate→Probes rename.
+> The `newUI` line of work is **merged into `main`**. Recent themes: regularized
+> elastix engine + automatic outer-contour snap, manual atlas correction (box +
+> landmarks), Register-panel slimmed (parameters moved to the Registration menu),
+> menu bar trimmed to Project + Registration.
 
 ## How to run
 
@@ -98,11 +98,33 @@ window; lazily loads the atlas so brain volumes show). HERBS pkl + per-channel C
 Probes can have an entry on a section in one slide and a tip on a section in
 another, so all sections must share **one coordinate space**. Rather than track
 per-slide offsets through clicks/registration/3D (brittle), **opening multiple
-slide images merges them into one combined image** (sections from all slides laid
-out in a single canvas). The user is told this on load. After the merge the rest
-of the pipeline is unchanged - there is effectively one slide. The napari built-in
-**layer list / layer controls panels are hidden** (the workflow panel drives
-everything), so slides are never managed as separate layers.
+slide images merges them into one combined image** (`io.image.merge_images` stacks
+sources **top-to-bottom** with a 40 px gap, sorted alphabetically so reload
+reproduces the exact pixels). The user is told this on load. After the merge the
+rest of the pipeline is unchanged - there is effectively one slide. The napari
+built-in **layer list / layer controls panels are hidden** (the workflow panel
+drives everything), so slides are never managed as separate layers.
+
+**Slide-aware section ordering (v0.2.15).** Because sources are *stacked
+vertically*, a naive column-first ordering walks each column top-to-bottom across
+the whole canvas - so column 0 runs through both stacked slides and interleaves
+their sections. Fix: `io.image.slide_bands(heights)` returns each source's
+`(y_start, y_end)` band (same `gap_px` as the merge), tracked in
+`WorkflowState.slide_bands` (set on first load = one band, on merge, and on
+reload). `order_sections(..., band_bounds=...)` then partitions sections by band
+(centroid-y), orders each source independently with the existing column/row logic,
+and concatenates `ap_order` top band first - so columns stay within a slide.
+`detect_sections_worker` threads it; a single-source slide passes one band and
+behaves exactly as before.
+
+**Close/clear project (v0.2.15).** **Project menu → Close Project** (confirm
+dialog) calls `WorkflowState.reset()` (wipes project, images, bands, active
+selection, saved path; **keeps the loaded atlas object** in memory), clears all
+napari layers, and re-runs every panel's `refresh_after_load()` - returning the
+app to its just-launched state without a restart. Wired via an `on_cleared`
+callback to `_install_project_menu`; `_refresh_panels()` now also covers the slide
+loader + image tools (the slide loader gained a `refresh_after_load` that resets
+its labels).
 
 ## Ephys alignment (v0.2)
 
@@ -485,7 +507,7 @@ update/roll back the GPU driver.
    (regions + CCF) in the napari 3D view and a per-channel region CSV (see "Ephys
    alignment" follow-ups). Done earlier: multiple-slide merge, Ephys tab.
 2. Eyeball DeepSlice planes for a **left/right mirror** (flip `_FLIP_ML` if so).
-3. **Push** `newUI` to origin when ready (committed locally, not pushed).
+3. **Push** `main` to origin when ready (newUI has been merged into main).
 4. Possible follow-ups discussed but not built: auto-clean DeepSlice AP outliers
    (neighbor smoothing), a globally-coupled (vs per-section) registration, and a
    true Mesa software-GL option (the bundled `opengl32sw.dll` exists but vispy/

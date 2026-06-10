@@ -41,6 +41,15 @@ def _cluster_rows(ys: np.ndarray, min_gap: float) -> np.ndarray:
     return row_of_original
 
 
+def _band_of(cy: float, bands: list[tuple[int, int]]) -> int:
+    """Index of the band whose ``(y_start, y_end)`` contains ``cy`` (nearest if gap)."""
+    for i, (y0, y1) in enumerate(bands):
+        if y0 <= cy < y1:
+            return i
+    centers = [0.5 * (y0 + y1) for y0, y1 in bands]
+    return int(np.argmin([abs(cy - c) for c in centers]))
+
+
 def order_sections(
     sections: list[DetectedSection],
     *,
@@ -48,6 +57,7 @@ def order_sections(
     left_to_right: bool = True,
     top_to_bottom: bool = True,
     row_gap_factor: float = 0.6,
+    band_bounds: list[tuple[int, int]] | None = None,
 ) -> list[OrderedSection]:
     """Order sections into a linear AP sequence and tag each with row/col.
 
@@ -60,9 +70,37 @@ def order_sections(
       etc. This matches how sections are usually laid out on the lab's slides.
     * **row-first** - across row 0 (left→right), then row 1, etc. (reading
       order).
+
+    When ``band_bounds`` is given (the per-source vertical bands from
+    :func:`histo_to_ccf.io.image.slide_bands` for a merged multi-slide canvas),
+    ordering is **slide-aware**: each source's sections are gridded and numbered
+    independently, then concatenated top band first - so a column never runs
+    across two stacked slides. Row/col tags are local to each band.
     """
     if not sections:
         return []
+
+    # Slide-aware: order each source's band independently, then renumber the
+    # ap_order sequentially across bands (top band first).
+    if band_bounds and len(band_bounds) > 1:
+        groups: dict[int, list[DetectedSection]] = {}
+        for s in sections:
+            b = _band_of(float(s.centroid_px[1]), band_bounds)
+            groups.setdefault(b, []).append(s)
+        out: list[OrderedSection] = []
+        offset = 0
+        for b in sorted(groups):
+            sub = order_sections(
+                groups[b], column_first=column_first, left_to_right=left_to_right,
+                top_to_bottom=top_to_bottom, row_gap_factor=row_gap_factor,
+            )
+            out.extend(
+                OrderedSection(section=o.section, row=o.row, col=o.col,
+                               ap_order=o.ap_order + offset)
+                for o in sub
+            )
+            offset += len(sub)
+        return out
 
     cys = np.array([s.centroid_px[1] for s in sections])
     cxs = np.array([s.centroid_px[0] for s in sections])

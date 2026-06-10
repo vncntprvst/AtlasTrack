@@ -197,21 +197,38 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # After a project load, redraw the canvas AND repopulate every tab's fields
     # from the loaded project (probes, tip/entry, atlas + AP, ordering, residuals,
     # ephys) - loading the data alone leaves the widgets showing stale defaults.
+    panels = (slide_loader, image_tools, probe_picker, click_overlay,
+              atlas_browser, ordering, register_panel, ephys_panel)
+
+    def _refresh_panels() -> None:
+        for panel in panels:
+            refresh = getattr(panel, "refresh_after_load", None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:  # noqa: BLE001 - one panel must not block the rest
+                    pass
+
     def _on_project_loaded() -> None:
         _reload_project_display(viewer, state)
-        probe_picker.refresh_after_load()
-        click_overlay.refresh_after_load()
-        atlas_browser.refresh_after_load()
-        ordering.refresh_after_load()
-        register_panel.refresh_after_load()
-        ephys_panel.refresh_after_load()
+        _refresh_panels()
         # Auto-load the project's atlas in the background so the overlay / 3D
         # brain are ready without a manual "Load atlas" click.
         atlas_browser.auto_load_atlas()
 
-    # Project save/load live in the menu bar (see _install_project_menu), not a
-    # tab - they are file actions, not part of the left-to-right workflow.
-    _install_project_menu(viewer, state, on_loaded=_on_project_loaded)
+    def _on_project_cleared() -> None:
+        # Remove every layer from the canvas and reset all tabs to the empty
+        # project (state has already been reset by the menu action).
+        try:
+            viewer.layers.clear()
+        except Exception:  # noqa: BLE001
+            pass
+        _refresh_panels()
+
+    # Project save/load/close live in the menu bar (see _install_project_menu),
+    # not a tab - they are file actions, not part of the left-to-right workflow.
+    _install_project_menu(viewer, state, on_loaded=_on_project_loaded,
+                          on_cleared=_on_project_cleared)
     # A "Registration" menu hosts the parameters dialog (kept out of the panel),
     # and napari's default menus are hidden - the user only wants Project +
     # Registration in the bar.
@@ -230,7 +247,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
 
 def _install_project_menu(
-    viewer: "napari.Viewer", state: "WorkflowState", on_loaded=None
+    viewer: "napari.Viewer", state: "WorkflowState", on_loaded=None, on_cleared=None
 ) -> None:
     """Add a "Project" menu (first in the menu bar) with Save / Save As… / Load.
 
@@ -284,6 +301,26 @@ def _install_project_menu(
         if helper._path_edit.text().strip():
             helper._save()
 
+    def _close() -> None:
+        # Closing discards in-memory work, so confirm first (best-effort dialog).
+        try:
+            from qtpy.QtWidgets import QMessageBox
+
+            resp = QMessageBox.question(
+                helper, "Close project",
+                "Close the current project? This clears the loaded slides, "
+                "sections, probes and registration from the app. Unsaved changes "
+                "will be lost.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if resp != QMessageBox.Yes:
+                return
+        except Exception:  # noqa: BLE001 - headless: proceed without a prompt
+            pass
+        state.reset()
+        if on_cleared is not None:
+            on_cleared()
+
     save_action = menu.addAction("Save Project")
     save_action.triggered.connect(_save)
     save_as_action = menu.addAction("Save Project As…")
@@ -291,6 +328,8 @@ def _install_project_menu(
     menu.addSeparator()
     load_action = menu.addAction("Load Project…")
     load_action.triggered.connect(helper._load)
+    close_action = menu.addAction("Close Project")
+    close_action.triggered.connect(_close)
 
 
 def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
@@ -475,7 +514,7 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
     import numpy as np
 
     from histo_to_ccf.gui.section_display import sections_to_outline_labels
-    from histo_to_ccf.io.image import load_image, merge_images
+    from histo_to_ccf.io.image import load_image, merge_images, slide_bands
 
     for slide_idx, slide in enumerate(state.project.slides):
         try:
@@ -483,9 +522,13 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
             # source loads directly. merge_images is deterministic, so the
             # combined pixels - and hence the stored section bboxes - line up.
             if slide.source_paths and len(slide.source_paths) > 1:
-                img = merge_images([load_image(Path(s)) for s in slide.source_paths])
+                sources = [load_image(Path(s)) for s in slide.source_paths]
+                img = merge_images(sources)
+                # Restore per-source bands so a re-detect stays slide-aware.
+                state.slide_bands[slide_idx] = slide_bands([s.shape[0] for s in sources])
             else:
                 img = load_image(Path(slide.image_path))
+                state.slide_bands[slide_idx] = [(0, int(img.shape[0]))]
         except Exception:
             continue
         # Flips are baked into the in-memory array at flip-time and only the

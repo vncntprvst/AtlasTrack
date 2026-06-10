@@ -170,6 +170,23 @@ class SlideLoaderWidget(QWidget):
         layout.addWidget(edit_box)
         layout.addStretch()
 
+    def refresh_after_load(self) -> None:
+        """Sync the loader's labels to the current project (load or clear)."""
+        slides = self._state.project.slides
+        idx = self._state.active_slide_idx
+        if not slides or idx is None or idx >= len(slides):
+            self._path_label.setText("No file loaded")
+            self._status.setText("")
+            return
+        slide = slides[idx]
+        n = len(slide.source_paths)
+        if n > 1:
+            self._path_label.setText(f"{n} images merged")
+        else:
+            from pathlib import Path
+
+            self._path_label.setText(Path(slide.image_path).name)
+
     # ------------------------------------------------------------------
     # Load
     # ------------------------------------------------------------------
@@ -200,6 +217,8 @@ class SlideLoaderWidget(QWidget):
         slide_idx = self._state.add_slide(p, img)
         self._state.active_slide_idx = slide_idx
         self._state.project.slides[slide_idx].source_paths = [str(p)]
+        # One source => one band spanning the whole image (ordering unchanged).
+        self._state.slide_bands[slide_idx] = [(0, int(img.shape[0]))]
         self._path_label.setText(p.name)
         self._after_image_changed(img, slide_idx)
 
@@ -211,7 +230,7 @@ class SlideLoaderWidget(QWidget):
         changes pixel coordinates, so any existing detected sections are cleared
         and the user is told to re-detect.
         """
-        from histo_to_ccf.io.image import load_image, merge_images
+        from histo_to_ccf.io.image import load_image, merge_images, slide_bands
 
         slide_idx = self._state.active_slide_idx
         slide = self._state.project.slides[slide_idx]
@@ -229,6 +248,9 @@ class SlideLoaderWidget(QWidget):
             self._status.setText(f"Merge failed: {exc}")
             return
 
+        # Record each source's vertical band so detection orders columns/rows
+        # per source slide instead of across the stacked canvas.
+        self._state.slide_bands[slide_idx] = slide_bands([im.shape[0] for im in images])
         had_sections = bool(slide.sections)
         slide.source_paths = sources
         slide.image_path = sources[0]
@@ -304,6 +326,7 @@ class SlideLoaderWidget(QWidget):
             min_area_px=self._min_area.value(),
             closing_radius_px=self._closing_r.value(),
             equalize_boxes=self._equalize_box.isChecked(),
+            band_bounds=self._state.slide_bands.get(slide_idx),
         )
         worker.returned.connect(self._on_detected)
         worker.errored.connect(lambda e: self._status.setText(f"Error: {e}"))

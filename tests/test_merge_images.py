@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.io.image import merge_images
+from histo_to_ccf.io.image import merge_images, slide_bands
 
 
 def test_single_image_returned_unchanged() -> None:
@@ -52,3 +52,20 @@ def test_merge_is_deterministic_for_reload() -> None:
     out1 = merge_images([a, b])
     out2 = merge_images([a, b])
     np.testing.assert_array_equal(out1, out2)
+
+
+def test_slide_bands_match_merge_placement() -> None:
+    """Each band's (y0, y1) is exactly where merge_images places that source."""
+    a = np.ones((3, 4), dtype=np.uint8)
+    b = np.full((2, 6), 2, dtype=np.uint8)
+    gap = 5
+    bands = slide_bands([a.shape[0], b.shape[0]], gap_px=gap)
+    assert bands == [(0, 3), (3 + gap, 3 + gap + 2)]
+
+    out = merge_images([a, b], gap_px=gap)
+    for (y0, y1), src in zip(bands, [a, b], strict=True):
+        np.testing.assert_array_equal(out[y0:y1, : src.shape[1]], src)
+
+
+def test_slide_bands_single_source_spans_image() -> None:
+    assert slide_bands([120]) == [(0, 120)]

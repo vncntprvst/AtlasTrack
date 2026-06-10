@@ -41,6 +41,25 @@ def _to_rgb(arr: np.ndarray) -> np.ndarray:
     return np.stack([arr[..., 0]] * 3, axis=-1)
 
 
+def slide_bands(
+    heights: list[int], *, gap_px: int = 40
+) -> list[tuple[int, int]]:
+    """Vertical ``(y_start, y_end)`` band of each source image in the merged canvas.
+
+    :func:`merge_images` stacks sources top-to-bottom separated by ``gap_px``, so
+    source ``i`` occupies rows ``[y_start, y_end)``. These bands let section
+    detection stay **slide-aware**: order the sections within each source's band
+    independently instead of letting a column run across two stacked slides. Must
+    use the same ``gap_px`` as :func:`merge_images`.
+    """
+    bands: list[tuple[int, int]] = []
+    y = 0
+    for h in heights:
+        bands.append((y, y + int(h)))
+        y += int(h) + gap_px
+    return bands
+
+
 def merge_images(images: list[np.ndarray], *, gap_px: int = 40) -> np.ndarray:
     """Merge several slide images into one canvas, stacked vertically with a gap.
 

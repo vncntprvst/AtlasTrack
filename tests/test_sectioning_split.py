@@ -84,6 +84,41 @@ def test_order_sections_column_first_default() -> None:
     assert by_rc[(0, 1)] == 2
 
 
+def test_order_sections_slide_aware_keeps_columns_within_a_slide() -> None:
+    """With per-source bands, a column never runs across two stacked slides."""
+    from histo_to_ccf.sectioning.split import DetectedSection
+
+    def sec(cx, cy):
+        bbox = (cx - 15, cy - 15, cx + 15, cy + 15)
+        return DetectedSection(bbox, np.zeros((1, 1), bool), 900, (float(cx), float(cy)), 1.0)
+
+    # Two stacked slides (band0 = rows 0..100, band1 = rows 140..240), each a
+    # 2-col x 2-row grid at the same x positions.
+    band0 = [sec(20, 25), sec(60, 25), sec(20, 75), sec(60, 75)]
+    band1 = [sec(20, 165), sec(60, 165), sec(20, 215), sec(60, 215)]
+    sections = band0 + band1
+    bands = [(0, 100), (140, 240)]
+
+    ordered = order_sections(sections, band_bounds=bands)
+    ap = {(int(o.section.centroid_px[0]), int(o.section.centroid_px[1])): o.ap_order
+          for o in ordered}
+    slide0_ap = [ap[(x, y)] for x in (20, 60) for y in (25, 75)]
+    slide1_ap = [ap[(x, y)] for x in (20, 60) for y in (165, 215)]
+    # Every slide-0 section is numbered before every slide-1 section.
+    assert max(slide0_ap) < min(slide1_ap)
+    assert sorted(slide0_ap) == [0, 1, 2, 3]
+    assert sorted(slide1_ap) == [4, 5, 6, 7]
+
+    # Without bands, column-first walks col 0 across BOTH slides, so the two
+    # slides interleave (the behaviour we are fixing).
+    plain = order_sections(sections)
+    ap_plain = {(int(o.section.centroid_px[0]), int(o.section.centroid_px[1])): o.ap_order
+                for o in plain}
+    s0 = [ap_plain[(x, y)] for x in (20, 60) for y in (25, 75)]
+    s1 = [ap_plain[(x, y)] for x in (20, 60) for y in (165, 215)]
+    assert max(s0) > min(s1)  # interleaved
+
+
 def test_equalize_box_sizes_expands_undersized() -> None:
     from histo_to_ccf.sectioning.split import DetectedSection, _equalize_box_sizes
 
