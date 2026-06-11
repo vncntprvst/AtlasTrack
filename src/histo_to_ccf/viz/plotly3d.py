@@ -237,16 +237,19 @@ def _rereference_traces_to_bregma(fig: "go.Figure") -> None:
     """Shift every trace's x (ML) and y (AP) from CCF µm to bregma-referenced µm.
 
     Applied to *all* traces (region meshes and probes) so they stay aligned:
-    ``x = ML - midline`` (0 at midline) and ``y = bregma_AP - AP`` (0 at bregma,
-    anterior positive - same convention as the Atlas/ordering/residuals tabs).
-    DV (z) is left unchanged.
+    ``x = midline - ML`` (0 at midline) and ``y = bregma_AP - AP`` (0 at bregma,
+    anterior positive). DV (z) is left unchanged.
+
+    ML is now negated too (``midline - ML``). Reversing the z-axis for dorsal-up
+    mirrors L/R (the old bug); flipping ML cancels that mirror, so the scene is
+    un-mirrored AND AP reads anterior-positive. The ML sign also matches Paxinos.
     """
     from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM, MIDLINE_ML_UM
 
     for tr in fig.data:
         x = getattr(tr, "x", None)
         if x is not None:
-            tr.x = tuple(float(v) - MIDLINE_ML_UM for v in x)
+            tr.x = tuple(MIDLINE_ML_UM - float(v) for v in x)
         y = getattr(tr, "y", None)
         if y is not None:
             tr.y = tuple(BREGMA_AP_FROM_ORIGIN_UM - float(v) for v in y)
@@ -312,14 +315,14 @@ def build_figure(
         scene=dict(
             xaxis_title=xaxis_title,
             yaxis_title=yaxis_title,
-            zaxis_title="DV (µm)",
+            zaxis_title="DV (µm, ventral +)",
+            # Reverse DV so dorsal is up (reliable). On its own this mirrors L/R, but
+            # the ML flip in _rereference_traces_to_bregma cancels that mirror.
+            zaxis={"autorange": "reversed"},
             aspectmode="data",
-            # Dorsal-up comes from the camera's up vector (-DV), NOT from reversing
-            # the z-axis: reversing a single axis flips the scene's handedness and
-            # mirrors left/right (the bug). The camera also looks from the POSTERIOR
-            # (eye at -AP), matching the napari 3D view.
-            camera={"eye": {"x": 0.0, "y": -1.9, "z": -1.1},
-                    "up": {"x": 0, "y": 0, "z": -1},
+            # Look from the POSTERIOR (eye at -AP), dorsal up, matching napari.
+            camera={"eye": {"x": 0.0, "y": -1.9, "z": 1.1},
+                    "up": {"x": 0, "y": 0, "z": 1},
                     "center": {"x": 0, "y": 0, "z": 0}},
             bgcolor="rgb(20,20,30)",
             xaxis={"gridcolor": "rgb(60,60,80)", "zerolinecolor": "rgb(120,120,160)"},

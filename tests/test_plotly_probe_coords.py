@@ -37,7 +37,8 @@ def test_probe_line_uses_placed_ml_without_shank_offset() -> None:
 def test_bregma_referencing_shifts_ml_and_ap() -> None:
     fig = build_figure(_project_with_shank3(), atlas=None, bregma_relative=True)
     probe = _probe_trace(fig)
-    # ML from midline (5700): 5800 -> +100 (stays on the right, never crosses 0).
-    assert list(probe.x) == [100.0, 100.0]
+    # ML = midline - ML_ccf (5700 - 5800) -> -100 (Paxinos sign; flipped to keep the
+    # dorsal-up z-reversal from mirroring L/R).
+    assert list(probe.x) == [-100.0, -100.0]
     # AP from bregma (5400 - 10700): -5300 (posterior, negative).
     assert list(probe.y) == [-5300.0, -5300.0]

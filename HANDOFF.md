@@ -1,6 +1,24 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-11 · version **0.2.26** · branch **dev**_
+_Last updated: 2026-06-11 · version **0.2.27** · branch **dev**_
+
+## 3D orientation: anterior-positive both views, dorsal-up, no mirror (v0.2.27)
+
+Removing the Plotly z-reversal (v0.2.24) fixed the L/R mirror but left the brain
+**upside-down** (the camera up-vector approach didn't hold). Root cause again is
+handedness: **reversing one axis mirrors L/R; negating one axis mirrors L/R.** The
+reliable combination:
+
+- **Plotly**: keep the `zaxis` reversal (reliable dorsal-up) and **negate ML**
+  (`x = midline - ML`) to cancel the mirror it causes; AP stays `bregma - AP`
+  (anterior +). Camera looks from the posterior (`eye.y < 0`), `up = +z`.
+- **napari**: the display affine now negates **both AP and ML**
+  (`bregma - AP`, `midline - ML`) - two negations = a proper rotation (**det = +1**,
+  no mirror) - giving anterior-positive AP to match Plotly. DV stays ventral-positive;
+  dorsal-up from the camera (`up = -DV`), `view_direction = +AP`.
+- Net: **both views are anterior-positive AP, ML 0 at midline (Paxinos sign),
+  dorsal-up, un-mirrored.** `test_bregma_display_affine_does_not_mirror` still guards
+  det == +1. **Verify L/R + up/down on a real Plotly export.**
 
 ## Paxinos 5° pitch correction (v0.2.26)
 
@@ -51,10 +69,8 @@ instead (the way napari already did it); the camera also looks from the posterio
   So the napari bregma display is offset-only: `AP - bregma` (stays
   posterior-positive), `ML - midline`, DV unchanged; original posterior-dorsal
   camera kept. `test_bregma_display_affine_does_not_mirror` guards det == +1.
-- Consequence: **napari shows AP posterior-positive, Plotly anterior-positive**
-  (Plotly's x/y axis swap forces one negation to stay un-mirrored). Both are
-  bregma-referenced and L/R-correct; only the AP sign label differs. **Verify on a
-  real export** that L/R now matches reality in Plotly.
+- (Superseded by v0.2.27: both views are now anterior-positive AP - the napari
+  affine negates AP **and** ML together to stay un-mirrored.)
 
 ## Atlas conversion + Paxinos export - PLANNED, not built (user request)
 

@@ -938,10 +938,10 @@ def test_bregma_display_affine_does_not_mirror() -> None:
     from histo_to_ccf.viz.napari3d import _bregma_affine
 
     a = _bregma_affine()
-    assert np.isclose(np.linalg.det(a[:3, :3]), 1.0)  # proper, no mirror
-    # Offset only: AP 0 at bregma, ML 0 at midline, DV unchanged.
+    assert np.isclose(np.linalg.det(a[:3, :3]), 1.0)  # proper rotation, no mirror
+    # AP anterior-positive (bregma - AP), ML 0 at midline (midline - ML), DV unchanged.
     out = a @ np.array([10700.0, 5800.0, 5000.0, 1.0])
-    assert np.allclose(out[:3], [10700.0 - 5400.0, 5800.0 - 5700.0, 5000.0])
+    assert np.allclose(out[:3], [5400.0 - 10700.0, 5700.0 - 5800.0, 5000.0])
 
 
 @pytest.mark.qt
@@ -957,9 +957,8 @@ def test_default_3d_camera_is_posterior_dorsal_up(qtbot) -> None:
         viewer.dims.ndisplay = 3
         _set_default_camera(viewer)
         vd = np.asarray(viewer.camera.view_direction)
-        # Bregma display is offset-only (AP stays posterior-positive), so "from
-        # behind" still looks toward anterior = -AP.
-        assert vd[0] < 0          # looking toward anterior (-AP) = viewing from behind
+        # AP is anterior-positive, so viewing "from behind" looks toward anterior = +AP.
+        assert vd[0] > 0          # looking toward anterior (+AP) = viewing from behind
         assert abs(vd[1]) < 0.05  # symmetric left-right (no ML)
         assert vd[2] > 0          # tilted slightly downward (+DV)
         up = np.asarray(viewer.camera.up_direction)
