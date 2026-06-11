@@ -41,6 +41,11 @@ class LfpData:
     channel_ids: list
     stream_name: str
     derived_from_ap: bool = False
+    # Per-channel shank id from the probe (probeinterface). ``None`` when the probe
+    # doesn't define shanks. This is the *correct* way to split multi-shank probes -
+    # NOT the x location, since a Neuropixels 2.0 shank has TWO electrode columns,
+    # so unique-x over-splits one shank into two.
+    channel_shank_ids: np.ndarray | None = None
 
 
 def list_streams(recording_dir: "str | Path") -> list[str]:
@@ -126,6 +131,17 @@ def load_lfp(
         x_um = np.zeros(n_ch)
         depth_um = np.arange(n_ch, dtype=float)
 
+    # Per-channel shank id, in recording-channel order (the probe attached to the
+    # recording is already aligned to the channels). Lets the alignment view split
+    # a multi-shank probe correctly instead of guessing from x.
+    shank_ids = None
+    try:
+        sids = rec.get_probe().shank_ids
+        if sids is not None and len(sids) == traces.shape[1]:
+            shank_ids = np.asarray(sids)
+    except Exception:
+        shank_ids = None
+
     return LfpData(
         traces=np.asarray(traces, dtype=float),
         fs=fs,
@@ -134,4 +150,5 @@ def load_lfp(
         channel_ids=list(rec.channel_ids),
         stream_name=stream_name,
         derived_from_ap=derived,
+        channel_shank_ids=shank_ids,
     )

@@ -37,7 +37,7 @@ A napari viewer opens with the **Registration** panel (5 tabs) docked on the
 **3D & Export** panel docked on the **right** (3D view + Plotly/HERBS/CSV export,
 always available). The menu bar has two menus: **Project** (Save / Load / Close —
 *Close* clears the current project to start fresh without restarting) and
-**Registration** (Parameters… — the registration settings, kept out of the panel).
+**Registration** (Parameters — the registration settings, kept out of the panel).
 
 ---
 
@@ -120,7 +120,7 @@ to pan **left/right**, or **Shift** and scroll to pan **up/down**.
 The panel is intentionally lean - just **Register all sections**, the progress
 bar, the residuals table, **Show atlas overlay**, and the manual-adjustment tools.
 
-1. (Optional) Open **Registration menu → Parameters…** to review the settings.
+1. (Optional) Open **Registration menu → Parameters** to review the settings.
    The defaults are good and all toggles are **on**:
    - **Predict planes with DeepSlice** (top) - predicts a consistent set of atlas
      planes first, so you don't need to assign AP by hand. (Needs the `deepslice`
@@ -209,11 +209,18 @@ the IBL ephys-alignment GUI does.
    AP stream).
 3. Set **Seconds to analyse** (default 60) and click **Load & compute LFP power**.
 4. Click **Open alignment…**. The dialog shows the depth×frequency **LFP power
-   map** (left) beside the atlas **region colour strip** (right), sharing a depth
-   axis with the tip at the bottom.
-5. Drag the red **anchor lines** so LFP power transitions line up with region
-   boundaries (use **Add anchor (mid)** to create one, **Remove selected** /
-   **Clear anchors** to manage them).
+   map** (left) beside the atlas **region colour strip** (right, now labelled with
+   region **acronyms + names**), sharing a depth axis (tip at the bottom, surface at
+   the top). The header states how many channels this **shank** has and how many
+   **rows** (a Neuropixels 2.0 row holds 2 sites, so 96 channels = 48 rows), the
+   electrode span, and the histology track length (always ≥ the electrode span).
+   The depth axis is the **histology track**; the recorded electrodes occupy only
+   the **green dashed bracket**, which sits above the tip (the shank tip extends
+   below the lowest electrode).
+5. Two **anchors are pre-set** at the recorded-block edges. Drag the red **anchor
+   lines** so LFP power transitions line up with region boundaries (use **Add
+   anchor (mid)** to create one, **Remove selected** / **Clear anchors** to manage
+   them). **Save LFP power…** exports the per-channel power (.npz/.csv).
 6. Click **Apply** - each channel is placed on the tip→entry line and the
    per-channel CCF coordinates (plus the anchors) are stored on the shank and saved
    with the project.

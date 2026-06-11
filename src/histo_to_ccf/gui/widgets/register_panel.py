@@ -61,7 +61,7 @@ class RegisterPanelWidget(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
 
         # Registration parameters live in a dialog opened from the Registration
-        # menu ("Parameters…"), not inline - the defaults are good, so the panel
+        # menu ("Parameters"), not inline - the defaults are good, so the panel
         # stays focused on "Register all sections" and the results below.
         self._params_dialog = None
         params_box = QGroupBox("Registration parameters")
@@ -167,7 +167,7 @@ class RegisterPanelWidget(QWidget):
             "a 2D B-spline warps the histology onto it (mutual-information metric)."
         )
         params_layout.addWidget(method_lbl)
-        # Held for the Parameters… dialog; intentionally NOT added to the panel.
+        # Held for the Parameters dialog; intentionally NOT added to the panel.
         self._params_box = params_box
 
         self._reg_btn = QPushButton("Register all sections")
@@ -294,7 +294,7 @@ class RegisterPanelWidget(QWidget):
     def open_parameters_dialog(self) -> None:
         """Show the registration-parameters group in a (lazily-built) dialog.
 
-        Wired to the menu-bar "Registration → Parameters…" action. The parameter
+        Wired to the menu-bar "Registration → Parameters" action. The parameter
         widgets are reparented into the dialog once and persist there, so the
         values the user sets are the same widgets the registration run reads.
         """

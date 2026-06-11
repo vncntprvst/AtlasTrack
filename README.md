@@ -84,7 +84,7 @@ histo2ccf gl-info        # diagnose GPU/OpenGL if the GUI won't start
 
 The GUI shows a 5-tab **Registration** panel on the left (Histology → Atlas →
 Probes → Register → Ephys), a permanent **3D & Export** panel on the right, and a
-menu bar with **Project** (Save / Load / Close) and **Registration** (Parameters…).
+menu bar with **Project** (Save / Load / Close) and **Registration** (Parameters).
 **Project → Close** clears the current slides/sections/probes so you can start a
 fresh registration without restarting the app. In the canvas, the mouse wheel
 zooms; **Ctrl+wheel** pans left/right and **Shift+wheel** pans up/down.

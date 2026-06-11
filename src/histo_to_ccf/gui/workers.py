@@ -139,12 +139,16 @@ def lfp_power_worker(
     data = load_lfp(recording_dir, stream_name, max_seconds=max_seconds)
     freqs, psd = lfp_psd(data.traces, data.fs, fmin=fmin, fmax=fmax)
 
-    # Depth = distance from tip: smallest y is the tip end. Sort ascending so the
-    # display can put the tip at the bottom.
+    # Sort ascending by the probe y-location (distance along the shank from the
+    # tip) so the display can put the tip at the bottom. Keep the ABSOLUTE y - do
+    # NOT zero it at the lowest channel: the lowest recorded electrode usually sits
+    # well above the physical tip (e.g. the NP2.0 chisel tip + bank offset), and
+    # forcing it to depth 0 would wrongly pin it to the histology tip.
     order = np.argsort(data.channel_depths_um)
     depths = data.channel_depths_um[order]
-    depths = depths - float(depths.min())  # zero at the tip
     psd_sorted = psd[order]
+    sids = data.channel_shank_ids
+    shank_ids = np.asarray(sids)[order] if sids is not None else None
 
     return {
         "freqs": freqs,
@@ -152,6 +156,7 @@ def lfp_power_worker(
         "image": power_image(psd_sorted),
         "depths_um": depths,
         "x_um": data.channel_x_um[order],
+        "shank_ids": shank_ids,
         "channel_ids": [data.channel_ids[i] for i in order],
         "stream_name": data.stream_name,
         "derived_from_ap": data.derived_from_ap,

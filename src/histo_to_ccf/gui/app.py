@@ -346,7 +346,7 @@ def _install_project_menu(
 
 
 def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
-    """Add a "Registration" menu whose "Parameters…" opens the params dialog.
+    """Add a "Registration" menu whose "Parameters" opens the params dialog.
 
     The registration parameters were moved out of the Register panel (the
     defaults are good); this is where to bring them back up when needed.
@@ -361,7 +361,7 @@ def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
 
     menu = QMenu("Registration", menubar)
     menubar.addMenu(menu)
-    params_action = menu.addAction("Parameters…")
+    params_action = menu.addAction("Parameters")
     params_action.triggered.connect(register_panel.open_parameters_dialog)
 
 

@@ -1,6 +1,34 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-11 · version **0.2.22** · branch **dev**_
+_Last updated: 2026-06-11 · version **0.2.23** · branch **dev**_
+
+## Ephys alignment clarity + NP2.0 geometry (v0.2.23)
+
+Driven by the user's Neuropixels feedback (captured in memory:
+`reference_neuropixels_geometry`). In `ephys_align_dialog` / `ephys/loader` /
+`lfp_power_worker`:
+
+- **Split shanks by `shank_ids`, not x.** `loader` now reads
+  `recording.get_probe().shank_ids` (per channel) into `LfpData.channel_shank_ids`;
+  the dialog's `_shank_mask` selects by shank id, falling back to gap-clustering x
+  into the probe's shank count (`_cluster_x_into_shanks`). Fixes "shank 3 shows 48
+  channels not 96" - NP2.0 has **2 columns per shank**, so unique-x grabbed one
+  column. The info line now states **"N recorded channels in M rows (~k sites/row)"**
+  (derived, never hard-coded).
+- **Absolute depth-from-tip.** `lfp_power_worker` no longer zeroes depths at the
+  lowest channel; the recorded block keeps its real offset above the physical tip,
+  and the dialog uses absolute `_depths`. Axis labels are now track endpoints
+  ("surface"/"tip"), not channel ids.
+- **Region acronyms** (+ short names) are drawn beside the colour strip
+  (`_draw_region_labels`, `_region_caption`).
+- **Recorded-block brackets**: green dashed lines mark where the recorded
+  electrodes land on the track (`_draw_recorded_extent`, redrawn on anchor move),
+  and two **anchors are pre-set** at the block edges for fresh shanks.
+- **Save LFP power** (`_save_lfp_power`): export per-channel PSD + depths + freqs as
+  `.npz`/`.csv`.
+- **Not done (needs the full probe layout, not just recorded contacts):** lines for
+  the *full physical* electrode-site extent (all 1,280 sites incl. the 175 µm tip
+  taper). The histology track is always >= the electrode span.
 
 ## Probe ML double-count fix + bregma-referenced Plotly axes (v0.2.22)
 
@@ -140,7 +168,7 @@ Windows.
 Layout: the **Registration** panel (5 tabs) docks on the **left**; a permanent
 **3D & Export** panel (`VizExportPanelWidget`) docks on the **right**. The menu bar
 shows only two menus (v0.2.14): **Project** (Save / Save As… / Load) and
-**Registration** (Parameters…); napari's default File/View/Plugins/Window/Help menus
+**Registration** (Parameters); napari's default File/View/Plugins/Window/Help menus
 are **hidden** (`_keep_only_menus`, best-effort - they're set invisible, not removed).
 Tab order left→right: **Histology → Atlas → Probes → Register → Ephys**.
 1. **Histology** (was "Load") - open one or more composite slides; multiple opens
@@ -169,7 +197,7 @@ Tab order left→right: **Histology → Atlas → Probes → Register → Ephys*
    sections"**, the progress/status, the residuals table, "Show atlas overlay", and
    the manual adjustment group. **All registration parameters** are **no longer shown
    inline** - the defaults are good, so they live in a dialog opened from
-   **Registration menu → Parameters…** (`register_panel.open_parameters_dialog`
+   **Registration menu → Parameters** (`register_panel.open_parameters_dialog`
    reparents the same widgets into the dialog, so what you set is what the run reads).
    In that dialog, **"Predict planes with DeepSlice"** sits at the **top** (it's the
    first thing registration does), followed by B-spline grid, max iterations,

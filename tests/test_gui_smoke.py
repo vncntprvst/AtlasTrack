@@ -843,9 +843,12 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
     dlg._per_freq_check.setChecked(True)
     assert dlg._img_feat.shape[0] == 16
 
+    # A fresh shank pre-sets two anchors at the recorded electrode block edges.
+    assert len(dlg.anchors()) == 2
+
     # Double-click placement adds an anchor at the clicked depth, then clear.
     dlg._add_anchor_at_scene_y(300.0)
-    assert len(dlg.anchors()) == 1
+    assert len(dlg.anchors()) == 3
     dlg.clear_anchors()
     assert dlg.anchors() == []
 
@@ -860,6 +863,47 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
     assert len(eph.channel_ccf_um) == 16
     assert len(eph.channel_depths_um) == 16
     assert eph.anchors and eph.anchors[0][0] == pytest.approx(1000.0)
+
+
+@pytest.mark.qt
+def test_ephys_shank_selection_full_shank_not_one_column(qtbot) -> None:
+    """A NP2.0 shank (2 columns) selects all 96 of its channels, not one 48-col."""
+    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+    from histo_to_ccf.gui.widgets.ephys_align_dialog import EphysAlignmentDialog
+
+    state = WorkflowState()
+    shanks = [Shank(index=i) for i in range(4)]
+    shanks[3].tip_ccf_um = (10000.0, 5800.0, 6000.0)
+    shanks[3].entry_ccf_um = (10000.0, 5800.0, 1000.0)
+    state.project.probes.append(
+        ProbeSpec(label="A", type=ProbeType(name="NP2", n_shanks=4), shanks=shanks))
+
+    # 4 shanks x 2 columns x 48 rows = 384 channels.
+    n_rows = 48
+    xs, depths, sids = [], [], []
+    for s in range(4):
+        for r in range(n_rows):
+            for c in range(2):
+                xs.append(s * 250.0 + c * 32.0)
+                depths.append(r * 15.0)
+                sids.append(str(s))
+    base = dict(
+        depths_um=np.array(depths, float), x_um=np.array(xs, float),
+        image=np.zeros((len(xs), 5), np.uint8), psd=np.zeros((len(xs), 5)),
+        freqs=np.arange(5.0), channel_ids=list(range(len(xs))), stream_name="S",
+    )
+
+    # By probe shank ids.
+    dlg = EphysAlignmentDialog(state, 0, 3, {**base, "shank_ids": np.array(sids)})
+    qtbot.addWidget(dlg)
+    assert dlg._n_channels == 96 and dlg._n_rows == 48
+
+    # Fallback (no shank ids) clusters x into shanks -> still the full 96.
+    dlg2 = EphysAlignmentDialog(state, 0, 3, {**base, "shank_ids": None})
+    qtbot.addWidget(dlg2)
+    assert dlg2._n_channels == 96
+    dlg.close()
+    dlg2.close()
 
 
 @pytest.mark.qt
