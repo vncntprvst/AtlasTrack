@@ -1,6 +1,6 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-11 · version **0.2.27** · branch **dev**_
+_Last updated: 2026-06-11 · version **0.2.29** · branch **dev**_
 
 ## 3D orientation: anterior-positive both views, dorsal-up, no mirror (v0.2.27)
 
@@ -32,6 +32,47 @@ the v0.2.25 pure-mirror Paxinos transform was only right near bregma. Rebuilt
 `export_paxinos_csv(..., alignment=...)`. Scale/pitch/bregma-DV are **estimates** -
 validate with histology. The 3D views stay bregma-CCF (not pitch-corrected). See
 memory `reference_paxinos_transform`.
+
+## Box-adjustment persistence + optional preserve-on-reregister (v0.2.30)
+
+User report: a **box** atlas correction (done after "Reset morph to plane") "keeps
+resetting back"; trigger unknown (NOT re-registration, NOT reload - both ruled out
+by the user / by code: `manual_affine` round-trips through save/load and the
+world↔section affine math is exact; `_render_overlay` reapplies it). Changes made:
+
+- **Hardened `_rerender_section_overlay`** to reapply a box `manual_affine` (via
+  `section_to_world`) instead of forcing `layer.affine = identity`, mirroring
+  `_render_overlay`. (Its 3 current callers all clear the correction first, so this
+  is latent-bug insurance, not the observed cause.)
+- **Optional** "Keep hand-corrected sections on re-run" checkbox (params dialog,
+  **default off**, per user) → `register_worker_progressive(preserve_manual=...)`
+  skips re-registering sections with `manual_affine`/`manual_landmarks` and yields a
+  "Keeping N hand-corrected section(s)" note.
+- **Still unexplained**: the observed reset. Leading remaining hypothesis is an
+  *uncommitted* box (the drag only persists when the user clicks **Apply
+  adjustment** / toggles the Adjust button off → `_commit_adjustment`; a drag left
+  un-applied is lost on the next redraw). TODO if confirmed: live-commit on drag or
+  auto-commit on section-switch / overlay-refresh.
+
+## Bugfix: tip/entry markers vanish after close→reload (v0.2.29)
+
+`_on_project_cleared` calls `viewer.layers.clear()`, but `ClickOverlayWidget` kept
+its `_tip_layer`/`_entry_layer`/`_traj_layer` attributes pointing at the removed
+layers. `_ensure_points_layers` only (re)creates a layer when its ref is `None`, so
+after a close→reload it wrote marker data to **detached** layers: markers didn't
+draw and `Select / move` set `selection.active` to a layer "not in the list".
+Fix: `_drop_stale_layer_refs()` nulls any ref no longer in `viewer.layers`; called
+from `_ensure_points_layers`, `_ensure_traj_layer`, and `refresh_after_load`.
+Regression test: `test_markers_redraw_after_layers_cleared`.
+
+## TODO: region-atlas overlay (Kim/BBP) not yet correct
+
+The region-atlas picker (v0.2.25) renders Kim/BBP region meshes onto Allen-registered
+probe coordinates assuming the atlases are pixel-perfectly co-registered to Allen
+25 µm. **The user confirmed Kim/BBP overlay is NOT entirely correct** (a real
+offset/mismatch vs the Allen coordinates) - revisit: check whether these BrainGlobe
+atlases truly share the Allen voxel grid (origin + resolution + orientation), and
+add a per-atlas alignment/offset if needed before trusting cross-atlas overlays.
 
 ## Region-atlas picker + Paxinos export (v0.2.25)
 
@@ -322,6 +363,14 @@ reproduces the exact pixels). The user is told this on load. After the merge the
 rest of the pipeline is unchanged - there is effectively one slide. The napari
 built-in **layer list / layer controls panels are hidden** (the workflow panel
 drives everything), so slides are never managed as separate layers.
+
+**Swap-image-on-reopen (v0.2.28).** Multi-select still merges, but **Open slide…**
+when a slide is *already loaded* now SWAPS rather than appends
+(`slide_loader._replace_images`, routed from `_open_file`). Same-size new image =>
+keep section boxes + registration (reuse a registration on the same section in a
+different channel; flips re-applied, per-channel levels cleared, outlines redrawn).
+Different-size => treated as a new slide (sections/flips cleared, re-detect). The
+old incremental "open more later → merge" path is gone (use multi-select instead).
 
 **Slide-aware section ordering (v0.2.15).** Because sources are *stacked
 vertically*, a naive column-first ordering walks each column top-to-bottom across

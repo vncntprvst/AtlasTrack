@@ -152,6 +152,17 @@ class RegisterPanelWidget(QWidget):
             "tissue are left alone. Works with any engine."
         )
         params_layout.addWidget(self._boundary_snap)
+
+        self._preserve_manual = QCheckBox("Keep hand-corrected sections on re-run")
+        self._preserve_manual.setChecked(False)
+        self._preserve_manual.setToolTip(
+            "When re-running registration, skip sections that have a manual atlas "
+            "correction (box transform or landmarks) so their fit - including a "
+            "'Reset morph to plane' - isn't recomputed and lost. Off = re-register "
+            "every section. Clear a section's correction with 'Reset adjustment' to "
+            "force it to re-register while this is on."
+        )
+        params_layout.addWidget(self._preserve_manual)
         self._on_elastix_toggled(self._use_elastix.isChecked())
 
         method_lbl = QLabel(
@@ -470,6 +481,7 @@ class RegisterPanelWidget(QWidget):
             use_masks=self._use_mask.isChecked(),
             prealign=self._prealign.isChecked(),
             boundary_snap=self._boundary_snap.isChecked(),
+            preserve_manual=self._preserve_manual.isChecked(),
         )
         worker.yielded.connect(self._on_progress)
         worker.returned.connect(self._on_registration_done)
@@ -834,14 +846,25 @@ class RegisterPanelWidget(QWidget):
             return
         edges = annotation_boundaries(labels).astype(np.uint8)
         x0, y0 = section.bbox_px[0], section.bbox_px[1]
+        # The landmark TPS is baked into the labels above; a box manual_affine rides
+        # on the LAYER affine, so it must be re-applied here too (else a box-adjusted
+        # section snaps back to the un-nudged plane on any re-render). Mirrors
+        # _render_overlay. Landmarks win (mutually exclusive).
+        if section.manual_landmarks is None and section.manual_affine is not None:
+            from histo_to_ccf.registration.manual import section_to_world
+
+            affine = Affine(affine_matrix=section_to_world(
+                np.asarray(section.manual_affine, dtype=float), (y0, x0)))
+        else:
+            affine = Affine(affine_matrix=np.eye(3))
         name = f"Atlas overlay {section.index}"
         if name in self._viewer.layers:
             layer = self._viewer.layers[name]
             layer.data = edges
             layer.translate = (y0, x0)
-            layer.affine = Affine(affine_matrix=np.eye(3))
+            layer.affine = affine
         else:
-            self._viewer.add_labels(edges, name=name, opacity=0.7, translate=(y0, x0))
+            self._viewer.add_labels(edges, name=name, opacity=0.7, translate=(y0, x0)).affine = affine
 
     def _landmark_layer(self):
         if self._landmark_idx is None:

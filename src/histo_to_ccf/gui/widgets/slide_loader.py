@@ -197,8 +197,19 @@ class SlideLoaderWidget(QWidget):
             self, "Open slide image(s)", "",
             "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;All files (*)",
         )
-        for path in paths:
-            self._load_path(path)
+        if not paths:
+            return
+        already_loaded = (
+            self._state.active_slide_idx is not None and bool(self._state.project.slides)
+        )
+        if already_loaded:
+            # Image(s) already loaded (e.g. a reloaded project): SWAP the slide for
+            # the newly opened image(s) instead of merging into it - lets the user
+            # reuse a registration on the same section imaged in a different channel.
+            self._replace_images(paths)
+        else:
+            for path in paths:
+                self._load_path(path)
 
     def _load_path(self, path) -> None:
         from pathlib import Path
@@ -270,6 +281,91 @@ class SlideLoaderWidget(QWidget):
             note += "Existing sections were cleared - click 'Detect sections' again."
         self._info_merge(note)
         self._after_image_changed(combined, slide_idx)
+
+    def _replace_images(self, paths) -> None:
+        """Swap the loaded slide image for newly opened image(s).
+
+        The use case: reuse a registration project on the *same* section imaged with
+        a different upper-layer / dye channel. When the new image has the **same
+        size** as the current one, the section boxes and their registration are kept
+        (they stay valid - only the pixels change) and the slide's flips are
+        re-applied so the new channel lines up. If the size differs it is treated as
+        a genuinely different slide: sections are cleared and the user re-detects.
+        """
+        from pathlib import Path
+
+        from histo_to_ccf.io.image import load_image, merge_images, slide_bands
+
+        slide_idx = self._state.active_slide_idx
+        slide = self._state.project.slides[slide_idx]
+        old_img = self._state.slide_images.get(slide_idx)
+        sources = sorted(str(Path(p)) for p in paths)
+        try:
+            images = [load_image(Path(s)) for s in sources]
+            combined = merge_images(images) if len(images) > 1 else images[0]
+        except Exception as exc:  # noqa: BLE001
+            self._status.setText(f"Open failed: {exc}")
+            return
+
+        same_geom = old_img is not None and combined.shape[:2] == old_img.shape[:2]
+
+        if len(images) > 1:
+            self._state.slide_bands[slide_idx] = slide_bands([im.shape[0] for im in images])
+        else:
+            self._state.slide_bands[slide_idx] = [(0, int(combined.shape[0]))]
+        slide.source_paths = sources
+        slide.image_path = sources[0]
+        # Per-channel display levels don't transfer to a different dye image.
+        slide.levels = None
+        for section in slide.sections:
+            section.levels = None
+
+        if same_geom:
+            # Re-apply the kept flips so the new channel matches the existing boxes.
+            img = combined
+            if slide.flip_h:
+                img = np.fliplr(img)
+            if slide.flip_v:
+                img = np.flipud(img)
+            for section in slide.sections:
+                if not (section.flip_h or section.flip_v):
+                    continue
+                x0, y0, x1, y1 = section.bbox_px
+                crop = img[y0:y1, x0:x1]
+                if section.flip_h:
+                    crop = np.fliplr(crop)
+                if section.flip_v:
+                    crop = np.flipud(crop)
+                img[y0:y1, x0:x1] = crop
+            self._state.slide_images[slide_idx] = img
+            self._path_label.setText(
+                f"{len(sources)} images merged" if len(sources) > 1 else Path(sources[0]).name
+            )
+            self._status.setText(
+                f"Swapped slide image; kept {len(slide.sections)} section(s) + "
+                "registration (same size)."
+            )
+            self._after_image_changed(img, slide_idx)
+            self._redraw_outlines()
+        else:
+            # Different geometry => a different slide: clear sections (and their
+            # registration) and reset flips, like a fresh load.
+            had = bool(slide.sections)
+            slide.flip_h = False
+            slide.flip_v = False
+            slide.sections.clear()
+            self._state.slide_images[slide_idx] = combined
+            self._path_label.setText(
+                f"{len(sources)} images merged" if len(sources) > 1 else Path(sources[0]).name
+            )
+            note = (
+                f"Replaced with a different-size image "
+                f"({combined.shape[1]}×{combined.shape[0]} px). "
+            )
+            if had:
+                note += "Previous sections/registration were cleared - click 'Detect sections'."
+            self._info_merge(note)
+            self._after_image_changed(combined, slide_idx)
 
     def _info_merge(self, message: str) -> None:
         """Tell the user that images were merged (best-effort dialog + status)."""

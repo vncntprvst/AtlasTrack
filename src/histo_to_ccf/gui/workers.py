@@ -178,6 +178,7 @@ def register_worker_progressive(
     use_masks: bool = True,
     prealign: bool = True,
     boundary_snap: bool = True,
+    preserve_manual: bool = True,
 ):
     """Registration pipeline that yields per-section progress dicts.
 
@@ -203,12 +204,32 @@ def register_worker_progressive(
     # Collect work items: sections with a provided image AND either a DeepSlice
     # anchoring or a manually-assigned plane.
     tasks: list[tuple[int, object, object]] = []
+    preserved: list[int] = []
     for slide_idx, slide in enumerate(project.slides):
         for section in slide.sections:
             if section.index not in section_images:
                 continue
+            # Don't re-register sections the user has hand-corrected: re-running
+            # registration would recompute the B-spline and silently undo a
+            # "Reset morph to plane" + box/landmark fix. Keep their existing result
+            # (clear the correction via "Reset adjustment" to re-register one).
+            if (
+                preserve_manual
+                and section.registration is not None
+                and (section.manual_affine is not None
+                     or section.manual_landmarks is not None)
+            ):
+                preserved.append(section.index)
+                continue
             if section.index in anchorings or section.plane is not None:
                 tasks.append((slide_idx, slide, section))
+
+    if preserved:
+        yield {
+            "current": 0, "total": len(tasks),
+            "msg": f"Keeping {len(preserved)} hand-corrected section(s) unchanged: "
+                   f"{preserved}",
+        }
 
     n_total = len(tasks)
     if n_total == 0:

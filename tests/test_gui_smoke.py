@@ -441,6 +441,93 @@ def test_edit_boxes_resize_and_delete(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_open_slides_replaces_image_keeping_registration(qtbot, tmp_path) -> None:
+    """Opening a slide when one is already loaded swaps the pixels; same-size keeps
+    sections + registration, different-size clears them."""
+    import imageio.v3 as iio
+
+    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+
+    state = WorkflowState()
+    state.add_slide("orig.png", np.zeros((200, 300, 3), dtype=np.uint8))
+    state.active_slide_idx = 0
+    slide = state.project.slides[0]
+    slide.source_paths = ["orig.png"]
+    state.slide_bands[0] = [(0, 200)]
+    for i, box in enumerate([(0, 0, 80, 80), (100, 0, 180, 80)]):
+        slide.sections.append(Section(index=i, slide_idx=0, bbox_px=box, ap_order=i))
+
+    widget = SlideLoaderWidget(state, viewer=None)
+    qtbot.addWidget(widget)
+    # Skip the async min-area estimator (background thread) - not under test here.
+    widget._after_image_changed = lambda *a, **k: None
+
+    # Same size -> swap pixels, keep the 2 sections + their registration.
+    same = tmp_path / "chan2.png"
+    iio.imwrite(same, np.full((200, 300, 3), 50, dtype=np.uint8))
+    widget._replace_images([str(same)])
+    assert len(slide.sections) == 2
+    assert slide.image_path == str(same)
+    assert state.slide_images[0].shape[:2] == (200, 300)
+    assert int(state.slide_images[0].mean()) == 50  # new pixels are shown
+
+    # Different size -> treated as a new slide, sections cleared.
+    diff = tmp_path / "other.png"
+    iio.imwrite(diff, np.full((150, 150, 3), 80, dtype=np.uint8))
+    widget._replace_images([str(diff)])
+    assert len(slide.sections) == 0
+    assert state.slide_images[0].shape[:2] == (150, 150)
+
+
+@pytest.mark.qt
+def test_markers_redraw_after_layers_cleared(qtbot) -> None:
+    """After the canvas is cleared (project close) the overlay must recreate its
+    Points layers on reload, not write to detached layers (markers vanished +
+    'Select / move' warned 'not in the list')."""
+    import napari
+
+    from histo_to_ccf.gui.widgets.click_overlay import (
+        _LAYER_ENTRY,
+        _LAYER_TIP,
+        ClickOverlayWidget,
+    )
+    from histo_to_ccf.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.add_slide("s.png", np.zeros((200, 200), dtype=np.uint8))
+        state.active_slide_idx = 0
+        shanks = [Shank(index=0),
+                  Shank(index=1, entry_px=Point2D(x_px=50.0, y_px=60.0), entry_section_idx=0)]
+        state.project.probes.append(
+            ProbeSpec(label="B", type=ProbeType(name="NP2", n_shanks=2), shanks=shanks))
+
+        widget = ClickOverlayWidget(state, viewer)
+        qtbot.addWidget(widget)
+        widget.refresh_after_load()
+        assert _LAYER_ENTRY in viewer.layers
+        assert len(viewer.layers[_LAYER_ENTRY].data) == 1
+
+        # Simulate a project close clearing the canvas (leaves stale layer refs).
+        viewer.layers.clear()
+        assert widget._entry_layer is not None  # stale reference retained
+
+        # Reload: the entry marker must be redrawn on a live, in-viewer layer.
+        widget.refresh_after_load()
+        assert _LAYER_ENTRY in viewer.layers
+        assert len(viewer.layers[_LAYER_ENTRY].data) == 1
+        assert widget._entry_layer in viewer.layers
+
+        # Select / move can now activate the layer without "not in the list".
+        widget._select_btn.setChecked(True)
+        assert viewer.layers.selection.active in (
+            viewer.layers[_LAYER_TIP], viewer.layers[_LAYER_ENTRY])
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_ordering_resort_and_interpolate(qtbot) -> None:
     from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
     from histo_to_ccf.project.schema import PlaneParams

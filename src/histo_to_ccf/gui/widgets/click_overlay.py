@@ -239,8 +239,25 @@ class ClickOverlayWidget(QWidget):
     # Layer management
     # ------------------------------------------------------------------
 
+    def _drop_stale_layer_refs(self) -> None:
+        """Forget layer references that are no longer in the viewer.
+
+        A project close/clear empties ``viewer.layers`` but leaves these widget
+        attributes pointing at the removed layers. Operating on such a detached
+        layer means markers never draw and ``selection.active = layer`` warns
+        "not in the list" - so reset the refs and let them be recreated.
+        """
+        layers = self._viewer.layers
+        if self._tip_layer is not None and self._tip_layer not in layers:
+            self._tip_layer = None
+        if self._entry_layer is not None and self._entry_layer not in layers:
+            self._entry_layer = None
+        if self._traj_layer is not None and self._traj_layer not in layers:
+            self._traj_layer = None
+
     def _ensure_points_layers(self) -> None:
         """Create the Tips/Entries Points layers on first use (and wire events)."""
+        self._drop_stale_layer_refs()
         if self._tip_layer is None:
             if _LAYER_TIP in self._viewer.layers:
                 self._tip_layer = self._viewer.layers[_LAYER_TIP]  # type: ignore[assignment]
@@ -262,6 +279,7 @@ class ClickOverlayWidget(QWidget):
 
     def _ensure_traj_layer(self) -> "napari.layers.Shapes":
         """Create (or fetch) the trajectory Shapes layer used for line drawing."""
+        self._drop_stale_layer_refs()
         if _LAYER_TRAJECTORY in self._viewer.layers:
             self._traj_layer = self._viewer.layers[_LAYER_TRAJECTORY]  # type: ignore[assignment]
         elif self._traj_layer is None:
@@ -563,6 +581,7 @@ class ClickOverlayWidget(QWidget):
     def refresh_after_load(self) -> None:
         """Restore tip/entry markers + the table from a freshly-loaded project."""
         self._mask_cache = None
+        self._drop_stale_layer_refs()
         self._refresh_probe_combo()
         self._rebuild_markers()
         self._refresh_table()
