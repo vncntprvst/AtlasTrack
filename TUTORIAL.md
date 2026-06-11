@@ -171,7 +171,9 @@ regions, probe tracks, and (after an ephys alignment) the per-channel positions.
 
 **Plotly HTML**  
 Click **Export Plotly HTML…** → save to e.g. `Desktop\probe_3d.html`.  
-Opens automatically in your browser; rotate the atlas + probe interactively.
+Opens automatically in your browser; rotate the atlas + probe interactively. The
+axes are **referenced to bregma**: ML = 0 at the midline, AP = 0 at bregma
+(anterior positive), so coordinates read like stereotaxic values.
 
 **Save / Load (Project menu)**  
 **Project → Save Project** writes `<slide_name>.histo2ccf.json` next to the image

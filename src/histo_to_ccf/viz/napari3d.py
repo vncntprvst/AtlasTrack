@@ -33,28 +33,21 @@ def add_probe_layers(
 
     Returns the list of added layers.
     """
-    from histo_to_ccf.probes.geometry import shank_offsets
-
     added = []
     for p_idx, probe in enumerate(project.probes):
         color = _PROBE_COLORS[p_idx % len(_PROBE_COLORS)]
-        n = probe.type.n_shanks
-        pitch = probe.type.shank_pitch_um
-        ml_offsets = shank_offsets(n, pitch)
         lines = []
         for shank in probe.shanks:
             if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
                 continue
-            tip = np.array(shank.tip_ccf_um, dtype=float)    # (AP, ML, DV)
+            # Each shank's tip/entry was placed + registered individually, so its
+            # CCF already carries the correct ML. Do NOT add a geometric shank
+            # offset here - that double-counted the shank separation and pushed
+            # outer shanks across the midline. (The per-channel export uses these
+            # coords directly too.) Stored as (AP, ML, DV).
+            tip = np.array(shank.tip_ccf_um, dtype=float)
             entry = np.array(shank.entry_ccf_um, dtype=float)
-            ml_offset = float(ml_offsets[shank.index]) if shank.index < len(ml_offsets) else 0.0
-            tip_adj = tip.copy(); tip_adj[1] += ml_offset
-            entry_adj = entry.copy(); entry_adj[1] += ml_offset
-            # napari 3D: (z=DV, y=AP, x=ML) or just direct if 3D mode uses (row,col,depth)
-            # napari uses (y, x) for 2D and (z, y, x) for 3D by default. In our case:
-            # We'll store as (AP, ML, DV) matching the atlas dimensions.
-            lines.append(np.array([[tip_adj[0], tip_adj[1], tip_adj[2]],
-                                   [entry_adj[0], entry_adj[1], entry_adj[2]]]))
+            lines.append(np.array([tip, entry]))
 
         if not lines:
             continue

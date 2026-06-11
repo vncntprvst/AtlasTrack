@@ -187,30 +187,27 @@ def add_probe_traces(
     Probes without both tip_ccf_um and entry_ccf_um are skipped.
     """
     import plotly.graph_objects as go
-    from histo_to_ccf.probes.geometry import probe_prism_mesh, shank_offsets
+    from histo_to_ccf.probes.geometry import probe_prism_mesh
 
     probe_count = 0
     for probe in project.probes:
         color = _PROBE_COLORS[probe_count % len(_PROBE_COLORS)]
         probe_count += 1
-        n = probe.type.n_shanks
-        pitch = probe.type.shank_pitch_um
-        ml_offsets = shank_offsets(n, pitch)
 
         for shank in probe.shanks:
             if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
                 continue
+            # Use the placed + registered tip/entry directly - each shank carries
+            # its own correct ML, so adding a geometric shank offset here would
+            # double-count and shove outer shanks across the midline.
             tip = np.array(shank.tip_ccf_um, dtype=float)    # (AP, ML, DV)
             entry = np.array(shank.entry_ccf_um, dtype=float)
-            ml_offset = float(ml_offsets[shank.index]) if shank.index < len(ml_offsets) else 0.0
-            tip_adj = tip.copy(); tip_adj[1] += ml_offset
-            entry_adj = entry.copy(); entry_adj[1] += ml_offset
 
             if style in ("line", "both"):
                 fig.add_trace(go.Scatter3d(
-                    x=[tip_adj[1], entry_adj[1]],  # ML
-                    y=[tip_adj[0], entry_adj[0]],  # AP
-                    z=[tip_adj[2], entry_adj[2]],  # DV
+                    x=[tip[1], entry[1]],  # ML
+                    y=[tip[0], entry[0]],  # AP
+                    z=[tip[2], entry[2]],  # DV
                     mode="lines+markers",
                     line={"color": color, "width": 4},
                     marker={"size": [5, 3], "color": color},
@@ -220,7 +217,7 @@ def add_probe_traces(
 
             if style in ("mesh", "both"):
                 try:
-                    mesh_dict = probe_prism_mesh(tuple(tip_adj), tuple(entry_adj))  # type: ignore[arg-type]
+                    mesh_dict = probe_prism_mesh(tuple(tip), tuple(entry))  # type: ignore[arg-type]
                     fig.add_trace(go.Mesh3d(
                         **mesh_dict,
                         color=color,
@@ -236,6 +233,25 @@ def add_probe_traces(
 # Figure builder
 # ---------------------------------------------------------------------------
 
+def _rereference_traces_to_bregma(fig: "go.Figure") -> None:
+    """Shift every trace's x (ML) and y (AP) from CCF µm to bregma-referenced µm.
+
+    Applied to *all* traces (region meshes and probes) so they stay aligned:
+    ``x = ML - midline`` (0 at midline) and ``y = bregma_AP - AP`` (0 at bregma,
+    anterior positive - same convention as the Atlas/ordering/residuals tabs).
+    DV (z) is left unchanged.
+    """
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM, MIDLINE_ML_UM
+
+    for tr in fig.data:
+        x = getattr(tr, "x", None)
+        if x is not None:
+            tr.x = tuple(float(v) - MIDLINE_ML_UM for v in x)
+        y = getattr(tr, "y", None)
+        if y is not None:
+            tr.y = tuple(BREGMA_AP_FROM_ORIGIN_UM - float(v) for v in y)
+
+
 def build_figure(
     project: "Project",
     atlas: "BrainGlobeAtlas | None" = None,
@@ -245,6 +261,7 @@ def build_figure(
     show_tip_regions: bool = True,
     style: str = "line",
     title: str = "Histo-to-CCF: Probe trajectories",
+    bregma_relative: bool = True,
 ) -> "go.Figure":
     """Build a Plotly 3D figure with probe trajectories and atlas meshes.
 
@@ -281,18 +298,27 @@ def build_figure(
 
     add_probe_traces(fig, project, style=style)
 
+    # Optionally re-reference all traces (regions AND probes, so they stay
+    # aligned) to bregma: ML 0 = midline, AP 0 = bregma level (anterior +,
+    # matching the Atlas/ordering tabs). DV is left as CCF depth.
+    xaxis_title, yaxis_title = "ML (µm)", "AP (µm)"
+    if bregma_relative:
+        _rereference_traces_to_bregma(fig)
+        xaxis_title = "ML from midline (µm)"
+        yaxis_title = "AP from bregma (µm, ant +)"
+
     fig.update_layout(
         title=title,
         scene=dict(
-            xaxis_title="ML (µm)",
-            yaxis_title="AP (µm)",
+            xaxis_title=xaxis_title,
+            yaxis_title=yaxis_title,
             zaxis_title="DV (µm)",
             # Invert DV so dorsal is up.
             zaxis={"autorange": "reversed"},
             aspectmode="data",
             bgcolor="rgb(20,20,30)",
-            xaxis={"gridcolor": "rgb(60,60,80)", "zerolinecolor": "rgb(80,80,100)"},
-            yaxis={"gridcolor": "rgb(60,60,80)", "zerolinecolor": "rgb(80,80,100)"},
+            xaxis={"gridcolor": "rgb(60,60,80)", "zerolinecolor": "rgb(120,120,160)"},
+            yaxis={"gridcolor": "rgb(60,60,80)", "zerolinecolor": "rgb(120,120,160)"},
         ),
         paper_bgcolor="rgb(20,20,30)",
         font={"color": "rgb(220,220,220)"},

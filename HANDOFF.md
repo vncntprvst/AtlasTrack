@@ -1,6 +1,24 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-11 · version **0.2.21** · branch **dev**_
+_Last updated: 2026-06-11 · version **0.2.22** · branch **dev**_
+
+## Probe ML double-count fix + bregma-referenced Plotly axes (v0.2.22)
+
+**Bug:** the two 3D views (`napari3d.add_probe_layers`, `plotly3d.add_probe_traces`)
+added a per-shank geometric `ml_offset` (from `shank_offsets(n, pitch)`) **on top
+of** each shank's already-placed+registered `tip_ccf_um`/`entry_ccf_um`. Since the
+user places/registers each shank's tip and entry individually, the ML is already
+correct - the offset double-counted the shank separation and could push outer
+shanks across the midline. The per-channel export (`channels.shank_channel_coords`)
+never did this - it uses the placed coords directly. **Fix:** both 3D views now use
+`tip_ccf_um`/`entry_ccf_um` directly (no offset), matching the export.
+
+**Bregma-referenced Plotly axes:** `build_figure(bregma_relative=True)` (default)
+post-processes **all** traces (regions + probes, so they stay aligned) via
+`_rereference_traces_to_bregma`: `x = ML - MIDLINE_ML_UM` (0 at midline),
+`y = BREGMA_AP_FROM_ORIGIN_UM - AP` (0 at bregma, anterior +, matching the Atlas/
+ordering/residuals tabs); DV unchanged. Axis titles become "ML from midline (µm)" /
+"AP from bregma (µm, ant +)". napari 3D still uses CCF µm.
 
 ## Default 3D camera (v0.2.21)
 

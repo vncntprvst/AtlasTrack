@@ -863,6 +863,28 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_napari_probe_layer_uses_placed_ml_no_offset(qtbot) -> None:
+    """The 3D probe line uses the placed tip/entry ML, with no shank offset added."""
+    import napari
+    from histo_to_ccf.project.schema import Project, ProbeSpec, ProbeType, Shank
+    from histo_to_ccf.viz.napari3d import add_probe_layers
+
+    viewer = napari.Viewer(show=False)
+    try:
+        shank = Shank(index=3, tip_ccf_um=(10700.0, 5800.0, 5000.0),
+                      entry_ccf_um=(10700.0, 5800.0, 1000.0))
+        project = Project(probes=[ProbeSpec(
+            label="P", type=ProbeType(name="NP4", n_shanks=4, shank_pitch_um=250.0),
+            shanks=[shank])])
+        layers = add_probe_layers(viewer, project)
+        assert layers
+        line = np.asarray(layers[0].data[0])  # (2, 3) [tip, entry] in (AP, ML, DV)
+        assert line[0][1] == 5800.0 and line[1][1] == 5800.0  # ML unshifted
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_default_3d_camera_is_posterior_dorsal_up(qtbot) -> None:
     """Default 3D camera: from behind (anterior view dir), dorsal up, tilted down."""
     import napari
