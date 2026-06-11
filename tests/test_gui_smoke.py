@@ -928,6 +928,22 @@ def test_napari_probe_layer_uses_placed_ml_no_offset(qtbot) -> None:
         viewer.close()
 
 
+def test_bregma_display_affine_does_not_mirror() -> None:
+    """The bregma display affine is a pure translation (det +1) - never a reflection.
+
+    A reflection (det -1) would mirror left/right, the bug that the Plotly z-axis
+    reversal caused.
+    """
+    import numpy as np
+    from histo_to_ccf.viz.napari3d import _bregma_affine
+
+    a = _bregma_affine()
+    assert np.isclose(np.linalg.det(a[:3, :3]), 1.0)  # proper, no mirror
+    # Offset only: AP 0 at bregma, ML 0 at midline, DV unchanged.
+    out = a @ np.array([10700.0, 5800.0, 5000.0, 1.0])
+    assert np.allclose(out[:3], [10700.0 - 5400.0, 5800.0 - 5700.0, 5000.0])
+
+
 @pytest.mark.qt
 def test_default_3d_camera_is_posterior_dorsal_up(qtbot) -> None:
     """Default 3D camera: from behind (anterior view dir), dorsal up, tilted down."""
@@ -941,6 +957,8 @@ def test_default_3d_camera_is_posterior_dorsal_up(qtbot) -> None:
         viewer.dims.ndisplay = 3
         _set_default_camera(viewer)
         vd = np.asarray(viewer.camera.view_direction)
+        # Bregma display is offset-only (AP stays posterior-positive), so "from
+        # behind" still looks toward anterior = -AP.
         assert vd[0] < 0          # looking toward anterior (-AP) = viewing from behind
         assert abs(vd[1]) < 0.05  # symmetric left-right (no ML)
         assert vd[2] > 0          # tilted slightly downward (+DV)

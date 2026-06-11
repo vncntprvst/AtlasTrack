@@ -167,3 +167,47 @@ def export_channel_csv(
                 n_rows += 1
 
     return n_rows
+
+
+def export_paxinos_csv(
+    project: "Project",
+    output_path: str | Path,
+    *,
+    probe_label: str | None = None,
+    alignment: str | None = None,
+) -> int:
+    """Export per-channel coordinates in **Paxinos** stereotaxic mm (bregma origin).
+
+    Columns: ``probe, shank, channel, ap_mm, ml_mm, dv_mm`` where AP is
+    anterior-positive, ML 0 at the midline, DV depth below bregma. ``alignment``
+    selects the CCF→stereotaxic transform (5° pitch + scaling); see
+    :data:`histo_to_ccf.io.ccf_coords.PAXINOS_ALIGNMENTS`. Returns the row count.
+    """
+    from histo_to_ccf.io.ccf_coords import (
+        DEFAULT_PAXINOS_ALIGNMENT,
+        ccf_um_to_paxinos_mm,
+    )
+
+    align = alignment or DEFAULT_PAXINOS_ALIGNMENT
+    coords_map = project_channel_coords(project)
+    out_path = Path(output_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    n_rows = 0
+    with out_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["probe", "shank", "channel", "ap_mm", "ml_mm", "dv_mm"])
+        for (label, shank_idx), coords in sorted(coords_map.items()):
+            if probe_label is not None and label != probe_label:
+                continue
+            ap_mm, ml_mm, dv_mm = ccf_um_to_paxinos_mm(
+                coords[:, 0], coords[:, 1], coords[:, 2], alignment=align
+            )
+            for ch_idx in range(len(coords)):
+                writer.writerow([
+                    label, shank_idx, ch_idx,
+                    f"{ap_mm[ch_idx]:.3f}", f"{ml_mm[ch_idx]:.3f}", f"{dv_mm[ch_idx]:.3f}",
+                ])
+                n_rows += 1
+
+    return n_rows

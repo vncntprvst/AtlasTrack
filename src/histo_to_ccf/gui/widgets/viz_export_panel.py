@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -22,6 +23,24 @@ from qtpy.QtWidgets import (
 )
 
 from histo_to_ccf.gui.workflow import WorkflowState
+
+# CCFv3-aligned atlases that share the Allen 25 µm voxel space, so probe
+# coordinates are identical and only the region annotation/meshes/acronyms differ.
+# (label, brainglobe id) - mirrors the Atlas tab's quick picks.
+_COMPATIBLE_REGION_ATLASES = [
+    ("Allen CCFv3 25 µm", "allen_mouse_25um"),
+    ("CCFv3-BBP Augmented 25 µm", "ccfv3augmented_mouse_25um"),
+    ("Chon/Kim Unified 25 µm", "kim_mouse_25um"),
+]
+
+# CCF→Paxinos stereotaxic alignment presets for the Paxinos export (label, key).
+# All but "none" un-pitch CCFv3's ~5° nose-down tilt; see ccf_coords.PAXINOS_ALIGNMENTS.
+_PAXINOS_ALIGNMENT_CHOICES = [
+    ("Pinpoint / Qiu 2018 (5° pitch)", "qiu2018"),
+    ("Pinpoint / Dorr 2008 (5° pitch)", "dorr2008"),
+    ("Allen forum (5° pitch, DV ×0.943)", "allen_forum"),
+    ("None - linear mirror, no tilt", "none"),
+]
 
 if TYPE_CHECKING:
     import napari
@@ -52,6 +71,10 @@ class VizExportPanelWidget(QWidget):
         self._viewer = viewer
         self._viewer3d = None  # held so the separate 3D window isn't GC'd
         self._settings = None
+        # Region/display atlas (request: view/export regions in a compatible atlas
+        # without re-registering). None until resolved by _ensure_display_atlas.
+        self._display_atlas = None
+        self._display_atlas_id: str | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -73,6 +96,24 @@ class VizExportPanelWidget(QWidget):
 
         viz_box = QGroupBox("3D Visualization")
         viz_layout = QVBoxLayout(viz_box)
+
+        # Region/display atlas picker: render regions from a different but
+        # coordinate-compatible CCFv3 atlas. Probe coordinates are unchanged.
+        atlas_row = QHBoxLayout()
+        atlas_row.addWidget(QLabel("Region atlas:"))
+        self._region_atlas_combo = QComboBox()
+        self._region_atlas_combo.addItem("Same as registration", "")
+        for label, aid in _COMPATIBLE_REGION_ATLASES:
+            self._region_atlas_combo.addItem(label, aid)
+        self._region_atlas_combo.setToolTip(
+            "Draw region meshes / acronyms from this atlas in the 3D views and Plotly "
+            "export. These CCFv3-aligned 25 µm atlases share the registration atlas's "
+            "voxel space, so probe coordinates are identical - only the region "
+            "annotation differs. 'Same as registration' uses the project atlas."
+        )
+        atlas_row.addWidget(self._region_atlas_combo)
+        viz_layout.addLayout(atlas_row)
+
         reg_row = QHBoxLayout()
         reg_row.addWidget(QLabel("Extra regions:"))
         self._extra_regions = QLineEdit()
@@ -101,6 +142,28 @@ class VizExportPanelWidget(QWidget):
         ch_btn.clicked.connect(self._export_channel_csv)
         export_layout.addWidget(herbs_btn)
         export_layout.addWidget(ch_btn)
+
+        pax_row = QHBoxLayout()
+        pax_row.addWidget(QLabel("Paxinos align:"))
+        self._paxinos_combo = QComboBox()
+        for label, key in _PAXINOS_ALIGNMENT_CHOICES:
+            self._paxinos_combo.addItem(label, key)
+        self._paxinos_combo.setToolTip(
+            "CCF→Paxinos stereotaxic transform. CCFv3 is pitched ~5° nose-down vs a "
+            "flat-skull frame, so all but 'None' un-pitch by 5° and apply published "
+            "axis scaling (Qiu 2018 = Pinpoint's recommended default). These are "
+            "ESTIMATES with real variance - validate against histology."
+        )
+        pax_row.addWidget(self._paxinos_combo)
+        export_layout.addLayout(pax_row)
+
+        pax_btn = QPushButton("Export per-channel Paxinos CSV")
+        pax_btn.setToolTip(
+            "Per-channel coordinates in Paxinos stereotaxic mm (bregma origin): "
+            "AP anterior-positive, ML 0 at midline, DV depth below bregma."
+        )
+        pax_btn.clicked.connect(self._export_paxinos_csv)
+        export_layout.addWidget(pax_btn)
         layout.addWidget(export_box)
 
         self._status = QLabel("")
@@ -144,17 +207,67 @@ class VizExportPanelWidget(QWidget):
         )
         worker.start()
 
+    def _selected_region_atlas_id(self) -> str:
+        idx = self._region_atlas_combo.currentIndex()
+        return self._region_atlas_combo.itemData(idx) or ""
+
+    def _ensure_display_atlas(self, on_ready) -> None:
+        """Resolve the chosen region atlas into ``self._display_atlas``, then call
+        ``on_ready()``. 'Same as registration' reuses ``state.atlas``; a different
+        compatible atlas is loaded lazily and cached. The registration atlas is
+        still ensured (probe remap needs it)."""
+        chosen = self._selected_region_atlas_id()
+        proj_id = self._state.project.atlas.name
+
+        def _after_reg() -> None:
+            if not chosen or chosen == proj_id:
+                self._display_atlas = self._state.atlas
+                self._display_atlas_id = proj_id or None
+                on_ready()
+                return
+            if self._display_atlas is not None and self._display_atlas_id == chosen:
+                on_ready()
+                return
+            atlas_dir = None
+            if self._settings is not None:
+                atlas_dir = getattr(self._settings, "atlas_dir", "") or None
+            self._status.setText(f"Loading region atlas {chosen}…")
+            from histo_to_ccf.gui.workers import load_atlas_worker
+
+            worker = load_atlas_worker(chosen, brainglobe_dir=atlas_dir)
+
+            def _loaded(atlas) -> None:
+                self._display_atlas = atlas
+                self._display_atlas_id = chosen
+                on_ready()
+
+            def _failed(exc) -> None:
+                self._display_atlas = self._state.atlas
+                self._status.setText(
+                    f"Region atlas load failed ({exc}); using registration atlas."
+                )
+                on_ready()
+
+            worker.returned.connect(_loaded)
+            worker.errored.connect(_failed)
+            worker.start()
+
+        self._ensure_atlas(_after_reg)
+
     def _export_plotly(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Plotly HTML", "", "HTML files (*.html);;All files (*)"
         )
         if not path:
             return
+        self._ensure_display_atlas(lambda: self._do_export_plotly(path))
+
+    def _do_export_plotly(self, path: str) -> None:
         try:
             from histo_to_ccf.viz.plotly3d import build_figure, save_html
 
             fig = build_figure(
-                self._state.project, self._state.atlas,
+                self._state.project, self._display_atlas,
                 extra_regions=self._extra_region_list(),
             )
             out = save_html(fig, path, open_browser=True)
@@ -221,8 +334,10 @@ class VizExportPanelWidget(QWidget):
         self._status.setText(msg)
 
     def _view_napari3d(self) -> None:
-        # Re-map first so the 3D view always reflects the latest corrections.
-        self._ensure_atlas(self._remap_then_render)
+        # Re-map first so the 3D view always reflects the latest corrections; the
+        # region atlas (possibly different from the registration atlas) is resolved
+        # into self._display_atlas before rendering.
+        self._ensure_display_atlas(self._remap_then_render)
 
     def _remap_then_render(self) -> None:
         try:
@@ -245,10 +360,10 @@ class VizExportPanelWidget(QWidget):
             added = show_3d_scene(
                 self._viewer3d,
                 self._state.project,
-                self._state.atlas,
+                self._display_atlas,
                 extra_regions=self._extra_region_list(),
             )
-            if self._state.atlas is None:
+            if self._display_atlas is None:
                 self._status.setText(
                     "Opened 3D window: probe tracks only. Load an atlas to see the brain."
                 )
@@ -302,3 +417,23 @@ class VizExportPanelWidget(QWidget):
                 self._status.setText(f"Per-channel CSV ({n} rows) → {Path(path).name}")
         except Exception as exc:  # noqa: BLE001
             _error_dialog(self, "CSV export failed", str(exc))
+
+    def _export_paxinos_csv(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Paxinos CSV", "", "CSV files (*.csv);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            from histo_to_ccf.probes.channels import export_paxinos_csv
+
+            align = self._paxinos_combo.currentData()
+            n = export_paxinos_csv(self._state.project, path, alignment=align)
+            if n == 0:
+                _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
+            else:
+                self._status.setText(
+                    f"Paxinos CSV ({n} rows, {align}) → {Path(path).name}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "Paxinos export failed", str(exc))

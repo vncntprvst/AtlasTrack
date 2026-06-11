@@ -10,10 +10,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from histo_to_ccf.probes.catalog import CATALOG, ProbeLayout, get_layout
+from histo_to_ccf.io.ccf_coords import ccf_um_to_paxinos_mm
+from histo_to_ccf.probes.catalog import CATALOG, get_layout
 from histo_to_ccf.probes.channels import (
     channel_ccf_coords,
     export_channel_csv,
+    export_paxinos_csv,
     project_channel_coords,
     shank_channel_coords,
 )
@@ -24,11 +26,8 @@ from histo_to_ccf.project.schema import (
     ProbeSpec,
     ProbeType,
     Project,
-    Section,
     Shank,
-    Slide,
 )
-
 
 # ---------------------------------------------------------------------------
 # catalog
@@ -342,3 +341,52 @@ def test_export_channel_csv_filters_probe(tmp_path: Path) -> None:
     out = tmp_path / "filtered.csv"
     n = export_channel_csv(project, out, probe_label="p1")
     assert n == 384
+
+
+# ---------------------------------------------------------------------------
+# CCF -> Paxinos
+# ---------------------------------------------------------------------------
+
+def test_ccf_um_to_paxinos_mm_none_is_plain_mirror() -> None:
+    # alignment="none" reduces to the plain mirror (no tilt, DV = raw CCF depth).
+    ap, ml, dv = ccf_um_to_paxinos_mm(5400.0, 5700.0, 3000.0, alignment="none")
+    assert float(ap) == pytest.approx(0.0)
+    assert float(ml) == pytest.approx(0.0)
+    assert float(dv) == pytest.approx(3.0)
+    ap2, ml2, _ = ccf_um_to_paxinos_mm(4400.0, 4700.0, 0.0, alignment="none")
+    assert float(ap2) == pytest.approx(1.0)
+    assert float(ml2) == pytest.approx(1.0)
+
+
+def test_ccf_um_to_paxinos_mm_bregma_maps_to_origin() -> None:
+    # Bregma in CCF (5400, 5700, 440) -> Paxinos origin under a corrected alignment.
+    ap, ml, dv = ccf_um_to_paxinos_mm(5400.0, 5700.0, 440.0, alignment="qiu2018")
+    assert float(ap) == pytest.approx(0.0, abs=1e-9)
+    assert float(ml) == pytest.approx(0.0, abs=1e-9)
+    assert float(dv) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_ccf_um_to_paxinos_mm_pitch_shifts_ap() -> None:
+    """The 5° pitch maps a point straight below bregma (CCF) to a non-zero AP."""
+    # 1 mm below bregma in CCF DV (5400, 5700, 1440).
+    ap_n, _, _ = ccf_um_to_paxinos_mm(5400.0, 5700.0, 1440.0, alignment="none")
+    ap_q, _, _ = ccf_um_to_paxinos_mm(5400.0, 5700.0, 1440.0, alignment="qiu2018")
+    assert float(ap_n) == pytest.approx(0.0)          # no tilt -> stays on the AP axis
+    # 1 mm * sin(5°) * scale_ap ≈ 0.0899 mm anterior.
+    assert float(ap_q) == pytest.approx(0.0899, abs=2e-3)
+    assert float(ap_q) > 0.05
+
+
+def test_export_paxinos_csv(tmp_path: Path) -> None:
+    project = _make_project_with_coords()
+    out = tmp_path / "paxinos.csv"
+    n = export_paxinos_csv(project, out)
+    assert n == 384
+    rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
+    assert set(rows[0].keys()) == {"probe", "shank", "channel", "ap_mm", "ml_mm", "dv_mm"}
+    # The CSV is exactly the Paxinos transform of the per-channel CCF coords.
+    coords = project_channel_coords(project)[("p1", 0)]
+    ap, ml, dv = ccf_um_to_paxinos_mm(coords[0, 0], coords[0, 1], coords[0, 2])
+    assert float(rows[0]["ap_mm"]) == pytest.approx(float(ap), abs=1e-3)
+    assert float(rows[0]["ml_mm"]) == pytest.approx(float(ml), abs=1e-3)
+    assert float(rows[0]["dv_mm"]) == pytest.approx(float(dv), abs=1e-3)

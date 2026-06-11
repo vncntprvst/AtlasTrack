@@ -33,7 +33,10 @@ amount of user input, the app:
 5. Returns **CCF coordinates** for every shank's tip and entry, plus per-channel
    coordinates when probe geometry is supplied.
 6. Plots all probe trajectories with semi-transparent BrainGlobe meshes (Plotly
-   HTML and an in-app napari 3D view); exports HERBS `.pkl` and per-channel CSV.
+   HTML and an in-app napari 3D view, both bregma-referenced); regions can be drawn
+   from any coordinate-compatible CCFv3 atlas (Allen, CCFv3-BBP Augmented, Chon/Kim
+   Unified) without re-registering. Exports HERBS `.pkl`, per-channel CCF CSV, and
+   per-channel **Paxinos** stereotaxic CSV.
 7. (Optional, `ephys` extra) Refines each shank's depth→CCF mapping from LFP
    features: load an Open Ephys recording, align the depth×frequency LFP power
    map to atlas region boundaries with draggable anchors, and store per-channel

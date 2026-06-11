@@ -1,6 +1,72 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-11 · version **0.2.23** · branch **dev**_
+_Last updated: 2026-06-11 · version **0.2.26** · branch **dev**_
+
+## Paxinos 5° pitch correction (v0.2.26)
+
+User correction: **CCFv3 is pitched ~5° nose-down vs flat-skull stereotaxic**, so
+the v0.2.25 pure-mirror Paxinos transform was only right near bregma. Rebuilt
+`ccf_um_to_paxinos_mm` as a proper affine: bregma-relative (now incl. **DV offset
+440 µm**, `BREGMA_DV_FROM_ORIGIN_UM`) → **5° un-pitch in the sagittal AP-DV plane**
+→ per-axis scaling → Paxinos signs/mm. Selectable presets in
+`PAXINOS_ALIGNMENTS` (`none` = legacy mirror, `allen_forum`, `qiu2018` = default,
+`dorr2008`); a "Paxinos align" dropdown in the export panel feeds
+`export_paxinos_csv(..., alignment=...)`. Scale/pitch/bregma-DV are **estimates** -
+validate with histology. The 3D views stay bregma-CCF (not pitch-corrected). See
+memory `reference_paxinos_transform`.
+
+## Region-atlas picker + Paxinos export (v0.2.25)
+
+- **Region/display atlas picker** (3D & Export panel): render region meshes /
+  acronyms from a *different but coordinate-compatible* CCFv3 25 µm atlas (Allen,
+  CCFv3-BBP Augmented, Chon/Kim Unified) without re-registering. These share the
+  Allen 25 µm voxel space, so **probe coordinates are identical** - only the region
+  annotation differs. `viz_export_panel._ensure_display_atlas` resolves the choice
+  into `self._display_atlas` (lazy-loads + caches a non-registration atlas; the
+  registration atlas is still loaded for the probe remap), and the Plotly / napari
+  builders are passed `_display_atlas` for regions. Probe CCF coords come from the
+  registration atlas as before.
+- **Paxinos export** (`Export per-channel Paxinos CSV`): linear CCF→Paxinos
+  (Franklin-Paxinos) conversion in `io.ccf_coords.ccf_um_to_paxinos_mm` -
+  `AP = (5400 - AP_ccf)/1000` (bregma 0, anterior +), `ML = (5700 - ML_ccf)/1000`
+  (midline 0), `DV = DV_ccf/1000` (CCF depth). **No rotation** - a simple mirror
+  affine. Uses the corrected bregma AP (5400 = `BREGMA_AP_FROM_ORIGIN_UM`); the
+  legacy 6600 placed regions ~1.2 mm too anterior. `probes.channels.export_paxinos_csv`
+  writes `probe,shank,channel,ap_mm,ml_mm,dv_mm`. Refs (forum + paper) in memory
+  `reference_paxinos_transform`. **DV is not re-referenced to the bregma surface** -
+  validate against real stereotaxic readings if absolute DV matters.
+
+## Bregma-referenced 3D + L/R mirror fix (v0.2.24)
+
+**Plotly L/R was genuinely mirrored** (not a camera angle): **reversing a single
+axis flips the scene's handedness** and mirrors left/right. Plotly had
+`zaxis: autorange='reversed'` (for dorsal-up), which - combined with the x=ML/y=AP
+swap and the AP negation - left an **odd** number of reflections = a mirror. Fix:
+**drop the z-reversal** and get dorsal-up from the **camera up vector** (`-DV`)
+instead (the way napari already did it); the camera also looks from the posterior
+(`eye.y < 0`) to match napari.
+
+- **The same rule bit the napari change:** `_bregma_affine` must be a **pure
+  translation** (det +1) - **never negate an axis** (det -1 = reflection = mirror).
+  So the napari bregma display is offset-only: `AP - bregma` (stays
+  posterior-positive), `ML - midline`, DV unchanged; original posterior-dorsal
+  camera kept. `test_bregma_display_affine_does_not_mirror` guards det == +1.
+- Consequence: **napari shows AP posterior-positive, Plotly anterior-positive**
+  (Plotly's x/y axis swap forces one negation to stay un-mirrored). Both are
+  bregma-referenced and L/R-correct; only the AP sign label differs. **Verify on a
+  real export** that L/R now matches reality in Plotly.
+
+## Atlas conversion + Paxinos export - PLANNED, not built (user request)
+
+- **View/export in a different *compatible* atlas** (e.g. CCFv3-BBP Augmented, Kim
+  unified): these share the CCFv3 25 µm voxel space, so probe **coordinates are
+  identical** - only the region **annotation/meshes/acronyms** differ. Plan: a
+  "Region atlas" picker in the 3D & Export panel that lazily loads the chosen atlas
+  and uses it for region rendering/lookup while probe CCF stays as-is.
+- **Paxinos coordinate export**: a real **affine** CCF->Paxinos (see
+  https://community.brain-map.org/t/how-to-switch-between-the-3-coordinate-systems-of-mouse-connectivity/952
+  and https://pmc.ncbi.nlm.nih.gov/articles/PMC10033636/). Needs the published
+  transform encoded + validated before shipping (wrong coords are worse than none).
 
 ## Ephys alignment clarity + NP2.0 geometry (v0.2.23)
 

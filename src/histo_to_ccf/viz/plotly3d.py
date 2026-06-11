@@ -313,9 +313,14 @@ def build_figure(
             xaxis_title=xaxis_title,
             yaxis_title=yaxis_title,
             zaxis_title="DV (µm)",
-            # Invert DV so dorsal is up.
-            zaxis={"autorange": "reversed"},
             aspectmode="data",
+            # Dorsal-up comes from the camera's up vector (-DV), NOT from reversing
+            # the z-axis: reversing a single axis flips the scene's handedness and
+            # mirrors left/right (the bug). The camera also looks from the POSTERIOR
+            # (eye at -AP), matching the napari 3D view.
+            camera={"eye": {"x": 0.0, "y": -1.9, "z": -1.1},
+                    "up": {"x": 0, "y": 0, "z": -1},
+                    "center": {"x": 0, "y": 0, "z": 0}},
             bgcolor="rgb(20,20,30)",
             xaxis={"gridcolor": "rgb(60,60,80)", "zerolinecolor": "rgb(120,120,160)"},
             yaxis={"gridcolor": "rgb(60,60,80)", "zerolinecolor": "rgb(120,120,160)"},

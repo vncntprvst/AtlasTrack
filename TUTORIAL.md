@@ -165,9 +165,17 @@ CCF used by the 3D view + exports - click this first.) **View in napari 3D** upd
 automatically; the pkl/CSV/Plotly exports use the last-updated coordinates, so click
 **Update coordinates** before exporting if you've moved points.
 
+**Region atlas** (3D Visualization)  
+Optionally pick a **Region atlas** other than the one you registered with. The
+Allen CCFv3, CCFv3-BBP Augmented and Chon/Kim Unified 25 µm atlases share the same
+voxel space, so your probe coordinates stay identical - only the region
+meshes/acronyms change. This lets you view (and Plotly-export) the same result in a
+finer/alternative parcellation without re-registering.
+
 **In-app 3D**  
 Click **View in napari 3D** - opens a separate 3D window with the brain shell, tip
 regions, probe tracks, and (after an ephys alignment) the per-channel positions.
+Both 3D views are **bregma-referenced** and not mirrored.
 
 **Plotly HTML**  
 Click **Export Plotly HTML…** → save to e.g. `Desktop\probe_3d.html`.  
@@ -193,6 +201,15 @@ Click **Export HERBS pkl…** - writes a `.pkl` readable by the old pipeline.
 
 **Per-channel CSV**  
 Click **Export per-channel CSV…** - writes `probe, shank, channel, ap_um, ml_um, dv_um` for all 384 channels.
+
+**Per-channel Paxinos CSV**  
+Pick a **Paxinos align** transform, then click **Export per-channel Paxinos CSV…** -
+the same channels in **Paxinos stereotaxic mm** (bregma origin): `ap_mm`
+anterior-positive, `ml_mm` 0 at the midline, `dv_mm` depth below bregma. CCFv3 is
+pitched ~5° nose-down vs a flat-skull frame, so the transform **un-pitches 5°** and
+applies published axis scaling (**Qiu 2018** is the default; *Dorr 2008*, *Allen
+forum*, or *None* = plain mirror are also available). These are **estimates with
+real variance - validate against histology** before trusting absolute values.
 
 ---
 

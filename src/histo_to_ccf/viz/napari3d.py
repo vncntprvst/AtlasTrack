@@ -228,16 +228,44 @@ def show_3d_scene(
 
     added += add_probe_layers(viewer, project, line_width=line_width)
     added += add_ephys_channel_layers(viewer, project)
+    _apply_bregma_display(added)  # show everything bregma-referenced (display only)
     switch_to_3d(viewer)
     _set_default_camera(viewer)
     return added
 
 
-# Data axes are (AP, ML, DV): AP increases posteriorly, DV increases ventrally.
-# Default 3D view: from behind (posterior), dorsal up, tilted slightly down from
-# the top - so both hemispheres are symmetric and the brainstem/probes face you.
+# Layer data is in CCF (AP, ML, DV) µm. The 3D scene is shown **bregma-referenced**
+# via a per-layer display affine - the stored data is untouched. It is a PURE
+# TRANSLATION (offsets only): AP 0 at bregma, ML 0 at the midline, DV unchanged.
+# Crucially it does NOT negate/reverse any axis - negating one axis is a reflection
+# that would MIRROR left/right (the bug the Plotly z-reversal caused). AP therefore
+# stays posterior-positive here; orientation (dorsal up, posterior view) is all from
+# the camera.
+def _bregma_affine() -> "np.ndarray":
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM, MIDLINE_ML_UM
+
+    return np.array([
+        [1.0, 0.0, 0.0, -BREGMA_AP_FROM_ORIGIN_UM],  # AP -> AP - bregma (0 at bregma)
+        [0.0, 1.0, 0.0, -MIDLINE_ML_UM],             # ML -> 0 at midline
+        [0.0, 0.0, 1.0, 0.0],                        # DV unchanged
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+
+
+# Default 3D view: from behind (posterior), dorsal up, tilted slightly down from the
+# top. AP stays posterior-positive (offset only), so "look toward anterior" is -AP.
 _VIEW_DIRECTION = (-1.0, 0.0, 0.5)   # look toward anterior (-AP), slightly down (+DV)
 _UP_DIRECTION = (0.0, 0.0, -1.0)     # dorsal is up (-DV)
+
+
+def _apply_bregma_display(layers: list) -> None:
+    """Set the bregma display affine on every 3D-scene layer (display only)."""
+    affine = _bregma_affine()
+    for layer in layers:
+        try:
+            layer.affine = affine
+        except Exception:  # noqa: BLE001 - affine is best-effort per layer
+            pass
 
 
 def _set_default_camera(viewer: "napari.Viewer") -> None:

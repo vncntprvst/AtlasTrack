@@ -4,6 +4,7 @@ Ported from legacy/HERBS_to_AllenCCF/probe_visualization.py.
 """
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -29,6 +30,10 @@ MIDLINE_ML_UM = 5700.0
 # while still storing the absolute-from-origin AP that the resampler expects.
 BREGMA_AP_FROM_ORIGIN_UM = 5400.0
 
+# CCF DV (µm from the dorsal-most slice) of bregma: ~44 voxels at 10 µm. Used to
+# re-reference DV to the bregma surface for stereotaxic output. ESTIMATE.
+BREGMA_DV_FROM_ORIGIN_UM = 440.0
+
 
 def relative_ap_ml_dv_to_ccf(ap_rel: float, ml_rel: float, dv_um: float) -> np.ndarray:
     """Convert bregma/midline-relative AP/ML/DV (µm) to Allen CCF AP/ML/DV (µm).
@@ -41,6 +46,71 @@ def relative_ap_ml_dv_to_ccf(ap_rel: float, ml_rel: float, dv_um: float) -> np.n
         [BREGMA_AP_UM - ap_rel, MIDLINE_ML_UM - ml_rel, dv_um],
         dtype=float,
     )
+
+
+# CCF -> stereotaxic (Paxinos/bregma) alignment presets.
+#
+# The Allen CCFv3 template is pitched ~5 deg nose-DOWN relative to a flat-skull
+# stereotaxic frame (bregma & lambda at equal DV), so a pure mirror is only correct
+# near bregma; the error grows with distance (especially in DV / far AP). Each preset
+# therefore un-pitches by 5 deg in the sagittal plane about the ML axis through
+# bregma, then applies published per-axis scale factors. These are ESTIMATES with
+# real variance - validate against pilot injections / histology.
+#
+# Refs: community.brain-map.org/t/.../1858 ; virtualbrainlab.org Pinpoint in-vivo
+# alignment (Qiu 2018 is Pinpoint's recommended default; Dorr 2008 alternative).
+#
+# value = (pitch_deg, scale_ap, scale_ml, scale_dv, bregma_dv_um)
+PAXINOS_ALIGNMENTS: dict[str, tuple[float, float, float, float, float]] = {
+    "none":        (0.0, 1.000, 1.000, 1.0000, 0.0),    # legacy pure mirror (no tilt)
+    "allen_forum": (5.0, 1.000, 1.000, 0.9434, BREGMA_DV_FROM_ORIGIN_UM),
+    "qiu2018":     (5.0, 1.031, 0.952, 0.8850, BREGMA_DV_FROM_ORIGIN_UM),
+    "dorr2008":    (5.0, 1.087, 1.000, 0.9520, BREGMA_DV_FROM_ORIGIN_UM),
+}
+DEFAULT_PAXINOS_ALIGNMENT = "qiu2018"
+
+
+def ccf_um_to_paxinos_mm(
+    ap_um: np.ndarray | float,
+    ml_um: np.ndarray | float,
+    dv_um: np.ndarray | float,
+    *,
+    alignment: str = DEFAULT_PAXINOS_ALIGNMENT,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Allen CCF (AP, ML, DV) µm -> Paxinos (Franklin-Paxinos) stereotaxic mm.
+
+    Steps (see :data:`PAXINOS_ALIGNMENTS`):
+
+    1. Bregma-relative µm, CCF signs: ``ap-5400``, ``ml-5700``, ``dv-bregma_dv``.
+    2. Un-pitch by ``pitch_deg`` in the sagittal (AP-DV) plane about the ML axis.
+    3. Per-axis scale (published estimates).
+    4. Paxinos signs + mm: AP anterior-positive, ML 0 at midline, DV ventral (depth).
+
+    With ``alignment="none"`` this reduces to the plain mirror
+    ``(5400-AP, 5700-ML, DV)/1000`` (no tilt, DV = raw CCF depth) - useful as a
+    no-correction baseline. The default ``"qiu2018"`` matches Pinpoint's recommended
+    transform. Uses the corrected bregma AP (5400 µm); the legacy 6600 placed regions
+    ~1.2 mm too anterior.
+    """
+    if alignment not in PAXINOS_ALIGNMENTS:
+        raise ValueError(
+            f"unknown alignment {alignment!r}; options: {sorted(PAXINOS_ALIGNMENTS)}"
+        )
+    pitch_deg, s_ap, s_ml, s_dv, bregma_dv = PAXINOS_ALIGNMENTS[alignment]
+
+    ap_c = np.asarray(ap_um, dtype=float) - BREGMA_AP_FROM_ORIGIN_UM  # + posterior
+    ml_c = np.asarray(ml_um, dtype=float) - MIDLINE_ML_UM             # + right (CCF)
+    dv_c = np.asarray(dv_um, dtype=float) - bregma_dv                 # + ventral
+
+    th = math.radians(pitch_deg)
+    cos_t, sin_t = math.cos(th), math.sin(th)
+    ap_r = ap_c * cos_t - dv_c * sin_t
+    dv_r = ap_c * sin_t + dv_c * cos_t
+
+    ap_mm = -(ap_r * s_ap) / 1000.0   # anterior positive
+    ml_mm = -(ml_c * s_ml) / 1000.0   # 0 at midline
+    dv_mm = (dv_r * s_dv) / 1000.0    # ventral positive (depth below bregma)
+    return ap_mm, ml_mm, dv_mm
 
 
 def atlas_resolution_um(atlas: "BrainGlobeAtlas") -> tuple[float, float, float]:
