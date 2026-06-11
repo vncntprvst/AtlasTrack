@@ -236,8 +236,23 @@ def show_3d_scene(
     added += add_probe_layers(viewer, project, line_width=line_width)
     added += add_ephys_channel_layers(viewer, project)
     switch_to_3d(viewer)
-    try:
-        viewer.reset_view()
-    except Exception:
-        pass
+    _set_default_camera(viewer)
     return added
+
+
+# Data axes are (AP, ML, DV): AP increases posteriorly, DV increases ventrally.
+# Default 3D view: from behind (posterior), dorsal up, tilted slightly down from
+# the top - so both hemispheres are symmetric and the brainstem/probes face you.
+_VIEW_DIRECTION = (-1.0, 0.0, 0.5)   # look toward anterior (-AP), slightly down (+DV)
+_UP_DIRECTION = (0.0, 0.0, -1.0)     # dorsal is up (-DV)
+
+
+def _set_default_camera(viewer: "napari.Viewer") -> None:
+    """Fit the data, then orient the camera to the standard posterior-top view."""
+    try:
+        viewer.reset_view()  # fit zoom/centre to the data
+        viewer.camera.set_view_direction(
+            view_direction=_VIEW_DIRECTION, up_direction=_UP_DIRECTION
+        )
+    except Exception:  # noqa: BLE001 - camera orientation is best-effort
+        pass

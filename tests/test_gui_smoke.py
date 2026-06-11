@@ -606,6 +606,90 @@ def test_wheel_pan_moves_camera(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_update_coordinates_remaps_moved_points(qtbot) -> None:
+    """'Update coordinates' re-maps tip/entry pixels (incl. moved ones) into CCF."""
+    import napari
+    from histo_to_ccf.project.schema import (
+        Point2D, ProbeSpec, ProbeType, RegistrationResult, Section, Shank,
+    )
+    from histo_to_ccf.gui.widgets.viz_export_panel import VizExportPanelWidget
+
+    class _FakeAtlas:
+        resolution = (25.0, 25.0, 25.0)
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.add_slide("s.png", np.zeros((20, 20), dtype=np.uint8))
+        state.active_slide_idx = 0
+        state.atlas = _FakeAtlas()
+        # A registered section with NO B-spline (so no .h5 needed): plane only.
+        state.project.slides[0].sections.append(Section(
+            index=5, slide_idx=0, bbox_px=(0, 0, 20, 20), ap_order=0,
+            registration=RegistrationResult(
+                anchoring=[100, 50, 80, 40, 0, 0, 0, 0, 40],
+                output_size_px=(20, 20), bspline_transform_path=None, residual=0.1),
+        ))
+        shank = Shank(index=0, tip_px=Point2D(x_px=5.0, y_px=5.0), tip_section_idx=5)
+        state.project.probes.append(
+            ProbeSpec(label="P", type=ProbeType(name="NP", n_shanks=1), shanks=[shank]))
+
+        panel = VizExportPanelWidget(state, viewer)
+        qtbot.addWidget(panel)
+
+        assert shank.tip_ccf_um is None
+        panel._do_update_coordinates()
+        first = shank.tip_ccf_um
+        assert first is not None
+
+        # Move the tip and update again -> CCF changes.
+        shank.tip_px = Point2D(x_px=15.0, y_px=12.0)
+        panel._do_update_coordinates()
+        assert shank.tip_ccf_um is not None and shank.tip_ccf_um != first
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_reset_morph_drops_bspline_keeps_plane(qtbot, tmp_path) -> None:
+    """Reset-morph nulls the B-spline + manual corrections but keeps the anchoring."""
+    import napari
+    from histo_to_ccf.project.schema import ManualLandmarks, RegistrationResult, Section
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.add_slide(str(tmp_path / "s.png"), np.zeros((10, 10), dtype=np.uint8))
+        state.active_slide_idx = 0
+        state.project_path = tmp_path / "p.histo2ccf.json"
+        anchoring = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        sec = Section(
+            index=5, slide_idx=0, bbox_px=(0, 0, 5, 5), ap_order=0,
+            registration=RegistrationResult(
+                anchoring=list(anchoring), output_size_px=(5, 5),
+                bspline_transform_path="transforms/section_005.h5", residual=0.1),
+            manual_landmarks=ManualLandmarks(source=[[1.0, 1.0]], target=[[2.0, 2.0]]),
+        )
+        state.project.slides[0].sections.append(sec)
+        panel = RegisterPanelWidget(state, viewer)
+        qtbot.addWidget(panel)
+        panel._populate_adjust_combo()
+        panel._adjust_combo.setCurrentIndex(panel._adjust_combo.findData(5))
+
+        panel._reset_morph()
+
+        # Morph + manual corrections dropped; the plane (anchoring) is kept.
+        assert sec.registration.bspline_transform_path is None
+        assert sec.manual_landmarks is None
+        assert sec.manual_affine is None
+        assert sec.registration.anchoring == anchoring
+        assert state.project_path.exists()  # auto-saved
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_residuals_table_bregma_and_ap_order(qtbot) -> None:
     """Residuals table: AP from bregma (matches Atlas tab) and sorted by AP order."""
     import napari
@@ -776,6 +860,28 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
     assert len(eph.channel_ccf_um) == 16
     assert len(eph.channel_depths_um) == 16
     assert eph.anchors and eph.anchors[0][0] == pytest.approx(1000.0)
+
+
+@pytest.mark.qt
+def test_default_3d_camera_is_posterior_dorsal_up(qtbot) -> None:
+    """Default 3D camera: from behind (anterior view dir), dorsal up, tilted down."""
+    import napari
+    from histo_to_ccf.viz.napari3d import _set_default_camera
+
+    viewer = napari.Viewer(show=False)
+    try:
+        # Data extent in (AP, ML, DV) so reset_view has something to fit.
+        viewer.add_points(np.array([[0, 0, 0], [13000, 11000, 8000]], float), ndim=3)
+        viewer.dims.ndisplay = 3
+        _set_default_camera(viewer)
+        vd = np.asarray(viewer.camera.view_direction)
+        assert vd[0] < 0          # looking toward anterior (-AP) = viewing from behind
+        assert abs(vd[1]) < 0.05  # symmetric left-right (no ML)
+        assert vd[2] > 0          # tilted slightly downward (+DV)
+        up = np.asarray(viewer.camera.up_direction)
+        assert up[2] < 0          # dorsal (-DV) is up
+    finally:
+        viewer.close()
 
 
 @pytest.mark.qt

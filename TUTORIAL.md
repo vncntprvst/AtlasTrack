@@ -143,6 +143,11 @@ bar, the residuals table, **Show atlas overlay**, and the manual-adjustment tool
    **Manual atlas adjustment**: pick the section, then either **Box transform**
    (drag the overlay / box handles) or **Landmarks** (place + drag correspondence
    points). **Reset adjustment** clears it. Both re-map probes and auto-save.
+   - **Badly distorted sections** (tissue torn apart, or a piece missing - e.g.
+     brainstem but no cerebellum): click **Reset morph to plane (keep AP/ML)** in
+     the Landmarks group. That drops the automatic warp but keeps the atlas plane,
+     so the overlay returns to the clean, undistorted slice - then use **Place
+     landmarks** to fit it by hand instead of fighting the distorted outline.
 
 ---
 
@@ -150,6 +155,15 @@ bar, the residuals table, **Show atlas overlay**, and the manual-adjustment tool
 
 These live in the permanent **3D & Export** panel on the right - available at any
 time, not only after registration.
+
+**Update coordinates**  
+Probe CCF coordinates are computed from your pixel clicks through the registration.
+If you **move a tip/entry point** (Probes tab) or **correct a section's atlas**
+after the 3D window is open, click **Update coordinates** to re-map every probe
+into CCF, save, and refresh the 3D window. (Moving a point alone doesn't update the
+CCF used by the 3D view + exports - click this first.) **View in napari 3D** updates
+automatically; the pkl/CSV/Plotly exports use the last-updated coordinates, so click
+**Update coordinates** before exporting if you've moved points.
 
 **In-app 3D**  
 Click **View in napari 3D** - opens a separate 3D window with the brain shell, tip

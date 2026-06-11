@@ -229,6 +229,16 @@ class RegisterPanelWidget(QWidget):
         # Tool 2 - landmark TPS warp, grouped: place, edit (move/add), apply.
         lm_group = QGroupBox("Landmarks")
         lg = QVBoxLayout(lm_group)
+        self._reset_morph_btn = QPushButton("Reset morph to plane (keep AP/ML)")
+        self._reset_morph_btn.setToolTip(
+            "Drop the automatic B-spline warp for this section but keep its atlas "
+            "plane (AP/ML). The overlay returns to the undistorted atlas slice, so "
+            "for hard sections (torn / missing tissue) you can redo the fit by hand "
+            "with landmarks instead of fighting a badly distorted outline. Clears "
+            "any existing manual correction; re-maps probes and saves."
+        )
+        self._reset_morph_btn.clicked.connect(self._reset_morph)
+        lg.addWidget(self._reset_morph_btn)
         self._place_lm_btn = QPushButton("Place landmarks")
         self._place_lm_btn.setToolTip(
             "Drop draggable correspondence points on the atlas overlay (6 around the "
@@ -749,6 +759,39 @@ class RegisterPanelWidget(QWidget):
         # Restore the un-corrected overlay for this section.
         self._rerender_section_overlay(section)
         self._remap_and_save(section)
+
+    def _reset_morph(self) -> None:
+        """Discard the auto B-spline morph for a section, keep its plane (AP/ML).
+
+        For sections the deformable fit mangles (torn / missing tissue), this
+        reverts the overlay to the undistorted atlas slice so the user can redo it
+        by hand with landmarks. Setting ``bspline_transform_path = None`` makes both
+        the overlay (`warp_annotation_to_section` falls back to the plane resize)
+        and the probe mapping (`bspline=None`) use only the anchoring. Any prior
+        manual correction is cleared so the landmark fit starts from the raw plane.
+        """
+        section = self._adjust_section()
+        if section is None or section.registration is None:
+            _error_dialog(self, "No registered section", "Pick a registered section first.")
+            return
+        section.registration.bspline_transform_path = None
+        section.manual_affine = None
+        section.manual_landmarks = None
+        # Drop any landmark/edit layer + reset the box-adjust toggle.
+        lm_name = f"Atlas landmarks {section.index}"
+        if lm_name in self._viewer.layers:
+            self._viewer.layers.remove(lm_name)
+        if self._adjust_btn.isChecked():
+            self._adjust_btn.blockSignals(True)
+            self._adjust_btn.setChecked(False)
+            self._adjust_btn.blockSignals(False)
+            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+        self._rerender_section_overlay(section)
+        self._remap_and_save(section)
+        self._status.setText(
+            f"Section {section.index}: morph dropped, atlas plane (AP/ML) kept. "
+            "Click 'Place landmarks' to fit it by hand."
+        )
 
     # ------------------------------------------------------------------
     # Landmark (thin-plate-spline) correction

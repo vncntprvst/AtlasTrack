@@ -1,6 +1,51 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-10 · version **0.2.18** · branch **dev**_
+_Last updated: 2026-06-11 · version **0.2.21** · branch **dev**_
+
+## Default 3D camera (v0.2.21)
+
+`show_3d_scene` left the camera at napari's default (a side/back view rotated 90°).
+It now ends with `_set_default_camera`: `reset_view()` (fit) then
+`camera.set_view_direction`. Data axes are **(AP, ML, DV)** (AP↑ posterior, DV↑
+ventral), so the standard view is **from behind (posterior), dorsal up, tilted ~30°
+down from the top**: `view_direction=(-1, 0, 0.5)` (toward anterior, slightly down),
+`up_direction=(0, 0, -1)` (dorsal up). Both hemispheres come out symmetric with the
+brainstem/probes facing the viewer. Tweak the two `_VIEW_DIRECTION` / `_UP_DIRECTION`
+constants in `viz/napari3d.py` to change it.
+
+## "Update coordinates" - when probe CCF is recomputed (v0.2.20)
+
+Probe **CCF** coords (`shank.tip_ccf_um` / `entry_ccf_um`, used by the 3D view +
+exports) are derived from the **pixel** clicks (`tip_px` / `entry_px`) through the
+registration. They are recomputed when: registration runs, a **manual atlas
+correction** is applied (`register_panel._remap_and_save`), or the new **"Update
+coordinates"** button is clicked. **Moving a tip/entry point** in the Probes tab
+only updates the *pixel* position (`click_overlay._sync_layer`) - it does **not**
+re-map to CCF, and an already-open 3D window doesn't refresh. So a moved point (or
+a correction made while the 3D window is open) wasn't reflected.
+
+Fix (`viz_export_panel`): **"Update coordinates"** (top of the 3D & Export panel)
+calls `_remap_probes` (`reload_registered_transforms` + `_apply_to_shank_registered`
+over every shank, reading the live `tip_px`/`entry_px` and registration incl.
+manual corrections), saves, and refreshes an open 3D window. **"View in napari
+3D"** now also re-maps first (`_remap_then_render`), so the 3D view is always
+current. Re-mapping is only done on these explicit actions (not per-drag), per the
+user's "too expensive to do automatically" concern. Needs the atlas loaded.
+**Note:** the pkl/CSV/Plotly exports still read the stored CCF, so click "Update
+coordinates" after moving points before exporting.
+
+## Reset morph to plane, for hard sections (v0.2.19)
+
+For sections the deformable fit mangles (tissue torn apart, or a piece missing -
+e.g. brainstem present but cerebellum gone), fixing the distorted outline by hand
+is slower than starting over. **Register tab → Manual atlas adjustment → Landmarks
+→ "Reset morph to plane (keep AP/ML)"** (`_reset_morph`) sets
+`section.registration.bspline_transform_path = None` and clears any
+`manual_affine`/`manual_landmarks`. With no B-spline path, `warp_annotation_to_section`
+falls back to the **undistorted atlas slice resized to the bbox**, and the probe
+mapping uses only the anchoring (`bspline=None`) - so the **AP/ML plane is kept**,
+just the morph is dropped. The user then uses **Place landmarks** to fit it by hand
+from the clean plane. Re-maps probes + auto-saves like the other corrections.
 
 ## Register residuals table consistency (v0.2.18)
 

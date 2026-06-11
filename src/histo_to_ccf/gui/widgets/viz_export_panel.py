@@ -58,6 +58,19 @@ class VizExportPanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
+        # Recompute probe/electrode CCF coordinates from the current registration.
+        self._update_btn = QPushButton("Update coordinates")
+        self._update_btn.setToolTip(
+            "Re-map every probe tip / entry (and per-channel) from its pixel "
+            "position through the current registration - including manual atlas "
+            "corrections and any tip/entry points you moved - into CCF µm, then "
+            "save. Moving points or correcting a section does NOT update the CCF "
+            "coordinates (used by the 3D view + exports) until you click this; an "
+            "open 3D window is refreshed too. Needs the atlas loaded."
+        )
+        self._update_btn.clicked.connect(self._update_coordinates)
+        layout.addWidget(self._update_btn)
+
         viz_box = QGroupBox("3D Visualization")
         viz_layout = QVBoxLayout(viz_box)
         reg_row = QHBoxLayout()
@@ -149,8 +162,74 @@ class VizExportPanelWidget(QWidget):
         except Exception as exc:  # noqa: BLE001
             _error_dialog(self, "Export failed", str(exc))
 
+    def _remap_probes(self) -> int:
+        """Re-project every shank tip/entry pixel through the current transforms.
+
+        Reads the live registration (incl. manual affine / landmarks / reset-to-
+        plane) and the current ``tip_px`` / ``entry_px`` (which moving a point in
+        the Probes tab updates), and rewrites ``tip_ccf_um`` / ``entry_ccf_um``.
+        Returns the number of shanks updated. Requires ``state.atlas``.
+        """
+        atlas = self._state.atlas
+        if atlas is None or not self._state.project.probes:
+            return 0
+        from histo_to_ccf.registration.pipeline import (
+            _apply_to_shank_registered,
+            reload_registered_transforms,
+        )
+
+        base_dir = (
+            self._state.project_path.parent if self._state.project_path else None
+        )
+        transforms = reload_registered_transforms(
+            self._state.project, atlas, project_dir=base_dir
+        )
+        n = 0
+        for probe in self._state.project.probes:
+            for shank in probe.shanks:
+                _apply_to_shank_registered(shank, self._state.project, transforms)
+                n += 1
+        return n
+
+    def _update_coordinates(self) -> None:
+        self._ensure_atlas(self._do_update_coordinates)
+
+    def _do_update_coordinates(self) -> None:
+        if self._state.atlas is None:
+            self._status.setText("Load an atlas first - it's needed to map pixels to CCF.")
+            return
+        if not self._state.project.probes:
+            self._status.setText("No probes to update.")
+            return
+        try:
+            n = self._remap_probes()
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "Update failed", str(exc))
+            return
+        msg = f"Updated {n} shank coordinate(s) from the current registration"
+        if self._state.project_path is not None:
+            try:
+                from histo_to_ccf.project.io import save_project
+
+                save_project(self._state.project, self._state.project_path)
+                msg += f"  ·  saved → {self._state.project_path.name}"
+            except Exception as exc:  # noqa: BLE001
+                msg += f"  ·  save failed: {exc}"
+        # Refresh an already-open 3D window so it reflects the new coordinates.
+        if self._viewer3d is not None and _viewer_alive(self._viewer3d):
+            self._render_napari3d()
+        self._status.setText(msg)
+
     def _view_napari3d(self) -> None:
-        self._ensure_atlas(self._render_napari3d)
+        # Re-map first so the 3D view always reflects the latest corrections.
+        self._ensure_atlas(self._remap_then_render)
+
+    def _remap_then_render(self) -> None:
+        try:
+            self._remap_probes()
+        except Exception:  # noqa: BLE001 - render with whatever coords exist
+            pass
+        self._render_napari3d()
 
     def _render_napari3d(self) -> None:
         try:
