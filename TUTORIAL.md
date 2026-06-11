@@ -74,9 +74,18 @@ always available). The menu bar has two menus: **Project** (Save / Load / Close 
 4. For each section: set **Assign to section idx**, then click **Assign AP to section**.
    (Midline / dorsal-surface anchoring is handled automatically by registration - no
    manual pixel entry needed.)
-5. In **Section ordering**: drag sections in the list to reorder them, set
-   **Section spacing (µm)** (persists with the project), pick the anchor section, and
-   click **Apply spacing** to propagate AP values across all sections.
+5. In **Section ordering**: the list is the **anterior→posterior sequence**, top =
+   first. With the **Direction: Anterior → Posterior** default, the **top section is
+   the most anterior** (and is marked *◄ anterior end*; the bottom is *◄ posterior
+   end*) - check this matches your slides before registering. Drag sections to
+   reorder, set **Section spacing (µm)** (persists with the project), pick the anchor
+   section, and click **Apply spacing** to propagate AP values across all sections.
+
+> **DeepSlice + your AP.** DeepSlice predicts every plane, then is **guided** by any
+> AP you assigned: it shifts its predictions onto your values (one assigned section
+> sets the overall offset, two or more set offset + scale). So you can let DeepSlice
+> do the work and just pin a level or two to anchor it - your assigned AP is no
+> longer overridden.
 
 ---
 
@@ -93,7 +102,16 @@ always available). The menu bar has two menus: **Project** (Save / Load / Close 
      - **Marker**: click the surface directly.
      - **Trajectory line**: draw the probe track as a line; the point where it crosses
        the tissue surface is taken as the entry.
-3. The table at the bottom shows the stored coordinates for both tips **and** entries.
+   Each shank gets its **own colour** (the tip and entry of one shank match; the
+   colour cycles as you select another shank/probe). Tips are **discs**, entries are
+   **triangles**. A new tip/entry for a shank replaces its previous one.
+3. **Adjust / delete points**: click **Select / move** to drag a marker to a new
+   spot or select markers (Shift-click for several); then press Delete or
+   **Clear selected** to remove just those. **Clear all points** wipes everything.
+4. The table at the bottom shows the stored coordinates for both tips **and** entries.
+
+**Tip — moving around the canvas:** the mouse wheel zooms; hold **Ctrl** and scroll
+to pan **left/right**, or **Shift** and scroll to pan **up/down**.
 
 ---
 

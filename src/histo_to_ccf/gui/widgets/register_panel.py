@@ -188,7 +188,9 @@ class RegisterPanelWidget(QWidget):
 
         layout.addWidget(QLabel("Per-section residuals:"))
         self._residuals_table = QTableWidget(0, 3)
-        self._residuals_table.setHorizontalHeaderLabels(["Section", "AP µm", "Residual"])
+        self._residuals_table.setHorizontalHeaderLabels(
+            ["Section", "AP from bregma µm", "Residual"]
+        )
         self._residuals_table.setMaximumHeight(160)
         layout.addWidget(self._residuals_table)
 
@@ -403,7 +405,11 @@ class RegisterPanelWidget(QWidget):
             from histo_to_ccf.gui.workers import deepslice_worker
 
             ds_dir = transforms_dir.parent / "deepslice"
-            ds = deepslice_worker(section_images, atlas, ds_dir)
+            # Number DeepSlice's input by the user's AP sequence (ap_order), so its
+            # serial-section ordering follows the intended order, not the raw
+            # detection index.
+            ds = deepslice_worker(section_images, atlas, ds_dir,
+                                  order=self._section_order())
             ds.returned.connect(
                 lambda anch: self._start_register(section_images, transforms_dir, anch)
             )
@@ -412,8 +418,30 @@ class RegisterPanelWidget(QWidget):
         else:
             self._start_register(section_images, transforms_dir, None)
 
+    def _section_order(self) -> dict[int, int]:
+        """Map ``section.index`` to its rank in the user's AP sequence (``ap_order``).
+
+        DeepSlice orders the series by its input filename token; numbering by the
+        ap_order rank makes it follow the order the user set in the ordering panel
+        (which writes ``ap_order``) rather than the raw detection index.
+        """
+        order: dict[int, int] = {}
+        for slide in self._state.project.slides:
+            ranked = sorted(slide.sections, key=lambda s: s.ap_order)
+            for rank, section in enumerate(ranked):
+                order[section.index] = rank
+        return order
+
     def _start_register(self, section_images, transforms_dir, anchorings) -> None:
         atlas = self._state.atlas
+        # Guide DeepSlice with any user-assigned AP: shift its predicted planes so
+        # they honour the hand-set AP values (keeping DeepSlice's tilt/spacing).
+        if anchorings:
+            from histo_to_ccf.registration.pipeline import guide_anchorings_with_planes
+
+            anchorings = guide_anchorings_with_planes(
+                anchorings, self._state.project, atlas
+            )
         n = len(anchorings) if anchorings else len(section_images)
         self._status.setText(f"Starting registration of {n} section(s)…")
 
@@ -490,16 +518,31 @@ class RegisterPanelWidget(QWidget):
         self._status.setText(f"Error: {exc}")
 
     def _refresh_residuals(self) -> None:
+        """Fill the residuals table - AP **from bregma** and in **AP order**, to
+        match the Atlas/ordering tab, using the *actual registered* plane.
+
+        The AP shown is the centre of each section's registered anchoring (what was
+        really registered, incl. any DeepSlice guidance), converted to bregma µm -
+        not ``plane.ap_um`` (the request), which can differ. Rows are sorted by
+        ``ap_order`` so the sequence reads the same as the ordering list.
+        """
+        from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+
+        ap_res = float(self._state.project.atlas.resolution_um or 25.0)
         rows = []
         for slide in self._state.project.slides:
             for sec in slide.sections:
-                if sec.registration is not None:
-                    ap = sec.plane.ap_um if sec.plane else float("nan")
-                    rows.append((sec.index, ap, sec.registration.residual))
+                if sec.registration is None:
+                    continue
+                a = sec.registration.anchoring  # (ox,oy,oz,ux,uy,uz,vx,vy,vz) voxels
+                ap_idx = a[0] + 0.5 * a[3] + 0.5 * a[6]  # AP of the plane centre
+                ap_bregma = BREGMA_AP_FROM_ORIGIN_UM - ap_idx * ap_res
+                rows.append((sec.ap_order, sec.index, ap_bregma, sec.registration.residual))
+        rows.sort(key=lambda r: r[0])
         self._residuals_table.setRowCount(len(rows))
-        for i, (idx, ap, res) in enumerate(rows):
+        for i, (_order, idx, ap, res) in enumerate(rows):
             self._residuals_table.setItem(i, 0, QTableWidgetItem(str(idx)))
-            self._residuals_table.setItem(i, 1, QTableWidgetItem(f"{ap:.0f}" if ap == ap else "-"))
+            self._residuals_table.setItem(i, 1, QTableWidgetItem(f"{ap:+.0f}" if ap == ap else "-"))
             self._residuals_table.setItem(i, 2, QTableWidgetItem(f"{res:.4f}" if res is not None else "-"))
 
     def _show_overlay(self) -> None:

@@ -102,11 +102,19 @@ def deepslice_worker(
     workdir: Path,
     *,
     species: str = "mouse",
+    order: dict[int, int] | None = None,
 ) -> dict[int, list[float]]:
-    """Predict per-section atlas anchorings with DeepSlice (background thread)."""
+    """Predict per-section atlas anchorings with DeepSlice (background thread).
+
+    ``order`` (section_idx -> AP-sequence rank) numbers the DeepSlice input by the
+    user's intended anterior→posterior order, so its serial-section ordering isn't
+    bound to the raw detection index.
+    """
     from histo_to_ccf.registration.deepslice_adapter import predict_anchorings
 
-    return predict_anchorings(section_images, atlas, workdir=workdir, species=species)
+    return predict_anchorings(
+        section_images, atlas, workdir=workdir, species=species, order=order
+    )
 
 
 @thread_worker
@@ -177,10 +185,10 @@ def register_worker_progressive(
     """
     import SimpleITK as sitk
 
-    from histo_to_ccf.atlas.planes import Anchoring, anchoring_from_plane_params
     from histo_to_ccf.io.ccf_coords import atlas_resolution_um
     from histo_to_ccf.registration.pipeline import (
         _apply_to_shank_registered,
+        anchoring_for_section,
         register_section_image,
     )
     from histo_to_ccf.registration.transforms import RegisteredSectionTransform
@@ -219,10 +227,10 @@ def register_worker_progressive(
         logger.info("Registering section {} ({}/{})", section.index, i + 1, n_total)
 
         img = section_images[section.index]
-        if section.index in anchorings:
-            anchoring = Anchoring.from_iterable(anchorings[section.index])
-        else:
-            anchoring = anchoring_from_plane_params(atlas, section.plane)
+        # A manually assigned AP takes precedence over a DeepSlice prediction
+        # (see anchoring_for_section); DeepSlice, on by default, otherwise silently
+        # overrode every hand-set AP.
+        anchoring = anchoring_for_section(section, anchorings, atlas)
 
         # One section failing (e.g. a plane with too little atlas overlap) must
         # not abort the whole batch - log it and carry on.

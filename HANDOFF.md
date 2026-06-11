@@ -1,6 +1,45 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-10 · version **0.2.15** · branch **main** (newUI merged in)_
+_Last updated: 2026-06-10 · version **0.2.18** · branch **dev**_
+
+## Register residuals table consistency (v0.2.18)
+
+The residuals table disagreed with the Atlas/ordering tab and confused users into
+thinking the registration was wrong. Three fixes in `_refresh_residuals`:
+- **AP from bregma** (`BREGMA_AP_FROM_ORIGIN_UM - ap_idx·res`), matching the Atlas
+  tab, instead of raw CCF-origin µm (e.g. shows `-5300`, not `10700`).
+- **Sorted by `ap_order`** (the AP sequence), so rows read 0,1,2,3 like the
+  ordering list, not the project's storage/detection order (0,3,6,9…).
+- Uses the **actual registered AP** = centre of `section.registration.anchoring`
+  (incl. DeepSlice guidance), not `section.plane.ap_um` (the request) which can
+  differ. Header now reads "AP from bregma µm".
+
+## DeepSlice ordering + manual-AP guidance + Ctrl+S (v0.2.17)
+
+- **Ctrl+S / Ctrl+Shift+S / Ctrl+O** save / save-as / load (application-wide
+  QAction shortcuts on the Project menu).
+- **DeepSlice is ordered by the user's AP sequence, not the detection index.**
+  DeepSlice enforces a monotonic A→P order by its filename `_s<token>`. The token
+  was `section.index` (detection order); reordering in the ordering panel only
+  changes `ap_order`, so a reorder was **ignored by DeepSlice**. Now
+  `register_panel._section_order` numbers the DeepSlice input by `ap_order` rank
+  (`predict_anchorings(order=...)`), and the results map back to `section.index`.
+  No reorder → rank == index → unchanged.
+- **A manually assigned AP guides DeepSlice** (`pipeline.guide_anchorings_with_planes`,
+  v0.2.18): after DeepSlice predicts, each **assigned** section's plane is
+  translated along AP so its centre sits **exactly** at the user's AP (keeping
+  DeepSlice's tilt); **unassigned** sections are shifted by interpolating the
+  assigned sections' shifts (vs DeepSlice's predicted AP). This *guarantees* a
+  pinned section lands on its value (an earlier least-squares-line version only got
+  close - the cause of "section 0 didn't register to -5300 even though I assigned
+  it"). Applied in `_start_register`; `anchoring_for_section` then uses the guided
+  DeepSlice anchoring, falling back to the manual plane only where DeepSlice didn't
+  cover. **Watch:** the residuals table shows the *actual* registered AP (the
+  anchoring), so a mismatch there vs the assigned AP means guidance didn't apply.
+- **Known gap (not yet fixed):** the Atlas-tab "Assign to section idx", the
+  overlay, and `section_images` still key by `section.index`, which can differ
+  from the intended A→P order after a reorder or an alphabetical multi-slide merge
+  - so "section 0" isn't guaranteed to be the anterior-most section.
 
 ## TL;DR
 
@@ -57,6 +96,12 @@ Tab order left→right: **Histology → Atlas → Probes → Register → Ephys*
    "Add probe" auto-arms Tip-marker mode. **Probe + shank are selected by label**
    (combos, consistent with the Ephys tab). Click to drop tip; switch to Entry
    (Marker, or draw a Trajectory line whose tissue-surface crossing = entry).
+   **Markers are colour-coded per shank** (v0.2.16): a shank's tip and entry share
+   one colour, cycling as you pick another shank/probe, and tip vs entry differ by
+   **symbol** (tip = disc, entry = triangle). **"Select / move"** enters napari
+   select mode to drag markers or select them; **"Clear selected"** removes just
+   the chosen ones (vs "Clear all"). A second tip/entry for a shank replaces its
+   previous one. (See "Tip/entry markers" below.)
 4. **Register** - the panel is deliberately lean (v0.2.14): just **"Register all
    sections"**, the progress/status, the residuals table, "Show atlas overlay", and
    the manual adjustment group. **All registration parameters** are **no longer shown
@@ -397,6 +442,37 @@ shifting the probe CCF by the matching pixels, schema round-trip; plus a qt smok
 (enter transform mode, set an affine, apply -> `manual_affine` stored + saved, reset).
 **Open polish:** the adjust picker doesn't yet auto-select the section nearest the
 viewport; per-section "stretch only" vs "move only" lock; an undo.
+
+## Tip/entry markers + canvas navigation (v0.2.16)
+
+**Markers (`gui/widgets/click_overlay.py`).** Two Points layers, **Tips** (symbol
+`disc`) and **Entries** (`triangle_up`); colour encodes the **shank**, not the
+type, so a shank's tip and entry match and different shanks cycle a 16-colour
+palette by their global ordinal (position in the flattened probe→shank list).
+Each point carries its `(p, s)` (probe/shank positions) in the layer **features**,
+so identity survives add/move/delete. The layers are **two-way synced** with the
+schema in `_sync_layer`: on *add* the new (last) point is assigned to the selected
+shank (napari may copy the previous point's features, so we overwrite the last
+row); points are then deduped to **one tip/entry per shank** (newest wins); the
+schema's `shank.tip_px/entry_px` is rewritten from the kept points; colours are
+reapplied (`_recolor`). "Select / move" puts both layers in napari `select` mode
+(drag to reposition, Delete / "Clear selected" → `remove_selected()` fires the
+data event that clears those shanks); "Clear all" wipes everything.
+**Gotcha:** do **not** set `current_face_color` to drive a preview colour - it
+recurses through napari's colour-swatch control and blows the stack; the per-point
+`face_color` array set in `_recolor` is what colours the markers. Also: the
+shank-combo `currentIndexChanged` must **not** repopulate the shank combo (only
+the *probe* combo does) or it recurses.
+
+**Canvas navigation (`app._install_wheel_pan`).** Plain wheel still zooms;
+**Ctrl+wheel pans horizontally, Shift+wheel pans vertically**. napari 0.7 already
+*suppresses* wheel-zoom whenever a modifier is held (its `NapariSceneCanvas`
+ignores modified wheel events) while still firing `viewer.mouse_wheel_callbacks`,
+so the pan callback never fights the zoom. Pan step = `delta * 80 / camera.zoom`
+world units (consistent feel at any magnification); honours natural-scroll
+inversion. **Real canvas scrollbars were considered and dropped** - napari's
+QtViewer exposes no insertable layout and overlaying widgets on the GL canvas is
+fragile across versions; the wheel-pan covers the need.
 
 ## Architecture notes / hard rules
 

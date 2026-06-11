@@ -102,6 +102,72 @@ def _lookup_manual(
 # ── Registered (M3) pipeline ──────────────────────────────────────────────────
 
 
+def anchoring_for_section(section: Section, anchorings: dict, atlas: "BrainGlobeAtlas"):
+    """Pick a section's atlas plane: a (guided) DeepSlice anchoring, else the plane.
+
+    When DeepSlice ran, ``anchorings`` holds its per-section prediction - already
+    **guided** by any user-assigned AP (see :func:`guide_anchorings_with_planes`),
+    so it is used directly. Sections DeepSlice didn't cover fall back to the
+    hand-assigned plane.
+    """
+    if section.index in anchorings:
+        return Anchoring.from_iterable(anchorings[section.index])
+    return anchoring_from_plane_params(atlas, section.plane)
+
+
+def _ap_center(anchoring9: "list[float] | tuple[float, ...]") -> float:
+    """AP voxel coordinate of a plane's centre (su = sv = 0.5): ox + ½ux + ½vx."""
+    return float(anchoring9[0]) + 0.5 * float(anchoring9[3]) + 0.5 * float(anchoring9[6])
+
+
+def guide_anchorings_with_planes(
+    anchorings: dict, project: Project, atlas: "BrainGlobeAtlas"
+) -> dict:
+    """Anchor DeepSlice's predicted AP to the user's hand-assigned AP values.
+
+    DeepSlice predicts each section's full plane (AP + tilt). For every section the
+    user assigned an AP (Atlas tab), the plane is translated along AP so its centre
+    sits **exactly** at that AP - keeping DeepSlice's tilt. Sections the user left
+    unassigned are shifted by **interpolating** the assigned sections' shifts (as a
+    function of DeepSlice's predicted AP), so the whole series follows the same
+    correction. This guarantees a pinned section lands on its value while still
+    letting DeepSlice place the rest. Returns the dict unchanged when there are no
+    manual anchors.
+    """
+    sec_by_idx = {
+        section.index: section
+        for slide in project.slides
+        for section in slide.sections
+    }
+
+    def user_center(section) -> float:
+        return _ap_center(anchoring_from_plane_params(atlas, section.plane).as_tuple())
+
+    # Per assigned section: (DeepSlice AP centre, exact shift onto the user's AP).
+    anchors: list[tuple[float, float]] = []
+    for idx, anch in anchorings.items():
+        section = sec_by_idx.get(idx)
+        if section is not None and section.plane is not None:
+            anchors.append((_ap_center(anch), user_center(section) - _ap_center(anch)))
+    if not anchors:
+        return anchorings
+    anchors.sort()
+    ds_list = [a[0] for a in anchors]
+    shift_list = [a[1] for a in anchors]
+
+    corrected: dict = {}
+    for idx, anch in anchorings.items():
+        section = sec_by_idx.get(idx)
+        if section is not None and section.plane is not None:
+            shift = user_center(section) - _ap_center(anch)  # exact
+        else:
+            shift = float(np.interp(_ap_center(anch), ds_list, shift_list))
+        new = list(anch)
+        new[0] = float(anch[0]) + shift  # shift the AP origin (ox); tilt unchanged
+        corrected[idx] = new
+    return corrected
+
+
 def _resolve_engine(engine: str) -> str:
     """Map ``"auto"`` to the best available engine; validate explicit choices."""
     from histo_to_ccf.registration.elastix_bspline import ELASTIX_AVAILABLE

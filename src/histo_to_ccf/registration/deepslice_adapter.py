@@ -170,15 +170,23 @@ def predict_anchorings(
     *,
     workdir: Path | str,
     species: str = "mouse",
+    order: dict[int, int] | None = None,
 ) -> dict[int, list[float]]:
     """Run DeepSlice on section crops and return per-section atlas anchorings.
 
-    Writes each crop to ``workdir`` as ``section_s<idx>.png`` (DeepSlice reads
-    the section number from the ``_s<idx>`` token), then runs DeepSlice **in a
-    separate process** (see :mod:`deepslice_run`) so its TensorFlow memory is
-    freed before the calling process moves on to registration. Returns
-    ``{section_idx: anchoring9}`` converted to the loaded atlas's anchoring,
-    ready to drop into the B-spline pipeline.
+    Writes each crop as ``section_s<token>.png`` (DeepSlice reads the section
+    number from the ``_s<token>`` token and uses it to order the series for
+    ``propagate_angles`` / ``enforce_index_order``), runs DeepSlice **in a separate
+    process** (see :mod:`deepslice_run`) so its TensorFlow memory is freed before
+    registration, then returns ``{section_idx: anchoring9}`` in the atlas's frame.
+
+    **Serial order.** DeepSlice enforces a monotonic anterior→posterior order *by
+    the filename token*. By default the token is ``section.index``, but that is the
+    detection order, which need not match the user's intended sequence (e.g. after
+    reordering, or when merged slides were stacked in another order). Pass ``order``
+    (``section_idx -> sequence rank``) to number the files by the **AP sequence**
+    the user set, so DeepSlice orders the whole single series correctly; the
+    results are mapped back to ``section.index``.
     """
     import subprocess
 
@@ -186,8 +194,14 @@ def predict_anchorings(
 
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
+
+    # token = AP-sequence rank (so DeepSlice orders by the user's series), or the
+    # section index when no explicit order is given.
+    token_of = {idx: (idx if order is None else int(order.get(idx, idx)))
+                for idx in section_images}
+    idx_of_token = {tok: idx for idx, tok in token_of.items()}
     for idx, img in section_images.items():
-        iio.imwrite(workdir / _section_filename(idx), _to_uint8(img))
+        iio.imwrite(workdir / _section_filename(token_of[idx]), _to_uint8(img))
 
     # Inherit stdout/stderr so DeepSlice's progress bar still shows in the
     # console; TensorFlow lives and dies inside this child process.
@@ -206,8 +220,7 @@ def predict_anchorings(
     shape = tuple(int(s) for s in atlas.annotation.shape)
     out: dict[int, list[float]] = {}
     for sl in doc.slices:
-        idx = _parse_section_index(sl.filename)
-        if idx is None:
-            continue
-        out[idx] = _quicknii_to_atlas_anchoring(list(sl.anchoring), shape)
+        tok = _parse_section_index(sl.filename)
+        if tok is not None and tok in idx_of_token:
+            out[idx_of_token[tok]] = _quicknii_to_atlas_anchoring(list(sl.anchoring), shape)
     return out

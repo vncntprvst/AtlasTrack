@@ -234,6 +234,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # Registration in the bar.
     _install_registration_menu(viewer, register_panel)
     _keep_only_menus(viewer, {"Project", "Registration"})
+    _install_wheel_pan(viewer)
 
     # Persist settings when the tab changes (cheap enough to do on every switch).
     def _on_tab_change(_idx: int) -> None:
@@ -321,6 +322,8 @@ def _install_project_menu(
         if on_cleared is not None:
             on_cleared()
 
+    from qtpy.QtCore import Qt
+
     save_action = menu.addAction("Save Project")
     save_action.triggered.connect(_save)
     save_as_action = menu.addAction("Save Project As…")
@@ -330,6 +333,16 @@ def _install_project_menu(
     load_action.triggered.connect(helper._load)
     close_action = menu.addAction("Close Project")
     close_action.triggered.connect(_close)
+
+    # Keyboard shortcuts (application-wide so they fire even with the napari
+    # canvas focused): Ctrl+S save, Ctrl+Shift+S save-as, Ctrl+O load.
+    for action, seq in (
+        (save_action, "Ctrl+S"),
+        (save_as_action, "Ctrl+Shift+S"),
+        (load_action, "Ctrl+O"),
+    ):
+        action.setShortcut(seq)
+        action.setShortcutContext(Qt.ApplicationShortcut)
 
 
 def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
@@ -350,6 +363,40 @@ def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
     menubar.addMenu(menu)
     params_action = menu.addAction("Parameters…")
     params_action.triggered.connect(register_panel.open_parameters_dialog)
+
+
+def _install_wheel_pan(viewer: "napari.Viewer") -> None:
+    """Pan the canvas with **Ctrl+wheel** (horizontal) and **Shift+wheel** (vertical).
+
+    The slides are tall composites, so plain wheel-zoom alone makes it awkward to
+    move around. napari already *suppresses* wheel-zoom whenever a modifier is
+    held (its canvas ignores modified wheel events), so these callbacks add
+    panning without ever fighting the zoom. Wheel-up moves the view up / left.
+    """
+
+    def _pan(viewer, event) -> None:
+        mods = set(getattr(event, "modifiers", ()))
+        horizontal = "Control" in mods
+        vertical = "Shift" in mods and not horizontal
+        if not (horizontal or vertical):
+            return
+        delta = event.delta[1] if event.delta[1] else event.delta[0]
+        if not delta:
+            return
+        if getattr(event.native, "inverted", lambda: False)():
+            delta = -delta
+        zoom = viewer.camera.zoom or 1.0
+        # ~80 canvas px per wheel notch, scaled to world units by the zoom so the
+        # pan feels the same at any magnification.
+        step = float(delta) * 80.0 / zoom
+        center = list(viewer.camera.center)  # (z, y, x)
+        if horizontal:
+            center[2] -= step
+        else:
+            center[1] -= step
+        viewer.camera.center = tuple(center)
+
+    viewer.mouse_wheel_callbacks.append(_pan)
 
 
 def _keep_only_menus(viewer: "napari.Viewer", keep: set[str]) -> None:

@@ -338,6 +338,14 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
             if a.isVisible()
         ]
         assert set(visible) == {"Project", "Registration"}, visible
+        # Project menu wires Ctrl+S (save) as an application-wide shortcut.
+        proj_menu = next(
+            a.menu() for a in viewer.window._qt_window.menuBar().actions()
+            if a.menu() and a.menu().title().replace("&", "") == "Project"
+        )
+        shortcuts = {a.text(): a.shortcut().toString() for a in proj_menu.actions()}
+        assert shortcuts.get("Save Project") == "Ctrl+S"
+        assert shortcuts.get("Load Project…") == "Ctrl+O"
         # 3D/export buttons live on the permanent viz panel, not the Register tab.
         assert hasattr(viz_panel, "_view_napari3d") and hasattr(viz_panel, "_export_plotly")
     finally:
@@ -462,6 +470,178 @@ def test_ordering_resort_and_interpolate(qtbot) -> None:
     widget._interpolate_ap()
     aps = [s.plane.ap_um for s in sorted(slide.sections, key=lambda s: s.ap_order)]
     assert aps == [1000.0, 1100.0, 1200.0, 1300.0]
+
+
+@pytest.mark.qt
+def _two_shank_state() -> WorkflowState:
+    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+
+    state = WorkflowState()
+    state.add_slide("s.png", np.zeros((100, 100), dtype=np.uint8))
+    state.active_slide_idx = 0
+    state.project.probes.append(
+        ProbeSpec(label="P0", type=ProbeType(name="NP", n_shanks=2),
+                  shanks=[Shank(index=0), Shank(index=1)])
+    )
+    return state
+
+
+def _color_of(layer, p_idx, s_idx):
+    """RGBA of the point whose features mark it as (probe p_idx, shank s_idx)."""
+    feats = layer.features
+    p = np.asarray(feats["p"], dtype=int)
+    s = np.asarray(feats["s"], dtype=int)
+    fc = np.asarray(layer.face_color)
+    for i in range(len(p)):
+        if p[i] == p_idx and s[i] == s_idx:
+            return fc[i]
+    return None
+
+
+@pytest.mark.qt
+def test_markers_color_per_shank_and_one_per_shank(qtbot) -> None:
+    """Tip+entry of a shank share a colour; another shank cycles; one tip/shank."""
+    import napari
+    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _two_shank_state()
+        w = ClickOverlayWidget(state, viewer)
+        qtbot.addWidget(w)
+        w._ensure_points_layers()
+
+        # Drop a tip for shank 0, then shank 1 (simulating clicks via layer.add).
+        w._probe_combo.setCurrentIndex(0)
+        w._shank_combo.setCurrentIndex(0)
+        w._tip_layer.add([[10.0, 20.0]])
+        w._shank_combo.setCurrentIndex(1)
+        w._tip_layer.add([[30.0, 40.0]])
+
+        shanks = state.project.probes[0].shanks
+        assert shanks[0].tip_px is not None and shanks[1].tip_px is not None
+        assert (shanks[0].tip_px.x_px, shanks[0].tip_px.y_px) == (20.0, 10.0)
+        # Two shanks -> two different colours.
+        c0 = _color_of(w._tip_layer, 0, 0)
+        c1 = _color_of(w._tip_layer, 0, 1)
+        assert c0 is not None and c1 is not None and not np.allclose(c0, c1)
+
+        # Entry for shank 0 shares shank 0's colour.
+        w._shank_combo.setCurrentIndex(0)
+        w._entry_layer.add([[12.0, 22.0]])
+        assert np.allclose(_color_of(w._entry_layer, 0, 0), c0)
+
+        # A second tip for shank 0 REPLACES it (still one tip point per shank).
+        w._tip_layer.add([[50.0, 60.0]])
+        assert len(w._tip_layer.data) == 2  # shank0 (moved) + shank1, not 3
+        assert (shanks[0].tip_px.x_px, shanks[0].tip_px.y_px) == (60.0, 50.0)
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_markers_clear_selected_removes_one(qtbot) -> None:
+    import napari
+    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _two_shank_state()
+        w = ClickOverlayWidget(state, viewer)
+        qtbot.addWidget(w)
+        w._ensure_points_layers()
+        w._shank_combo.setCurrentIndex(0)
+        w._tip_layer.add([[10.0, 20.0]])
+        w._shank_combo.setCurrentIndex(1)
+        w._tip_layer.add([[30.0, 40.0]])
+
+        # Select the shank-0 point and clear only it.
+        feats = w._tip_layer.features
+        s = np.asarray(feats["s"], dtype=int)
+        sel = {i for i in range(len(s)) if s[i] == 0}
+        w._tip_layer.selected_data = sel
+        w._clear_selected()
+
+        shanks = state.project.probes[0].shanks
+        assert shanks[0].tip_px is None  # cleared
+        assert shanks[1].tip_px is not None  # kept
+        assert len(w._tip_layer.data) == 1
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_wheel_pan_moves_camera(qtbot) -> None:
+    """Ctrl+wheel pans horizontally, Shift+wheel vertically; neither zooms."""
+    import napari
+    from histo_to_ccf.gui.app import _install_wheel_pan
+
+    viewer = napari.Viewer(show=False)
+    try:
+        _install_wheel_pan(viewer)
+        cb = viewer.mouse_wheel_callbacks[-1]
+        viewer.camera.center = (0.0, 0.0, 0.0)
+        viewer.camera.zoom = 1.0
+        zoom_before = viewer.camera.zoom
+
+        class _Evt:
+            def __init__(self, mods):
+                self.modifiers = mods
+                self.delta = (0.0, 1.0)
+                self.native = None
+
+        cb(viewer, _Evt(("Control",)))
+        assert viewer.camera.center[2] != 0.0  # x moved
+        assert viewer.camera.center[1] == 0.0
+        cb(viewer, _Evt(("Shift",)))
+        assert viewer.camera.center[1] != 0.0  # y moved
+        # Panning must not change zoom.
+        assert viewer.camera.zoom == zoom_before
+        # No modifier -> no pan.
+        before = tuple(viewer.camera.center)
+        cb(viewer, _Evt(()))
+        assert tuple(viewer.camera.center) == before
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_residuals_table_bregma_and_ap_order(qtbot) -> None:
+    """Residuals table: AP from bregma (matches Atlas tab) and sorted by AP order."""
+    import napari
+    from histo_to_ccf.project.schema import RegistrationResult, Section
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.add_slide("s.png", np.zeros((10, 10), dtype=np.uint8))
+        state.active_slide_idx = 0
+        # Stored out of AP order: section 3 (ap_order 1, posterior) before
+        # section 7 (ap_order 0, anterior). Anchorings: AP voxel = ox.
+        def reg(ox):
+            return RegistrationResult(anchoring=[ox, 0, 0, 0, 0, 0, 0, 0, 0],
+                                      output_size_px=(10, 10), residual=0.1)
+        state.project.slides[0].sections.extend([
+            Section(index=3, slide_idx=0, bbox_px=(0, 0, 5, 5), ap_order=1,
+                    registration=reg(420.0)),   # bregma 5400 - 420*25 = -5100
+            Section(index=7, slide_idx=0, bbox_px=(5, 5, 9, 9), ap_order=0,
+                    registration=reg(400.0)),   # bregma 5400 - 400*25 = -4600
+        ])
+        panel = RegisterPanelWidget(state, viewer)
+        qtbot.addWidget(panel)
+        panel._refresh_residuals()
+
+        t = panel._residuals_table
+        assert t.rowCount() == 2
+        # Sorted by ap_order: section 7 (anterior) first, then 3.
+        assert t.item(0, 0).text() == "7"
+        assert t.item(1, 0).text() == "3"
+        # AP shown from bregma (negative = posterior), anterior section less negative.
+        assert t.item(0, 1).text() == "-4600"
+        assert t.item(1, 1).text() == "-5100"
+    finally:
+        viewer.close()
 
 
 @pytest.mark.qt

@@ -50,10 +50,21 @@ class OrderingPanelWidget(QWidget):
         layout.addLayout(spacing_row)
 
         dir_row = QHBoxLayout()
-        dir_row.addWidget(QLabel("Direction:"))
+        dir_lbl = QLabel("Direction:")
+        dir_tip = (
+            "Which way the section sequence runs. With 'Anterior → Posterior' the "
+            "FIRST section (top of the list below) is the most anterior; AP then "
+            "steps posteriorly down the list. The list marks the anterior/posterior "
+            "ends so you can check the numbering matches your slides."
+        )
+        dir_lbl.setToolTip(dir_tip)
+        dir_row.addWidget(dir_lbl)
         self._ant_post = QRadioButton("Anterior → Posterior")
         self._ant_post.setChecked(True)
         self._post_ant = QRadioButton("Posterior → Anterior")
+        for rb in (self._ant_post, self._post_ant):
+            rb.setToolTip(dir_tip)
+            rb.toggled.connect(self._refresh_list)  # re-label the end markers
         dir_grp = QButtonGroup(self)
         dir_grp.addButton(self._ant_post)
         dir_grp.addButton(self._post_ant)
@@ -117,7 +128,7 @@ class OrderingPanelWidget(QWidget):
         refresh_btn.clicked.connect(self._refresh_list)
         layout.addWidget(refresh_btn)
 
-        layout.addWidget(QLabel("Sections (drag to reorder, top = first):"))
+        layout.addWidget(QLabel("Sections in AP order (top = first; drag to reorder):"))
         self._list = QListWidget()
         self._list.setDragDropMode(QAbstractItemView.InternalMove)
         self._list.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -256,10 +267,18 @@ class OrderingPanelWidget(QWidget):
         if slide is None:
             return
         sections = sorted(slide.sections, key=lambda s: s.ap_order)
+        forward = self._ant_post.isChecked()
+        first_end = "anterior" if forward else "posterior"
+        last_end = "posterior" if forward else "anterior"
         self._list.blockSignals(True)
         self._list.clear()
-        for s in sections:
-            item = QListWidgetItem(self._item_text(s))
+        for i, s in enumerate(sections):
+            text = self._item_text(s)
+            if i == 0:
+                text += f"   ◄ {first_end} end"
+            elif i == len(sections) - 1:
+                text += f"   ◄ {last_end} end"
+            item = QListWidgetItem(text)
             item.setData(Qt.UserRole, s.index)
             self._list.addItem(item)
         self._list.blockSignals(False)

@@ -168,6 +168,54 @@ def test_predict_anchorings_runs_subprocess_and_parses(tmp_path, monkeypatch) ->
     assert out[0] == pytest.approx(expected)
 
 
+def test_predict_anchorings_orders_by_ap_sequence(tmp_path, monkeypatch) -> None:
+    """`order` numbers the DeepSlice files by AP rank; results map back to index."""
+    import subprocess
+
+    from histo_to_ccf.io.quicknii import QuickNiiDocument, QuickNiiSlice, save_quicknii
+    from histo_to_ccf.registration import deepslice_adapter as ds
+
+    class _Atlas:
+        class annotation:
+            shape = (528, 320, 456)
+
+    # A distinct anchoring per token so we can verify the token->index mapping.
+    def anchoring_for(tok: int) -> list[float]:
+        return [float(tok), 0, 270, -320, 0, 0, 0, 0, -231]
+
+    written: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        workdir = Path(cmd[-2])
+        slices = []
+        for p in sorted(workdir.glob("section_s*.png")):
+            written.append(p.name)
+            tok = ds._parse_section_index(p.name)
+            slices.append(QuickNiiSlice(filename=p.name, nr=1, width=10, height=10,
+                                        anchoring=anchoring_for(tok)))
+        save_quicknii(QuickNiiDocument(slices=slices),
+                      workdir / "deepslice_predictions.json")
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    section_images = {10: np.zeros((10, 10), np.uint8), 11: np.zeros((10, 10), np.uint8)}
+    # User's AP sequence: section 11 is first (rank 0), section 10 second (rank 1).
+    order = {11: 0, 10: 1}
+    out = ds.predict_anchorings(section_images, _Atlas(), workdir=tmp_path, order=order)
+
+    # Files were named by AP rank, not by section index.
+    assert sorted(written) == ["section_s000.png", "section_s001.png"]
+    # Token 0 (rank 0) maps back to section 11; token 1 to section 10. The token
+    # rode in the ML origin (index 2) through the QuickNII->atlas conversion.
+    assert out[11][2] == 0.0
+    assert out[10][2] == 1.0
+
+
 def test_deepslice_anchoring_scales_with_resolution() -> None:
     from histo_to_ccf.registration.deepslice_adapter import _quicknii_to_atlas_anchoring
 
