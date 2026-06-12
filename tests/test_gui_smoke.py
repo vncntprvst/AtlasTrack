@@ -528,6 +528,55 @@ def test_markers_redraw_after_layers_cleared(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_sync_layer_does_not_wipe_markers_from_partial_layer(qtbot) -> None:
+    """A stale/partial marker layer must not null other probes' committed pixels
+    (the 'only Probe A reloaded' data-loss bug)."""
+    import napari
+
+    from histo_to_ccf.gui.widgets.click_overlay import _LAYER_TIP, ClickOverlayWidget
+    from histo_to_ccf.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.add_slide("s.png", np.zeros((400, 400), dtype=np.uint8))
+        state.active_slide_idx = 0
+        state.project.slides[0].sections.append(
+            Section(index=0, slide_idx=0, bbox_px=(0, 0, 400, 400), ap_order=0))
+        for label in ("ProbeA", "ProbeB"):
+            shanks = [Shank(index=i, tip_px=Point2D(x_px=10.0 + i, y_px=20.0 + i),
+                            tip_section_idx=0) for i in range(4)]
+            state.project.probes.append(
+                ProbeSpec(label=label, type=ProbeType(name="NP2", n_shanks=4),
+                          shanks=shanks))
+
+        widget = ClickOverlayWidget(state, viewer)
+        qtbot.addWidget(widget)
+        widget._rebuild_markers()
+        tip = viewer.layers[_LAYER_TIP]
+        assert len(tip.data) == 8  # both probes drawn
+
+        def n_tip_px():
+            return sum(1 for p in state.project.probes for s in p.shanks
+                       if s.tip_px is not None)
+
+        assert n_tip_px() == 8
+
+        # Simulate the layer going partial (only ProbeA's 4) without firing sync.
+        widget._suppress_store = True
+        tip.data = np.asarray(tip.data)[:4]
+        tip.features = {"p": np.zeros(4), "s": np.arange(4, dtype=float)}
+        widget._suppress_store = False
+
+        # A sync on this partial layer must NOT wipe ProbeB's 4 markers.
+        widget._sync_layer(tip, "tip", added=False)
+        assert n_tip_px() == 8  # ProbeB preserved
+        assert len(viewer.layers[_LAYER_TIP].data) == 8  # layer repopulated
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_ordering_resort_and_interpolate(qtbot) -> None:
     from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
     from histo_to_ccf.project.schema import PlaneParams

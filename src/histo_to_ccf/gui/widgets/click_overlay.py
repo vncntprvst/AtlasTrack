@@ -412,6 +412,24 @@ class ClickOverlayWidget(QWidget):
         """
         data = np.asarray(layer.data, dtype=float)
         n = len(data)
+
+        # Guard against a stale / incomplete layer silently wiping committed
+        # markers. _sync_layer rewrites the schema from the layer's points (it first
+        # clears EVERY shank's px of this kind), so if the layer is missing markers
+        # it should hold - e.g. a layer-list reset left it partial - the rewrite
+        # would null real tip_px/entry_px while their CCF survives (the "only Probe A
+        # reloaded" bug). A genuine edit changes the count by at most one; if 2+
+        # markers vanished on a non-add event, repopulate from the schema instead.
+        n_schema = sum(
+            1
+            for probe in self._state.project.probes
+            for sh in probe.shanks
+            if (sh.tip_px if kind == "tip" else sh.entry_px) is not None
+        )
+        if not added and (n_schema - n) >= 2:
+            self._rebuild_markers()
+            return
+
         p_arr = self._feature_array(layer.features, "p", n)
         s_arr = self._feature_array(layer.features, "s", n)
         if added and n >= 1:

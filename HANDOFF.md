@@ -1,6 +1,6 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-11 · version **0.2.29** · branch **dev**_
+_Last updated: 2026-06-11 · version **0.2.31** · branch **dev**_
 
 ## 3D orientation: anterior-positive both views, dorsal-up, no mirror (v0.2.27)
 
@@ -32,6 +32,22 @@ the v0.2.25 pure-mirror Paxinos transform was only right near bregma. Rebuilt
 `export_paxinos_csv(..., alignment=...)`. Scale/pitch/bregma-DV are **estimates** -
 validate with histology. The 3D views stay bregma-CCF (not pitch-corrected). See
 memory `reference_paxinos_transform`.
+
+## Bugfix: probe markers wiped from a partial layer (v0.2.31)
+
+User report: marked ProbeA+ProbeB, saved, reloaded → only ProbeA. The saved JSON
+had **both** probes, but ProbeB's shanks had `tip_ccf_um`/`entry_ccf_um` intact and
+`tip_px`/`entry_px` = `None`. Cause: `click_overlay._sync_layer` rewrites the schema
+from the marker layer's points, first nulling **every** shank's px of that kind; if
+the layer is ever incomplete (a layer-list reset / stale layer left it partial), the
+shanks missing from it get their px nulled while their CCF (computed earlier)
+survives. Fix: `_sync_layer` now bails out and **repopulates from the schema** if a
+non-add event leaves the layer 2+ markers short of the schema, instead of wiping.
+Regression test `test_sync_layer_does_not_wipe_markers_from_partial_layer`. Related:
+the [[stale layer]] marker fix (v0.2.29). **Recovered the user's ProbeB pixels** by
+inverting the per-section registration (anchoring least-squares + forward B-spline
+`TransformPoint`); validated on ProbeA (known px+CCF, <6 px error = B-spline
+inverse residual), CCF round-trip 0-5 µm, all in-bbox.
 
 ## Box-adjustment persistence + optional preserve-on-reregister (v0.2.30)
 

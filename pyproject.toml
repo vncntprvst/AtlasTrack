@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "histo-to-ccf"
-version = "0.2.30"
+version = "0.2.31"
 description = "Guided registration of histological brain sections to a reference atlas (Allen CCF), with probe trajectory mapping in 3D."
 readme = "README.md"
 requires-python = ">=3.10"
