@@ -67,6 +67,29 @@ def test_registration_mask_never_empty_on_flat_image() -> None:
     assert registration_moving_mask(flat).all()
 
 
+def test_registration_mask_keeps_cyan_tissue_not_treated_as_label() -> None:
+    """A DAPI section rendered cyan (high green+blue) must not be gutted.
+
+    Regression: ``section_label_mask`` flags green/red as fluorescent label, so a
+    cyan-stained tissue body had ~65% of its pixels excised, leaving a sparse
+    moving mask that made elastix abort ("too many samples map outside moving
+    image buffer"). The label exclusion must back off when it would remove most
+    of the tissue.
+    """
+    h, w = 120, 160
+    img = np.zeros((h, w, 3), dtype=np.uint8)
+    yy, xx = np.ogrid[:h, :w]
+    tissue = (yy - h // 2) ** 2 + (xx - w // 2) ** 2 < (h // 3) ** 2
+    img[tissue, 1] = 170  # green  -> cyan body (both channels high)
+    img[tissue, 2] = 200  # blue
+
+    body = float(tissue.mean())
+    mm = registration_moving_mask(img)
+    # The mask must still cover (most of) the tissue, not collapse to fragments.
+    assert mm.mean() >= 0.8 * body
+    assert mm[60, 80] == 1  # tissue centre kept
+
+
 def _disk_mask(h, w, cy, cx, r) -> np.ndarray:
     yy, xx = np.ogrid[:h, :w]
     return (yy - cy) ** 2 + (xx - cx) ** 2 < r * r

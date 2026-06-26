@@ -1,6 +1,85 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-11 · version **0.2.31** · branch **dev**_
+_Last updated: 2026-06-25 · version **0.2.34** · branch **dev**_
+
+## Fix: cyan/green-stained sections failed registration (v0.2.34)
+
+Whole slides where the sections are rendered **cyan** (high green + blue, e.g. a
+DAPI channel mapped to green+blue) failed elastix with an instant, uniform
+`Internal elastix error` for every section of that slide, while magenta sections
+on the same image registered fine. Real ITK error (surfaced by running elastix
+with `log_to_console=True`): `AdvancedMattesMutualInformationMetric: Too many
+samples map outside moving image buffer: 20 / 3693` → `Error in metric`.
+
+Root cause: `masks.section_label_mask` flags any `r>70 or g>70` pixel as a
+fluorescent **label** to exclude from the registration metric mask (assuming
+labels are green/red and DAPI tissue is pure blue). Cyan tissue has ~65% of its
+own pixels above the green threshold, so `registration_moving_mask` subtracted
+most of the tissue, leaving a ~15-19% scattered mask. elastix then drew nearly
+all metric samples outside the valid (masked) moving region and aborted.
+
+Fix (`masks.registration_moving_mask`): label-exclusion now backs off when it
+would remove most of the tissue - if `kept < 0.5 * dilated_tissue`, the bright
+R/G signal *is* the stain (not a sparse label) so the full tissue silhouette is
+kept. Verified end-to-end on the user's project `LO_06_red_whole.json`: bottom
+sections 12-23 now register (residuals 0.28-0.39, on par with the top slide's
+0.21-0.36); magenta sections unchanged. Regression test
+`test_masks.py::test_registration_mask_keeps_cyan_tissue_not_treated_as_label`.
+
+NOTE (latent, not this bug): `slide_loader` saves `image_path = sources[0]` for a
+merged multi-slide image; the merged composite is only reconstructed at load time
+by re-merging `source_paths` (`app._reload_project_display`). Cropping straight
+from `image_path` would miss every section past the first source's height - fine
+today because load always re-merges, but brittle if that ever changes.
+
+## Fix: deleting a hovered section box crashed napari (v0.2.33)
+
+Pressing **Delete** on a selected box in "Edit boxes" raised `IndexError: list
+index out of range` (an `EmitLoopError` from psygnal). Root cause is a napari
+bug, not ours: `Shapes.remove()` removes the shape from the data view **before**
+clearing the selection, but leaves the hovered-shape index (`layer._value`)
+pointing at the now-deleted row. The selection-cleared highlight recompute then
+calls `ShapeList.outline(stale_index)` on the shorter list → `IndexError`
+(`shapes.py::_outline_shapes`).
+
+Fix (`slide_loader._bind_safe_delete`, bound in `_edit_boxes`): rebind **Delete**
+and **Backspace** on the editable Shapes layer to a wrapper that resets
+`_value`/`_value_stored` to `(None, None)` before `remove_selected()`, so the
+post-remove highlight guard short-circuits. Regression test
+`test_gui_smoke.py::test_edit_boxes_delete_hovered_does_not_crash` hovers a shape
+then fires the bound Delete and asserts no crash.
+
+Also **removed the "Click to discard a box…" button** (and its now-dead
+`app.install_discard_handler` one-shot pick handler): with the editor's Delete
+fixed it was redundant — "Edit boxes → select → Delete" covers box removal.
+
+## DeepSlice pre-match in the Atlas matcher (v0.2.32)
+
+DeepSlice was only ever run **inside** the Register step. New **"Pre-match all
+(DeepSlice)"** button in the Atlas matcher (`atlas_matcher._prematch_deepslice`)
+runs it on the **active slide's** sections in one pass and fills each section's AP
+so the user fine-tunes from a good start instead of from zero:
+
+- Crops are built with the same `io.image.crop` Register uses, ordered by
+  `ap_order` (so DeepSlice's series order follows the user's intended sequence).
+- Each predicted plane is reduced to its **centre AP** via
+  `pipeline.anchoring_center_ap_um` and written to `section.plane.ap_um` (existing
+  tilt on the plane is preserved; the matcher displays/edits coronal AP). The link
+  **spacing** is seeded from the median AP step.
+- **Only AP is baked into the saved plane** - the tilt sign conventions of the
+  DeepSlice→our-frame anchoring aren't independently validated, so a possibly-wrong
+  tilt is *not* persisted. Instead the **full predicted plane (incl. tilt) is cached**
+  on `WorkflowState.deepslice_anchorings` (+ a per-crop `deepslice_fingerprints`).
+- **Register reuses the cache** (`register_panel._reuse_prematch`) when *every*
+  section to register has a cached plane whose `crop_fingerprint` still matches -
+  so a swapped dye image (same index, new pixels) or any missing section forces a
+  fresh DeepSlice pass. Safe failure mode: a mismatch only re-runs DeepSlice, never
+  feeds a stale prediction. Cache cleared on `WorkflowState.reset()`.
+- Tests: `tests/test_prematch_deepslice.py` (pure: AP round-trip vs
+  `coronal_anchoring`, fingerprint staleness, reuse guard) +
+  `test_gui_smoke.py::test_atlas_matcher_prematch_deepslice` (worker stubbed, no TF).
+
+## 3D orientation: anterior-positive both views, dorsal-up, no mirror (v0.2.27)
 
 ## 3D orientation: anterior-positive both views, dorsal-up, no mirror (v0.2.27)
 

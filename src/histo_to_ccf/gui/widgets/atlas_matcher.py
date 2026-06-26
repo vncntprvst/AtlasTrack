@@ -9,6 +9,8 @@ ordering panel's Interpolate AP). An **Overlay** view blends the atlas reference
 """
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -337,6 +339,15 @@ class AtlasMatcherDialog(QDialog):
         bottom = QHBoxLayout()
         self._status = QLabel("")
         bottom.addWidget(self._status, 1)
+        self._prematch_btn = QPushButton("Pre-match all (DeepSlice)")
+        self._prematch_btn.setToolTip(
+            "Run DeepSlice on every section of the active slide to fill a consistent\n"
+            "set of AP positions in one pass, then fine-tune here. The full predicted\n"
+            "planes (incl. tilt) are cached so Register can reuse them.\n"
+            "First run downloads the DeepSlice model and is slow."
+        )
+        self._prematch_btn.clicked.connect(self._prematch_deepslice)
+        bottom.addWidget(self._prematch_btn)
         assign_btn = QPushButton("Assign")
         assign_btn.setToolTip("Store this AP on the current section.")
         assign_btn.clicked.connect(self._assign_current)
@@ -471,6 +482,114 @@ class AtlasMatcherDialog(QDialog):
             section.plane = section.plane.model_copy(update={"ap_um": ap_abs})
         else:
             section.plane = PlaneParams(ap_um=ap_abs)
+
+    # -- DeepSlice pre-match ---------------------------------------------
+
+    def _prematch_section_images(self) -> "dict[int, np.ndarray]":
+        """Float32 crops of the active slide's sections, keyed by ``section.index``.
+
+        Built with the same ``io.image.crop`` the Register step uses, so the cached
+        crop fingerprints line up and Register can reuse this pre-match.
+        """
+        from histo_to_ccf.io.image import crop
+
+        out: dict[int, np.ndarray] = {}
+        for section in self._ordered_sections():
+            img = self._state.slide_images.get(section.slide_idx)
+            if img is None:
+                continue
+            x0, y0, x1, y1 = section.bbox_px
+            out[section.index] = crop(img, (x0, y0, x1, y1)).astype(np.float32)
+        return out
+
+    def _prematch_deepslice(self) -> None:
+        """Run DeepSlice on the active slide and fill every section's AP in one pass."""
+        atlas = self._state.atlas
+        if atlas is None:
+            self._status.setText("Load an atlas in the Atlas tab first.")
+            return
+        section_images = self._prematch_section_images()
+        if not section_images:
+            self._status.setText("No section images on the active slide to pre-match.")
+            return
+
+        # AP-sequence rank per section, so DeepSlice orders the series the way the
+        # user did (ap_order), not by raw detection index.
+        order = {s.index: rank for rank, s in enumerate(self._ordered_sections())}
+
+        pp = self._state.project_path
+        ds_dir = (
+            Path(pp).parent if pp is not None else Path(tempfile.mkdtemp())
+        ) / "deepslice"
+
+        from histo_to_ccf.gui.workers import deepslice_worker
+
+        self._prematch_btn.setEnabled(False)
+        self._status.setText(
+            f"Running DeepSlice on {len(section_images)} section(s) (first run is slow)…"
+        )
+        worker = deepslice_worker(section_images, atlas, ds_dir, order=order)
+        worker.returned.connect(lambda anch: self._apply_prematch(anch, section_images))
+        worker.errored.connect(self._on_prematch_error)
+        worker.start()
+
+    def _on_prematch_error(self, exc: Exception) -> None:
+        self._prematch_btn.setEnabled(True)
+        self._status.setText(f"DeepSlice pre-match failed: {exc}")
+
+    def _apply_prematch(
+        self,
+        anchorings: "dict[int, list[float]]",
+        section_images: "dict[int, np.ndarray]",
+    ) -> None:
+        """Write DeepSlice's predicted AP onto each section and cache the full planes.
+
+        Only the scalar centre-AP is stored on ``section.plane`` (the matcher displays
+        and lets you fine-tune coronal AP). The full predicted plane - including the
+        tilt DeepSlice is good at - is cached on the state so the Register step can
+        reuse it without baking a possibly-misconverted tilt into the saved project.
+        """
+        from histo_to_ccf.gui.workflow import crop_fingerprint
+        from histo_to_ccf.io.ccf_coords import atlas_resolution_um
+        from histo_to_ccf.registration.pipeline import anchoring_center_ap_um
+
+        self._prematch_btn.setEnabled(True)
+        if not anchorings:
+            self._status.setText("DeepSlice returned no planes.")
+            return
+
+        ap_res = atlas_resolution_um(self._state.atlas)[0]
+        sec_by_idx = {s.index: s for s in self._ordered_sections()}
+        n = 0
+        for idx, anch in anchorings.items():
+            section = sec_by_idx.get(idx)
+            if section is None:
+                continue
+            self._write_ap(section, anchoring_center_ap_um(anch, ap_res))
+            self._state.deepslice_anchorings[idx] = list(anch)
+            if idx in section_images:
+                self._state.deepslice_fingerprints[idx] = crop_fingerprint(section_images[idx])
+            n += 1
+
+        self._seed_spacing_from_planes()
+        # Show the current section's freshly-assigned AP, then redraw.
+        section = self._current_section()
+        if section is not None and section.plane is not None:
+            self._set_ap_silent(self._absolute_to_bregma(section.plane.ap_um))
+        self._refresh()
+        self._status.setText(
+            f"Pre-matched {n} section(s) with DeepSlice. Fine-tune AP here, then "
+            "Assign / register."
+        )
+
+    def _seed_spacing_from_planes(self) -> None:
+        """Seed the link spacing from the median |AP step| between consecutive sections."""
+        from itertools import pairwise
+
+        aps = [s.plane.ap_um for s in self._ordered_sections() if s.plane is not None]
+        steps = [abs(b - a) for a, b in pairwise(aps) if b != a]
+        if steps:
+            self._spacing_spin.setValue(float(np.median(steps)))
 
     # -- rendering -------------------------------------------------------
 

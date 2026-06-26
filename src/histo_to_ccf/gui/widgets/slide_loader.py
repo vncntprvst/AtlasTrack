@@ -31,6 +31,31 @@ _DRAW_LAYER = "_draw_section_temp"
 _BOX_LAYER = "Edit boxes {}"
 
 
+def _bind_safe_delete(layer) -> None:
+    """Make Delete/Backspace crash-safe on an editable Shapes layer.
+
+    napari removes the shape from the data view *before* clearing the
+    selection, but leaves the hovered-shape index (``layer._value``) pointing
+    at the now-deleted row.  The selection-cleared highlight recompute then
+    calls ``ShapeList.outline(stale_index)`` and raises ``IndexError`` (see
+    ``_outline_shapes``).  Resetting the hover/highlight state first makes that
+    recompute short-circuit, so the delete completes cleanly.
+    """
+
+    def _safe_remove(lyr) -> None:
+        if getattr(lyr, "_is_creating", False):
+            return
+        lyr._value = (None, None)
+        lyr._value_stored = (None, None)
+        lyr.remove_selected()
+
+    for key in ("Delete", "Backspace"):
+        try:
+            layer.bind_key(key, _safe_remove, overwrite=True)
+        except Exception:
+            pass
+
+
 class SlideLoaderWidget(QWidget):
     """Load a slide image, run section detection, and edit the results."""
 
@@ -142,15 +167,6 @@ class SlideLoaderWidget(QWidget):
         )
         boxes_btn.clicked.connect(self._edit_boxes)
         edit_layout.addWidget(boxes_btn)
-
-        discard_btn = QPushButton("Click to discard a box…")
-        discard_btn.setToolTip(
-            "Click this button, then click anywhere near a coloured box in the\n"
-            "viewer to remove that detection.  One click = one discard.\n"
-            "Numbers shown in yellow are the box indices."
-        )
-        discard_btn.clicked.connect(self._arm_discard)
-        edit_layout.addWidget(discard_btn)
 
         draw_btn = QPushButton("Draw new section…")
         draw_btn.setToolTip(
@@ -444,26 +460,11 @@ class SlideLoaderWidget(QWidget):
                 bbox_px=bbox,
                 ap_order=s.ap_order,
             ))
-        self._status.setText(f"Detected {len(sections)} section(s)  ·  use 'Discard' or 'Draw' to edit")
+        self._status.setText(
+            f"Detected {len(sections)} section(s)  ·  use 'Edit boxes' or 'Draw' to edit"
+        )
         if self._on_sections_detected is not None:
             self._on_sections_detected(sections)
-
-
-    # ------------------------------------------------------------------
-    # Discard (viewer-level one-shot click)
-    # ------------------------------------------------------------------
-
-    def _arm_discard(self) -> None:
-        if self._viewer is None:
-            self._status.setText("Viewer not available.")
-            return
-        slide_idx = self._state.active_slide_idx
-        if slide_idx is None:
-            self._status.setText("Load a slide first.")
-            return
-        from histo_to_ccf.gui.app import install_discard_handler
-        install_discard_handler(self._state, slide_idx, self._viewer)
-        self._status.setText("Ready - click near a box in the viewer to discard it.")
 
     # ------------------------------------------------------------------
     # Manual draw
@@ -573,6 +574,7 @@ class SlideLoaderWidget(QWidget):
 
         self._box_layer = layer
         layer.events.data.connect(self._sync_boxes_from_shapes)
+        _bind_safe_delete(layer)
 
         # Hide the static outline + numbers so the editable boxes are the only
         # representation while editing (avoids a confusing double display).

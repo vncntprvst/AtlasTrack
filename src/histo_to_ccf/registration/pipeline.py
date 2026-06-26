@@ -120,6 +120,18 @@ def _ap_center(anchoring9: "list[float] | tuple[float, ...]") -> float:
     return float(anchoring9[0]) + 0.5 * float(anchoring9[3]) + 0.5 * float(anchoring9[6])
 
 
+def anchoring_center_ap_um(
+    anchoring9: "list[float] | tuple[float, ...]", ap_res_um: float
+) -> float:
+    """Absolute AP (µm) of a plane's centre, given the atlas AP voxel size.
+
+    The inverse of how :func:`coronal_anchoring` places a plane at ``ap_um``: it
+    turns a DeepSlice anchoring (atlas-voxel ASR frame) into the scalar AP the
+    Atlas matcher / ``PlaneParams.ap_um`` expect.
+    """
+    return _ap_center(anchoring9) * float(ap_res_um)
+
+
 def guide_anchorings_with_planes(
     anchorings: dict, project: Project, atlas: "BrainGlobeAtlas"
 ) -> dict:

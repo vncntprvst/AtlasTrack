@@ -304,6 +304,76 @@ def test_atlas_matcher_navigate_and_assign(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_atlas_matcher_prematch_deepslice(qtbot, monkeypatch) -> None:
+    """Pre-match fills AP from DeepSlice and caches the full planes for Register."""
+    import histo_to_ccf.gui.widgets.atlas_matcher as matcher_mod
+    from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
+
+    state = WorkflowState()
+    state.add_slide("s.png", np.zeros((40, 60), dtype=np.uint8))
+    state.active_slide_idx = 0
+    slide = state.project.slides[0]
+    slide.sections.append(Section(index=0, slide_idx=0, bbox_px=(0, 0, 20, 20), ap_order=0))
+    slide.sections.append(Section(index=1, slide_idx=0, bbox_px=(20, 0, 40, 20), ap_order=1))
+    state.atlas = _FakeAtlas()
+
+    # Fake worker: synchronously emit predicted anchorings (no TensorFlow).
+    class _FakeWorker:
+        def __init__(self) -> None:
+            self.returned = _Signal()
+            self.errored = _Signal()
+
+        def start(self) -> None:
+            # centres: idx0 -> ox=100 (+½·40)=120 vox; idx1 -> 160 vox.
+            self.returned.emit({
+                0: [100, 0, 0, 40, 0, 0, 0, 0, 0],
+                1: [140, 0, 0, 40, 0, 0, 0, 0, 0],
+            })
+
+    captured = {}
+
+    def fake_worker(section_images, atlas, ds_dir, *, order=None):
+        captured["order"] = order
+        captured["keys"] = set(section_images)
+        return _FakeWorker()
+
+    monkeypatch.setattr(matcher_mod, "deepslice_worker", fake_worker, raising=False)
+    # deepslice_worker is imported lazily inside the handler from gui.workers.
+    import histo_to_ccf.gui.workers as workers_mod
+    monkeypatch.setattr(workers_mod, "deepslice_worker", fake_worker, raising=False)
+
+    dlg = AtlasMatcherDialog(state)
+    qtbot.addWidget(dlg)
+    dlg._prematch_deepslice()
+
+    # Both sections received an AP centred at the predicted plane (25 µm/voxel).
+    assert all(s.plane is not None for s in slide.sections)
+    assert slide.sections[0].plane.ap_um == pytest.approx(120 * 25.0)
+    assert slide.sections[1].plane.ap_um == pytest.approx(160 * 25.0)
+    # Full planes (incl. tilt) cached for Register reuse, with crop fingerprints.
+    assert set(state.deepslice_anchorings) == {0, 1}
+    assert set(state.deepslice_fingerprints) == {0, 1}
+    # Spacing seeded from the 1000 µm (40-voxel) step between the two centres.
+    assert dlg._spacing_spin.value() == pytest.approx(1000.0)
+    # Series ordered by ap_order, not raw index.
+    assert captured["order"] == {0: 0, 1: 1}
+
+
+class _Signal:
+    """Tiny stand-in for a Qt worker signal (connect/emit)."""
+
+    def __init__(self) -> None:
+        self._slots = []
+
+    def connect(self, slot) -> None:
+        self._slots.append(slot)
+
+    def emit(self, *args) -> None:
+        for slot in self._slots:
+            slot(*args)
+
+
+@pytest.mark.qt
 def test_gl_report_never_raises(qtbot) -> None:
     from histo_to_ccf.gui.gl_diagnostics import format_gl_report, gl_report
 
@@ -434,6 +504,46 @@ def test_edit_boxes_resize_and_delete(qtbot) -> None:
         # Delete the last rectangle and sync → that section is removed.
         layer.data = list(layer.data)[:2]
         layer.features = {"idx": [0, 1]}
+        widget._sync_boxes_from_shapes()
+        assert {s.index for s in slide.sections} == {0, 1}
+    finally:
+        viewer.close()
+
+
+def test_edit_boxes_delete_hovered_does_not_crash(qtbot) -> None:
+    """Deleting the box that the cursor is hovering must not raise IndexError.
+
+    Reproduces the napari highlight bug: the hovered-shape index (`_value`)
+    is left pointing past the shrunken shapes list after a delete, so the
+    highlight recompute used to crash in `_outline_shapes`.
+    """
+    import napari
+    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.add_slide("s.png", np.zeros((400, 400), dtype=np.uint8))
+        state.active_slide_idx = 0
+        slide = state.project.slides[0]
+        for i, box in enumerate([(0, 0, 80, 80), (100, 0, 180, 80), (200, 0, 280, 80)]):
+            slide.sections.append(Section(index=i, slide_idx=0, bbox_px=box, ap_order=i))
+
+        widget = SlideLoaderWidget(state, viewer=viewer)
+        qtbot.addWidget(widget)
+        widget._edit_boxes()
+        layer = widget._box_layer
+        assert layer is not None and len(layer.data) == 3
+
+        # Hover the last shape, select it, then fire the bound Delete handler.
+        layer.selected_data = {2}
+        layer._value = (2, None)  # cursor hovering shape 2 (stale after remove)
+        layer._set_highlight()
+        from napari.utils.key_bindings import coerce_keybinding
+
+        layer.keymap[coerce_keybinding("Delete")](layer)  # must not raise IndexError
+
+        assert len(layer.data) == 2
         widget._sync_boxes_from_shapes()
         assert {s.index for s in slide.sections} == {0, 1}
     finally:

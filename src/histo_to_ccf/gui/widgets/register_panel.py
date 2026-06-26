@@ -422,6 +422,13 @@ class RegisterPanelWidget(QWidget):
         self._progress.setValue(0)
 
         if use_deepslice:
+            cached = self._reuse_prematch(section_images)
+            if cached is not None:
+                self._status.setText(
+                    f"Reusing DeepSlice pre-match ({len(cached)} section(s))…"
+                )
+                self._start_register(section_images, transforms_dir, cached)
+                return
             self._status.setText("Running DeepSlice plane prediction (first run is slow)…")
             from histo_to_ccf.gui.workers import deepslice_worker
 
@@ -438,6 +445,28 @@ class RegisterPanelWidget(QWidget):
             ds.start()
         else:
             self._start_register(section_images, transforms_dir, None)
+
+    def _reuse_prematch(self, section_images: dict) -> "dict | None":
+        """Return cached DeepSlice anchorings if they cover every section to register.
+
+        The Atlas matcher's "Pre-match all" caches each section's predicted plane plus
+        a crop fingerprint. We reuse it only when *every* section in this run has a
+        cached plane whose fingerprint still matches the current crop - so a swapped
+        dye image (same index, new pixels) or any missing section forces a fresh
+        DeepSlice pass instead of silently reusing a stale prediction.
+        """
+        from histo_to_ccf.gui.workflow import crop_fingerprint
+
+        anch = self._state.deepslice_anchorings
+        fps = self._state.deepslice_fingerprints
+        if not anch:
+            return None
+        out: dict = {}
+        for idx, img in section_images.items():
+            if idx not in anch or fps.get(idx) != crop_fingerprint(img):
+                return None
+            out[idx] = anch[idx]
+        return out
 
     def _section_order(self) -> dict[int, int]:
         """Map ``section.index`` to its rank in the user's AP sequence (``ap_order``).

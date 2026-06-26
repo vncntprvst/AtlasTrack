@@ -93,7 +93,16 @@ def registration_moving_mask(
     rim = max(1, round(rim_frac * min(tissue.shape)))
     mask = ndi.binary_dilation(tissue, iterations=rim)
     if exclude_labels:
-        mask = mask & ~section_label_mask(image)
+        kept = mask & ~section_label_mask(image)
+        # Only subtract "labels" when they are the sparse bright blobs the mask is
+        # meant for. If excluding them removes most of the tissue, the bright R/G
+        # signal IS the stain itself - e.g. a DAPI section rendered cyan (high
+        # green) or magenta - not a fluorescent label. Excising it would gut the
+        # silhouette (the strongest alignment cue) and starve the elastix metric
+        # of valid samples ("too many samples map outside moving image buffer"),
+        # which aborts the whole registration. Keep the tissue in that case.
+        if kept.sum() >= 0.5 * mask.sum():
+            mask = kept
     if mask.sum() == 0:  # never hand elastix an empty mask
         return np.ones(tissue.shape, dtype=np.uint8)
     return mask.astype(np.uint8)

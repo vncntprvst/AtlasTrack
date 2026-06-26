@@ -13,6 +13,18 @@ if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
 
 
+def crop_fingerprint(arr: np.ndarray) -> tuple:
+    """Cheap content signature of a section crop (shape + pixel sum).
+
+    Used to detect when a cached DeepSlice prediction has gone stale - e.g. after
+    swapping the dye image on the *same* section (same bbox/index, new pixels). A
+    fingerprint mismatch makes the caller re-run DeepSlice rather than silently
+    reuse a prediction for the wrong image.
+    """
+    a = np.asarray(arr)
+    return (tuple(a.shape), float(a.astype(np.float64).sum()))
+
+
 @dataclass
 class WorkflowState:
     """Holds all live state shared across GUI widgets."""
@@ -27,6 +39,12 @@ class WorkflowState:
     _atlas: object = field(default=None, repr=False)
     active_slide_idx: int | None = None
     active_section_idx: int | None = None
+    # DeepSlice "pre-match" cache: section.index -> atlas-frame anchoring9 (the full
+    # predicted plane, incl. tilt), with a parallel per-crop fingerprint so a stale
+    # entry is re-run instead of reused. Lets the Register step skip a second
+    # DeepSlice pass when the user already pre-matched in the Atlas matcher.
+    deepslice_anchorings: dict[int, list[float]] = field(default_factory=dict)
+    deepslice_fingerprints: dict[int, tuple] = field(default_factory=dict)
 
     @property
     def atlas(self) -> "BrainGlobeAtlas | None":
@@ -48,6 +66,8 @@ class WorkflowState:
         self.project_path = None
         self.slide_images.clear()
         self.slide_bands.clear()
+        self.deepslice_anchorings.clear()
+        self.deepslice_fingerprints.clear()
         self.active_slide_idx = None
         self.active_section_idx = None
 

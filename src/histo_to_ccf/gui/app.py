@@ -432,7 +432,7 @@ def _on_slide_loaded(viewer: "napari.Viewer", state: "WorkflowState", slide_idx:
 
 
 def _on_sections_detected(viewer: "napari.Viewer", state: "WorkflowState", sections) -> None:
-    """Render section outlines + index labels; wire click-to-discard."""
+    """Render section outlines + index labels for the detected sections."""
     from histo_to_ccf.gui.section_display import sections_to_outline_labels
 
     slide_idx = state.active_slide_idx
@@ -454,59 +454,6 @@ def _on_sections_detected(viewer: "napari.Viewer", state: "WorkflowState", secti
 
     # --- Section number text layer ---
     _update_section_numbers(viewer, state, slide_idx)
-
-
-def install_discard_handler(
-    state: "WorkflowState",
-    slide_idx: int,
-    viewer: "napari.Viewer",
-) -> None:
-    """Arm one-click discard on the section-outline Labels layer.
-
-    Activates the Sections layer, switches it to **pick** mode, and connects a
-    one-shot handler to ``selected_label`` events.  The first non-zero label the
-    user picks is discarded; pick mode is then cancelled automatically.
-
-    This avoids ``viewer.mouse_press_callbacks`` which does not exist in
-    napari 0.7.x (Viewer is a Pydantic model with only drag/wheel callbacks).
-    """
-    from histo_to_ccf.gui.section_display import sections_to_outline_labels
-
-    outline_name = f"Sections {slide_idx}"
-    if outline_name not in viewer.layers:
-        return
-
-    lyr = viewer.layers[outline_name]
-
-    # Make the Labels layer active and enter pick (eyedropper) mode so that
-    # clicking in the canvas updates selected_label.
-    viewer.layers.selection.active = lyr
-    lyr.mode = "pick"
-
-    def _on_pick(event):
-        label_val = int(lyr.selected_label)
-        if label_val <= 0:
-            return  # clicked background - stay armed
-
-        # Disconnect and reset mode BEFORE mutating data to avoid re-entrancy.
-        try:
-            lyr.events.selected_label.disconnect(_on_pick)
-        except Exception:
-            pass
-        lyr.mode = "pan_zoom"
-
-        sec_index = label_val - 1  # labels stored as section.index + 1
-        slide = state.project.slides[slide_idx]
-        before = len(slide.sections)
-        slide.sections = [s for s in slide.sections if s.index != sec_index]
-        if len(slide.sections) == before:
-            return
-
-        new_labels = sections_to_outline_labels(lyr.data.shape[:2], slide.sections)
-        lyr.data = new_labels
-        _update_section_numbers(viewer, state, slide_idx)
-
-    lyr.events.selected_label.connect(_on_pick)
 
 
 def _update_section_numbers(
