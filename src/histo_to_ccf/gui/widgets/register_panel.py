@@ -299,6 +299,12 @@ class RegisterPanelWidget(QWidget):
         self._landmark_idx: int | None = None
         self._lm_prev_data = None  # for per-move delta tracking
         self._lm_ctrl_drag = False  # set while Ctrl is held during a drag
+        # Live-preview cache: the un-warped atlas boundary (section-local row/col)
+        # + section origin, so a drag re-warps just the contour (fast) instead of
+        # the whole label image. Populated by _place_landmarks.
+        self._lm_base_edge_rc = None
+        self._lm_base_shape: tuple[int, int] | None = None
+        self._lm_origin_xy: tuple[int, int] | None = None
 
         layout.addStretch()
 
@@ -916,6 +922,19 @@ class RegisterPanelWidget(QWidget):
         if labels is None:
             _error_dialog(self, "Atlas not loaded", "Click 'Show atlas overlay' first.")
             return
+        # Cache the un-warped boundary (section-local row/col) so dragging a
+        # landmark can re-warp just this contour live (see _preview_landmark_warp).
+        # Subsample to keep the per-drag forward-TPS cheap on large sections.
+        from histo_to_ccf.registration.transforms import annotation_boundaries
+
+        edge_rc = np.argwhere(annotation_boundaries(labels))
+        if len(edge_rc) > 4000:
+            edge_rc = edge_rc[:: int(np.ceil(len(edge_rc) / 4000))]
+        self._lm_base_edge_rc = edge_rc
+        self._lm_base_shape = (int(labels.shape[0]), int(labels.shape[1]))
+        self._lm_origin_xy = (int(section.bbox_px[0]), int(section.bbox_px[1]))
+        # Ensure the overlay layer exists so the live drag preview has a target.
+        self._rerender_section_overlay(section)
         # Continue from stored landmarks if present, else auto-place fresh ones.
         if section.manual_landmarks is not None:
             source = np.asarray(section.manual_landmarks.source, dtype=float)
@@ -996,6 +1015,42 @@ class RegisterPanelWidget(QWidget):
                 layer.features = {"sy": sy + delta[:, 0], "sx": sx + delta[:, 1]}
         # deletes keep features aligned automatically (napari drops the row).
         self._lm_prev_data = data.copy()
+        self._preview_landmark_warp()
+
+    def _preview_landmark_warp(self) -> None:
+        """Live, cheap preview: re-warp just the atlas contour as landmarks move.
+
+        Forward-TPS the cached (un-warped) boundary points through the current
+        source→target landmarks and rasterise them into the overlay layer. This
+        follows the cursor in real time; the exact full-label warp + probe re-map
+        + save stay in `_apply_landmarks` (one click at the end).
+        """
+        import numpy as np
+
+        if self._lm_base_edge_rc is None or self._landmark_idx is None:
+            return
+        name = f"Atlas overlay {self._landmark_idx}"
+        if name not in self._viewer.layers:
+            return
+        layer = self._landmark_layer()
+        if layer is None:
+            return
+        data = np.asarray(layer.data, dtype=float)
+        sy = np.asarray(layer.features.get("sy", []), dtype=float)
+        sx = np.asarray(layer.features.get("sx", []), dtype=float)
+        if len(data) < 3 or sy.shape[0] != len(data):
+            return
+        x0, y0 = self._lm_origin_xy
+        source = np.column_stack([sx - x0, sy - y0])           # (x, y) section-local
+        target = np.column_stack([data[:, 1] - x0, data[:, 0] - y0])
+        if np.allclose(source, target):
+            return  # nothing dragged yet (or a pure re-anchor): leave overlay as-is
+        from histo_to_ccf.registration.landmarks_warp import warp_contour_image
+
+        img = warp_contour_image(
+            self._lm_base_edge_rc, source, target, self._lm_base_shape
+        )
+        self._viewer.layers[name].data = img
 
     def _apply_landmarks(self) -> None:
         import numpy as np

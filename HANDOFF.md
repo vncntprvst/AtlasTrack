@@ -1,6 +1,61 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-25 · version **0.2.34** · branch **dev**_
+_Last updated: 2026-06-27 · version **0.2.36** · branch **dev**_
+
+## Real-time landmark drag + DeepSlice AP-order safeguard (v0.2.36)
+
+**Real-time landmark dragging** (Register tab). "Apply landmark warp" was slow
+because one click did four heavy things: full-label TPS warp (RBF over every
+pixel), reload all transforms, re-map all probes, save the whole project. Now a
+drag shows a live preview by re-warping only the atlas **boundary contour**: on
+`Place landmarks` the un-warped boundary is cached (`register_panel`:
+`_lm_base_edge_rc`, subsampled ≤4000 pts); each `_on_landmark_data` calls
+`_preview_landmark_warp`, which forward-TPS-warps that contour
+(`landmarks_warp.warp_contour_image`) and rasterises it into the overlay layer -
+follows the cursor in real time. The exact full warp + probe re-map + save stay
+in `_apply_landmarks` (one click at the end). Pure core tested in
+`test_landmarks_warp.py` (identity/drag/clip).
+
+**DeepSlice pre-match AP-order safeguard** (Atlas matcher). DeepSlice only
+`enforce_index_order()`s (monotonic), never spacing, so it could return sections
+out of order or two almost on top of each other (the bug the user hit). Now:
+- Before running: blocks if two sections share an `ap_order` rank (fix the order
+  window first); warns if spacing is 0 µm (offers to proceed).
+- After running: `_warn_if_prematch_disordered` flags AP steps that reverse the
+  series direction or collapse below 30% of the median step, in a QMessageBox
+  naming the offending section pairs, so the user evens them out before
+  registering. Headless core = `pipeline.prematch_ap_order_issues`, tested in
+  `test_prematch_deepslice.py`. Decision: warn, don't auto-force even spacing
+  (wrong with missing sections) - see memory `project_deepslice_prematch_safeguard`.
+
+Still open from this discussion (agreed, not yet built): place landmarks at
+salient corners/junctions (not by-angle); rename probes (`Probe.label` exists,
+set only at creation); a HERBS-cookbook-style user manual (no PDF lib in `.venv`
+yet to read `C:\Code\Registration\HERBS\CookBook.pdf`).
+
+## Fix: "Load atlas" hangs the GUI (and blocks exit) (v0.2.35)
+
+Loading an already-downloaded atlas could freeze on `load_atlas_worker`
+indefinitely (napari close dialog stuck "Executing load_atlas_worker"), and the
+terminal wouldn't return after closing because the blocked worker thread(s) kept
+the process alive. Re-clicking "Load atlas" stacked more hung workers.
+
+Root cause: `BrainGlobeAtlas(...)` defaults to `check_latest=True`, which calls
+`check_latest_version()` -> `remote_version` -> `utils.conf_from_url()` - an HTTP
+GET to the GIN server with **no timeout**. When GIN is slow/unreachable that call
+hangs forever inside the worker, even though the atlas is fully present on disk.
+
+Fix:
+- `workers.load_atlas_worker` now passes `check_latest=False` (skips only the
+  online version courtesy-check; a genuinely-missing atlas is still downloaded).
+  Load of `allen_mouse_25um` drops to ~0.2s and is offline-safe. Trade-off: no
+  auto-notification when a newer atlas version exists - acceptable for reliability.
+- `atlas_browser._load_atlas` guards re-entrancy: disables the Load button +
+  ignores clicks while a load is in flight (re-enabled on the worker's `finished`
+  signal), so a slow load can't stack multiple workers.
+
+If a stuck process needs killing: it's blocked on a network read, so Ctrl+C may
+not land - `Stop-Process -Name python -Force` (or close the terminal) clears it.
 
 ## Fix: cyan/green-stained sections failed registration (v0.2.34)
 

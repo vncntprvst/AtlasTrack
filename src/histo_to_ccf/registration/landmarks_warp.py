@@ -78,6 +78,34 @@ def invert_points(source: np.ndarray, target: np.ndarray, pts: np.ndarray) -> np
     return _rbf(target, source)(np.asarray(pts, dtype=float).reshape(-1, 2))
 
 
+def warp_contour_image(
+    edge_rc: np.ndarray,
+    source: np.ndarray,
+    target: np.ndarray,
+    shape: tuple[int, int],
+) -> np.ndarray:
+    """Forward-TPS boundary pixels and rasterise them into a binary edge image.
+
+    ``edge_rc`` is an ``(N, 2)`` array of ``(row, col)`` boundary pixels of the
+    *un-warped* atlas overlay. They are pushed source -> target and splatted into
+    a fresh ``shape`` image (1 on the warped contour, 0 elsewhere). This is the
+    cheap, live counterpart of :func:`warp_label_image` (a few hundred points, no
+    per-pixel pull-back) used for the real-time landmark-drag preview.
+    """
+    edge_rc = np.asarray(edge_rc)
+    h, w = int(shape[0]), int(shape[1])
+    img = np.zeros((h, w), dtype=np.uint8)
+    if edge_rc.size == 0:
+        return img
+    pts_xy = np.column_stack([edge_rc[:, 1], edge_rc[:, 0]]).astype(float)
+    warped = warp_points(source, target, pts_xy)  # (N, 2) (x, y)
+    cx = np.round(warped[:, 0]).astype(int)
+    cy = np.round(warped[:, 1]).astype(int)
+    ok = (cx >= 0) & (cx < w) & (cy >= 0) & (cy < h)
+    img[cy[ok], cx[ok]] = 1
+    return img
+
+
 def warp_label_image(
     labels: np.ndarray, source: np.ndarray, target: np.ndarray
 ) -> np.ndarray:

@@ -120,6 +120,39 @@ def _ap_center(anchoring9: "list[float] | tuple[float, ...]") -> float:
     return float(anchoring9[0]) + 0.5 * float(anchoring9[3]) + 0.5 * float(anchoring9[6])
 
 
+def prematch_ap_order_issues(
+    aps: "list[tuple[int, float]]", *, close_frac: float = 0.3
+) -> "tuple[list[tuple[int, int]], list[tuple[int, int]]]":
+    """Flag a DeepSlice pre-match's AP series as out-of-order or too-close.
+
+    ``aps`` is ``[(section_index, ap_um), ...]`` already in the user's section
+    order. Returns ``(reversed_pairs, close_pairs)`` of adjacent
+    ``(index, index)`` whose AP step reverses the overall direction, or collapses
+    below ``close_frac`` of the median |step|. DeepSlice only enforces *order*,
+    not spacing, so two sections can land almost on top of each other - this is
+    the headless core of the matcher's post-pre-match warning. Empty lists when
+    there is nothing to flag (or fewer than 3 sections to judge).
+    """
+    from itertools import pairwise
+
+    if len(aps) < 3:
+        return [], []
+    pairs = list(pairwise(aps))
+    steps = [b_ap - a_ap for (_, a_ap), (_, b_ap) in pairs]
+    med = float(np.median([abs(s) for s in steps]))
+    if med < 1e-6:
+        return [], []
+    sign = 1.0 if (aps[-1][1] - aps[0][1]) >= 0 else -1.0
+    reversed_pairs: list[tuple[int, int]] = []
+    close_pairs: list[tuple[int, int]] = []
+    for ((a_idx, _), (b_idx, _)), step in zip(pairs, steps, strict=True):
+        if step * sign <= 0:
+            reversed_pairs.append((a_idx, b_idx))
+        elif abs(step) < close_frac * med:
+            close_pairs.append((a_idx, b_idx))
+    return reversed_pairs, close_pairs
+
+
 def anchoring_center_ap_um(
     anchoring9: "list[float] | tuple[float, ...]", ap_res_um: float
 ) -> float:

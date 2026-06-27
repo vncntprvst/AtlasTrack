@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QSlider,
@@ -513,9 +514,38 @@ class AtlasMatcherDialog(QDialog):
             self._status.setText("No section images on the active slide to pre-match.")
             return
 
+        # DeepSlice orders the series by each section's ap_order rank and only
+        # *enforces order*, not spacing. So a sane, de-duplicated section order +
+        # a set spacing are what make its result trustworthy. Check both before
+        # running, and let the user fix the order window first if it's ambiguous.
+        ordered = self._ordered_sections()
+        ranks = [s.ap_order for s in ordered]
+        if len(set(ranks)) != len(ranks):
+            QMessageBox.warning(
+                self,
+                "Section order is ambiguous",
+                "Two or more sections share the same position in the AP order, so "
+                "DeepSlice can't order the series reliably.\n\nFix the section order "
+                "(and remove any gaps for missing sections) in the AP-order window "
+                "first, then re-run the pre-match.",
+            )
+            return
+        if abs(self._spacing_spin.value()) < 1e-6:
+            resp = QMessageBox.question(
+                self,
+                "No spacing set",
+                "Section spacing is 0 µm. Setting the expected spacing first lets the "
+                "pre-match flag any sections that come back out of order or too close "
+                "together.\n\nRun DeepSlice anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if resp != QMessageBox.Yes:
+                return
+
         # AP-sequence rank per section, so DeepSlice orders the series the way the
         # user did (ap_order), not by raw detection index.
-        order = {s.index: rank for rank, s in enumerate(self._ordered_sections())}
+        order = {s.index: rank for rank, s in enumerate(ordered)}
 
         pp = self._state.project_path
         ds_dir = (
@@ -581,6 +611,39 @@ class AtlasMatcherDialog(QDialog):
             f"Pre-matched {n} section(s) with DeepSlice. Fine-tune AP here, then "
             "Assign / register."
         )
+        self._warn_if_prematch_disordered()
+
+    def _warn_if_prematch_disordered(self) -> None:
+        """Warn when DeepSlice's predicted APs aren't a clean monotonic series.
+
+        DeepSlice only *enforces order*, never spacing, so it can return two
+        sections almost on top of each other or (rarely) a local inversion. Flag
+        AP steps that reverse direction or collapse to a small fraction of the
+        median step, so the user fixes them before registering instead of finding
+        out later (the exact failure that prompted this guard).
+        """
+        from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+
+        ordered = [s for s in self._ordered_sections() if s.plane is not None]
+        aps = [(s.index, s.plane.ap_um) for s in ordered]
+        reversed_pairs, close_pairs = prematch_ap_order_issues(aps)
+        if not reversed_pairs and not close_pairs:
+            return
+
+        def _fmt(pairs: "list[tuple[int, int]]") -> str:
+            return ", ".join(f"{a}↔{b}" for a, b in pairs)
+
+        lines = ["DeepSlice's predicted APs aren't a clean series:"]
+        if reversed_pairs:
+            lines.append(f"\n• Out of order (AP reverses): sections {_fmt(reversed_pairs)}")
+        if close_pairs:
+            lines.append(f"\n• Too close together: sections {_fmt(close_pairs)}")
+        lines.append(
+            "\n\nFix these before registering — set/confirm the spacing and use "
+            "Link + 'Assign AP to all' to even them out, or correct individual APs "
+            "here."
+        )
+        QMessageBox.warning(self, "Check pre-matched AP order", "".join(lines))
 
     def _seed_spacing_from_planes(self) -> None:
         """Seed the link spacing from the median |AP step| between consecutive sections."""

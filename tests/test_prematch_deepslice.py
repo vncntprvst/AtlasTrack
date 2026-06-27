@@ -93,3 +93,45 @@ def test_reset_clears_prematch_cache() -> None:
     _seed_cache(state, imgs)
     state.reset()
     assert not state.deepslice_anchorings and not state.deepslice_fingerprints
+
+
+# -- AP-order safeguard (post-pre-match warning core) ------------------------
+
+def test_prematch_order_issues_clean_series_has_none() -> None:
+    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+
+    aps = [(0, 1000.0), (1, 1100.0), (2, 1200.0), (3, 1300.0)]
+    assert prematch_ap_order_issues(aps) == ([], [])
+
+
+def test_prematch_order_issues_flags_reversal() -> None:
+    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+
+    # section 2 lands anterior to section 1 -> AP reverses on the 1->2 step.
+    aps = [(0, 1000.0), (1, 1200.0), (2, 1150.0), (3, 1400.0)]
+    rev, close = prematch_ap_order_issues(aps)
+    assert rev == [(1, 2)] and close == []
+
+
+def test_prematch_order_issues_flags_too_close() -> None:
+    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+
+    # 2->3 step (5 µm) is a tiny fraction of the ~100 µm median -> "too close".
+    aps = [(0, 1000.0), (1, 1100.0), (2, 1200.0), (3, 1205.0), (4, 1305.0)]
+    rev, close = prematch_ap_order_issues(aps)
+    assert rev == [] and close == [(2, 3)]
+
+
+def test_prematch_order_issues_handles_descending_series() -> None:
+    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+
+    # Overall posterior->anterior is fine; only a local reversal is flagged.
+    aps = [(0, 1300.0), (1, 1200.0), (2, 1250.0), (3, 1000.0)]
+    rev, close = prematch_ap_order_issues(aps)
+    assert rev == [(1, 2)] and close == []
+
+
+def test_prematch_order_issues_too_few_sections() -> None:
+    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+
+    assert prematch_ap_order_issues([(0, 1000.0), (1, 1100.0)]) == ([], [])

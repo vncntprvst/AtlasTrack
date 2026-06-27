@@ -83,9 +83,9 @@ class AtlasBrowserWidget(QWidget):
         dir_row.addWidget(browse_btn)
         layout.addLayout(dir_row)
 
-        load_btn = QPushButton("Load atlas")
-        load_btn.clicked.connect(self._load_atlas)
-        layout.addWidget(load_btn)
+        self._load_btn = QPushButton("Load atlas")
+        self._load_btn.clicked.connect(self._load_atlas)
+        layout.addWidget(self._load_btn)
 
         self._atlas_status = QLabel("Atlas not loaded")
         self._atlas_status.setWordWrap(True)
@@ -172,6 +172,11 @@ class AtlasBrowserWidget(QWidget):
         return atlas_id
 
     def _load_atlas(self) -> None:
+        # Guard against re-entrancy: a slow load must not let repeated clicks
+        # stack multiple atlas workers (each holds a thread; a hung one then
+        # blocks process exit). Ignore clicks while one is already running.
+        if getattr(self, "_atlas_loading", False):
+            return
         atlas_id = self._current_atlas_id()
         if not atlas_id:
             self._atlas_status.setText("Enter an atlas id first.")
@@ -180,10 +185,17 @@ class AtlasBrowserWidget(QWidget):
         self._atlas_status.setText(f"Loading {atlas_id}…")
         from histo_to_ccf.gui.workers import load_atlas_worker
 
+        self._atlas_loading = True
+        self._load_btn.setEnabled(False)
         worker = load_atlas_worker(atlas_id, brainglobe_dir=atlas_dir)
         worker.returned.connect(self._on_atlas_loaded)
         worker.errored.connect(lambda e: self._atlas_status.setText(f"Error: {e}"))
+        worker.finished.connect(self._on_atlas_load_finished)
         worker.start()
+
+    def _on_atlas_load_finished(self) -> None:
+        self._atlas_loading = False
+        self._load_btn.setEnabled(True)
 
     def _on_atlas_loaded(self, atlas) -> None:
         self._state.atlas = atlas

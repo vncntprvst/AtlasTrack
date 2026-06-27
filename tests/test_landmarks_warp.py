@@ -7,6 +7,7 @@ from histo_to_ccf.atlas.planes import Anchoring
 from histo_to_ccf.registration.landmarks_warp import (
     auto_landmarks,
     invert_points,
+    warp_contour_image,
     warp_label_image,
     warp_points,
 )
@@ -58,6 +59,36 @@ def test_warp_label_image_moves_feature() -> None:
     xs = np.nonzero(warped == 7)[1]
     assert xs.size > 0
     assert 60 <= xs.mean() <= 76
+
+
+def test_warp_contour_image_identity_preserves_edges() -> None:
+    # Undragged (source == target) -> the contour stays exactly where it was.
+    edge_rc = np.array([[10, 10], [10, 40], [40, 40], [40, 10], [25, 25]])
+    src = np.array([[10, 10], [90, 10], [50, 50], [10, 90], [90, 90]], float)
+    img = warp_contour_image(edge_rc, src, src, (100, 100))
+    for r, c in edge_rc:
+        assert img[r, c] == 1
+    assert img.sum() == len(edge_rc)
+
+
+def test_warp_contour_image_follows_drag() -> None:
+    # Drag the centre handle +20 in x; a boundary pixel near it should move right.
+    edge_rc = np.array([[50, 50]])  # one contour pixel at (row=50, col=50)
+    src = np.array([[10, 10], [90, 10], [50, 50], [10, 90], [90, 90]], float)
+    dst = src.copy()
+    dst[2] += [20, 0]  # +20 x on the centre control point
+    img = warp_contour_image(edge_rc, src, dst, (100, 100))
+    ys, xs = np.nonzero(img)
+    assert xs.size == 1 and 65 <= xs[0] <= 75 and ys[0] == 50
+
+
+def test_warp_contour_image_clips_out_of_bounds() -> None:
+    edge_rc = np.array([[5, 5]])
+    src = np.array([[10, 10], [90, 10], [5, 5], [10, 90], [90, 90]], float)
+    dst = src.copy()
+    dst[2] += [-100, -100]  # shove the contour pixel off-canvas
+    img = warp_contour_image(edge_rc, src, dst, (100, 100))
+    assert img.sum() == 0  # nothing rasterised outside the image
 
 
 def test_landmarks_shift_probe_mapping() -> None:

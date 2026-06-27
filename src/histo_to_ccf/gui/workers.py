@@ -50,7 +50,15 @@ def load_atlas_worker(
     """
     from brainglobe_atlasapi import BrainGlobeAtlas
 
-    kwargs = {"brainglobe_dir": brainglobe_dir} if brainglobe_dir else {}
+    # check_latest=False skips BrainGlobe's online "is there a newer version?"
+    # check, which does an HTTP GET to the GIN server with NO timeout. When GIN
+    # is slow/unreachable that call hangs the worker thread forever inside
+    # BrainGlobeAtlas() (the GUI's "stuck on load_atlas_worker" freeze) - even
+    # though the atlas is already on disk. A genuinely-missing atlas is still
+    # downloaded; only the version courtesy-check is skipped.
+    kwargs = {"check_latest": False}
+    if brainglobe_dir:
+        kwargs["brainglobe_dir"] = brainglobe_dir
     last_exc: Exception = RuntimeError("unknown error")
     for attempt in range(max_retries):
         try:
