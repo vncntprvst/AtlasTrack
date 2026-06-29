@@ -96,6 +96,27 @@ def test_slide_loader_widget_creates(qtbot) -> None:
     assert widget.isVisible()
 
 
+def test_matcher_display_does_not_saturate_empty_channel() -> None:
+    """A signal-free channel (e.g. green on a DAPI+red section) must stay dark.
+
+    Regression: per-channel auto-stretch blew the green channel's background noise
+    up to full saturation, painting the matcher's black background bright green.
+    """
+    import numpy as np
+
+    from histo_to_ccf.gui.widgets.atlas_matcher import _display_histology
+
+    crop = np.zeros((40, 50, 3), dtype=np.float32)
+    crop[..., 2] = 5.0           # faint blue background floor
+    crop[10:20, 15:25, 2] = 200.0  # bright blue tissue
+    crop[..., 1] = 4.0           # green: flat low background only (no signal)
+    disp = _display_histology(crop, None)
+    # Green stays near black everywhere (shared window, not its own min/max).
+    assert disp[..., 1].max() <= 20
+    # Blue signal is still stretched up so the tissue is visible.
+    assert disp[..., 2].max() >= 200
+
+
 @pytest.mark.qt
 def test_probe_picker_rename(qtbot) -> None:
     from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget

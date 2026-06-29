@@ -1,6 +1,18 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-27 · version **0.2.37** · branch **dev**_
+_Last updated: 2026-06-27 · version **0.2.38** · branch **dev**_
+
+## Fix: matcher histology showed a saturated-green background (v0.2.38)
+
+The Atlas matcher's histology pane painted the black slide background bright,
+noisy green. Cause: `atlas_matcher._display_histology` windowed **each channel by
+its own min/max** when no explicit per-section level was set. On a DAPI(blue)+label
+(magenta) section the **green channel carries no signal** (≈0-5 noise), so a
+min→max stretch blew that noise to full saturation. (Slide-grid thumbnails use
+napari's own display, so they looked fine.) Fix: channels lacking an explicit level
+are now windowed by a **shared** min/max across all three channels, so a signal-free
+channel stays dark and colour balance is preserved. Test:
+`test_gui_smoke.py::test_matcher_display_does_not_saturate_empty_channel`.
 
 ## Salient landmarks + probe rename + user manual (v0.2.37)
 

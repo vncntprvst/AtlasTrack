@@ -80,16 +80,26 @@ def _stretch(channel: np.ndarray, lo: float | None, hi: float | None) -> np.ndar
 
 
 def _display_histology(crop: np.ndarray, levels: "ChannelLevels | None") -> np.ndarray:
-    """Window a section crop to a displayable uint8 image (gray or RGB)."""
+    """Window a section crop to a displayable uint8 image (gray or RGB).
+
+    Channels without an explicit level are windowed by a **shared** min/max taken
+    across all three channels - NOT each channel's own min/max. Per-channel
+    auto-stretch would blow an empty channel's background noise (e.g. green on a
+    DAPI+red section) up to full saturation, painting the black background bright
+    green; a shared window keeps signal-free channels dark and preserves colour.
+    """
     if crop.ndim == 2:
         lo = levels.low[0] if levels else None
         hi = levels.high[0] if levels else None
         return _stretch(crop, lo, hi)
+    rgb = crop[..., :3].astype(np.float32)
+    full = 255.0 if rgb.max() <= 255.0 else float(rgb.max())
+    shared_lo, shared_hi = float(rgb.min()) / full, float(rgb.max()) / full
     chans = []
     for i in range(3):
         src = crop[..., i] if crop.shape[2] > i else crop[..., -1]
-        lo = levels.low[i] if levels and i < len(levels.low) else None
-        hi = levels.high[i] if levels and i < len(levels.high) else None
+        lo = levels.low[i] if levels and i < len(levels.low) else shared_lo
+        hi = levels.high[i] if levels and i < len(levels.high) else shared_hi
         chans.append(_stretch(src, lo, hi))
     return np.stack(chans, axis=-1)
 
