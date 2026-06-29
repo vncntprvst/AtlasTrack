@@ -59,6 +59,133 @@ def auto_landmarks(
     return np.array(pts, dtype=float)
 
 
+def _boundaries(labels: np.ndarray) -> np.ndarray:
+    """Boolean edge map: True where a region label differs from a 4-neighbour.
+
+    Inlined (not imported from ``transforms``) to keep this module dependency-free.
+    """
+    labels = np.asarray(labels)
+    edges = np.zeros(labels.shape, dtype=bool)
+    edges[:-1, :] |= labels[:-1, :] != labels[1:, :]
+    edges[1:, :] |= labels[:-1, :] != labels[1:, :]
+    edges[:, :-1] |= labels[:, :-1] != labels[:, 1:]
+    edges[:, 1:] |= labels[:, :-1] != labels[:, 1:]
+    return edges
+
+
+def _region_junctions(labels: np.ndarray) -> list[tuple[float, float]]:
+    """Centroids of points where >=3 region outlines meet (skeleton branch points)."""
+    from scipy.ndimage import convolve
+    from scipy.ndimage import label as cc_label
+    from skimage.morphology import skeletonize
+
+    sk = skeletonize(_boundaries(labels))
+    if not sk.any():
+        return []
+    deg = convolve(sk.astype(np.uint8), np.ones((3, 3), np.uint8), mode="constant")
+    branch = sk & ((deg - sk.astype(np.uint8)) >= 3)  # >=3 skeleton neighbours
+    if not branch.any():
+        return []
+    lab, n = cc_label(branch, structure=np.ones((3, 3)))
+    out: list[tuple[float, float]] = []
+    for i in range(1, n + 1):
+        ys, xs = np.nonzero(lab == i)
+        out.append((float(xs.mean()), float(ys.mean())))  # (x, y)
+    return out
+
+
+def _silhouette_corners(extent: np.ndarray) -> list[tuple[float, float]]:
+    """High-curvature corners of the silhouette (Harris response peaks)."""
+    from skimage.feature import corner_harris, corner_peaks
+
+    h, w = extent.shape
+    resp = corner_harris(extent.astype(float))
+    peaks = corner_peaks(
+        resp, min_distance=max(5, int(0.05 * min(h, w))), threshold_rel=0.05
+    )
+    cy, cx = float(np.nonzero(extent)[0].mean()), float(np.nonzero(extent)[1].mean())
+    out: list[tuple[float, float]] = []
+    for r, c in peaks:
+        # Nudge a hair toward the centroid so the handle sits on the overlay.
+        out.append((c + (cx - c) * 0.04, r + (cy - r) * 0.04))
+    return out
+
+
+def _silhouette_extremes(extent: np.ndarray) -> list[tuple[float, float]]:
+    """The four tips of the silhouette (top / bottom / left / right pixels)."""
+    ys, xs = np.nonzero(extent)
+    out: list[tuple[float, float]] = []
+    for sel in (ys.argmin(), ys.argmax(), xs.argmin(), xs.argmax()):
+        out.append((float(xs[sel]), float(ys[sel])))
+    return out
+
+
+def _spread_select(
+    cands: list[tuple[float, float]], min_dist: float, max_points: int
+) -> list[tuple[float, float]]:
+    """Greedily keep candidates (in priority order) that are >= min_dist apart."""
+    chosen: list[tuple[float, float]] = []
+    d2 = min_dist * min_dist
+    for x, y in cands:
+        if all((x - cx) ** 2 + (y - cy) ** 2 >= d2 for cx, cy in chosen):
+            chosen.append((x, y))
+            if len(chosen) >= max_points:
+                break
+    return chosen
+
+
+def salient_landmarks(
+    labels: np.ndarray, *, max_points: int = 12
+) -> np.ndarray:
+    """Place landmarks on distinctive spots of the atlas overlay, with coverage.
+
+    Candidates are taken in priority order: the four silhouette **tips**, then
+    **junctions** where region outlines meet (skeleton branch points), then
+    high-curvature silhouette **corners**, then the geometric
+    :func:`auto_landmarks` ring as fill. A greedy spread keeps every point >= 10%
+    of the image apart, so the result favours grabbable features where they exist
+    (busy dorsal cortex) while the tips + ring guarantee the rest of the section
+    (cerebellum, brainstem) is still pinned. Returns ``(N, 2)`` section-local
+    ``(x, y)``; falls back to the plain ring on a degenerate (tiny) extent.
+    """
+    extent = np.asarray(labels) > 0
+    h, w = extent.shape
+    if int(extent.sum()) < 64:
+        return auto_landmarks(extent)
+    min_dist = max(10.0, 0.10 * min(h, w))
+
+    ring = [(float(x), float(y)) for x, y in auto_landmarks(extent)]
+    cands = (
+        _silhouette_extremes(extent)
+        + _region_junctions(labels)
+        + _silhouette_corners(extent)
+        + ring
+    )
+    chosen = _spread_select(cands, min_dist, max_points)
+    if len(chosen) < 4:  # last resort: never starve the TPS
+        return auto_landmarks(extent)
+    return _snap_into_extent(np.array(chosen, dtype=float), extent)
+
+
+def _snap_into_extent(pts: np.ndarray, extent: np.ndarray) -> np.ndarray:
+    """Move any point that landed off the silhouette onto the nearest overlay pixel.
+
+    Silhouette corners can sit a pixel outside the mask; snapping keeps every
+    handle on the atlas overlay so it's grabbable.
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    h, w = extent.shape
+    nearest = distance_transform_edt(~extent, return_indices=True)[1]  # (2, h, w)
+    out = pts.copy()
+    for k, (x, y) in enumerate(pts):
+        ix = min(max(int(round(x)), 0), w - 1)
+        iy = min(max(int(round(y)), 0), h - 1)
+        if not extent[iy, ix]:
+            out[k] = (float(nearest[1, iy, ix]), float(nearest[0, iy, ix]))
+    return out
+
+
 def _rbf(src: np.ndarray, dst: np.ndarray):
     from scipy.interpolate import RBFInterpolator
 

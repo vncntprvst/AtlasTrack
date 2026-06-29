@@ -1,6 +1,32 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-27 · version **0.2.36** · branch **dev**_
+_Last updated: 2026-06-27 · version **0.2.37** · branch **dev**_
+
+## Salient landmarks + probe rename + user manual (v0.2.37)
+
+**Salient landmark placement.** `landmarks_warp.salient_landmarks(labels)` replaces
+the by-angle `auto_landmarks` for the initial `Place landmarks` points: candidates
+in priority order = silhouette tips (`_silhouette_extremes`) → region-outline
+junctions (`_region_junctions`: skeleton branch points of the boundary) → high-
+curvature corners (`_silhouette_corners`: Harris peaks) → the geometric ring as
+fill; a greedy spread keeps them ≥10% of the image apart, and `_snap_into_extent`
+pulls any off-mask corner back on. So points land on grabbable features where they
+exist (busy dorsal cortex) while tips+ring guarantee coverage of cerebellum/
+brainstem. Falls back to `auto_landmarks` on a degenerate extent. Wired in
+`register_panel._place_landmarks`. Tested in `test_landmarks_warp.py`
+(junction-targeting, spread, fallback); visually verified on sections 8 & 12.
+
+**Rename probes.** `probe_picker.py` gains a Rename row (combo of probes + new-label
+edit + button). `_rename_probe` updates `Probe.label`, rejects duplicates (labels
+are export keys in `probes/channels.py`), and fires a new `on_probes_changed`
+callback wired in `app.py` to `_refresh_panels` so the Probes tip/entry and Ephys
+combos pick up the new name. Tested in `test_gui_smoke.py::test_probe_picker_rename`.
+
+**User manual.** New `MANUAL.md` — cookbook-style reference (concepts, GUI
+reference, task recipes, troubleshooting) modeled on the HERBS cookbook,
+complementing the linear `TUTORIAL.md`. Linked from README. `pypdf` was installed
+into the `.venv` to read the cookbook.
+
 
 ## Real-time landmark drag + DeepSlice AP-order safeguard (v0.2.36)
 

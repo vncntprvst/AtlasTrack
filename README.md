@@ -43,7 +43,8 @@ amount of user input, the app:
    CCF coordinates.
 
 A full click-by-click walkthrough on the bundled example slide is in
-[`TUTORIAL.md`](TUTORIAL.md).
+[`TUTORIAL.md`](TUTORIAL.md); the comprehensive cookbook-style reference (concepts,
+GUI reference, task recipes, troubleshooting) is in [`MANUAL.md`](MANUAL.md).
 
 ## Install
 
@@ -99,6 +100,7 @@ src/histo_to_ccf/   # the package
   io/  atlas/  sectioning/  landmarks/  registration/  probes/  viz/  gui/
 tests/              # pytest suite (run: pytest -q)
 TUTORIAL.md         # step-by-step walkthrough on the example slide
+MANUAL.md           # cookbook-style reference: concepts, GUI, recipes, troubleshooting
 HANDOFF.md          # detailed design notes / engineering log
 ```
 

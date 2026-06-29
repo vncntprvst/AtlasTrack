@@ -38,6 +38,9 @@ class ProbePickerWidget(QWidget):
         # Optional callback fired after a probe is added (wired in app.py to arm
         # tip-marker mode so the user can immediately click a tip point).
         self.on_probe_added: Callable[[], None] | None = None
+        # Fired after a probe is renamed, so other panels' probe combos (Probes
+        # tip/entry, Ephys) refresh to the new label. Wired in app.py.
+        self.on_probes_changed: Callable[[], None] | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -71,9 +74,25 @@ class ProbePickerWidget(QWidget):
         add_btn.clicked.connect(self._add_probe)
         layout.addWidget(add_btn)
 
+        # --- Rename an existing probe -------------------------------------
+        rename_row = QHBoxLayout()
+        rename_row.addWidget(QLabel("Rename:"))
+        self._rename_combo = QComboBox()
+        self._rename_combo.currentIndexChanged.connect(self._on_rename_selected)
+        rename_row.addWidget(self._rename_combo)
+        self._rename_edit = QLineEdit()
+        self._rename_edit.setPlaceholderText("new label")
+        self._rename_edit.returnPressed.connect(self._rename_probe)
+        rename_row.addWidget(self._rename_edit)
+        rename_btn = QPushButton("Rename")
+        rename_btn.clicked.connect(self._rename_probe)
+        rename_row.addWidget(rename_btn)
+        layout.addLayout(rename_row)
+
         self._status = QLabel("")
         layout.addWidget(self._status)
         layout.addStretch()
+        self._refresh_rename_combo()
 
     def _on_type_changed(self, name: str) -> None:
         preset = _PRESETS.get(name, {})
@@ -87,10 +106,60 @@ class ProbePickerWidget(QWidget):
         shanks = [Shank(index=i) for i in range(n)]
         probe = ProbeSpec(label=label, type=probe_type, shanks=shanks)
         self._state.project.probes.append(probe)
+        self._refresh_rename_combo()
         self._status.setText(f"Added '{label}' ({n} shank{'s' if n > 1 else ''})")
         # Auto-select this probe in the annotation widget and arm tip mode.
         if self.on_probe_added is not None:
             self.on_probe_added()
+
+    # ------------------------------------------------------------------
+    # Rename
+    # ------------------------------------------------------------------
+
+    def _refresh_rename_combo(self) -> None:
+        """Repopulate the rename combo from the project, keeping the selection."""
+        cur = self._rename_combo.currentIndex()
+        self._rename_combo.blockSignals(True)
+        self._rename_combo.clear()
+        for probe in self._state.project.probes:
+            self._rename_combo.addItem(probe.label)
+        self._rename_combo.blockSignals(False)
+        if 0 <= cur < self._rename_combo.count():
+            self._rename_combo.setCurrentIndex(cur)
+        self._on_rename_selected(self._rename_combo.currentIndex())
+
+    def _on_rename_selected(self, idx: int) -> None:
+        """Prefill the edit with the selected probe's current label."""
+        probes = self._state.project.probes
+        if 0 <= idx < len(probes):
+            self._rename_edit.setText(probes[idx].label)
+
+    def _rename_probe(self) -> None:
+        probes = self._state.project.probes
+        idx = self._rename_combo.currentIndex()
+        if not (0 <= idx < len(probes)):
+            self._status.setText("No probe to rename.")
+            return
+        new = self._rename_edit.text().strip()
+        if not new:
+            self._status.setText("Enter a new label first.")
+            return
+        # Labels double as export keys (per-channel CSV / HERBS group by label),
+        # so two probes sharing one would collide - reject duplicates.
+        if any(i != idx and p.label == new for i, p in enumerate(probes)):
+            self._status.setText(f"Label '{new}' is already used by another probe.")
+            return
+        old = probes[idx].label
+        if new == old:
+            return
+        probes[idx].label = new
+        self._refresh_rename_combo()
+        self._rename_combo.setCurrentIndex(idx)
+        # Refresh other panels' probe combos (Probes tip/entry, Ephys) to the
+        # new label; do this BEFORE the status line so our message isn't clobbered.
+        if self.on_probes_changed is not None:
+            self.on_probes_changed()
+        self._status.setText(f"Renamed '{old}' → '{new}'")
 
     def current_probe_index(self) -> int | None:
         probes = self._state.project.probes
@@ -98,6 +167,7 @@ class ProbePickerWidget(QWidget):
 
     def refresh_after_load(self) -> None:
         """Reflect the loaded project's probes in the status line."""
+        self._refresh_rename_combo()
         probes = self._state.project.probes
         if not probes:
             self._status.setText("")

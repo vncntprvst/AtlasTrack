@@ -209,6 +209,10 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
                 except Exception:  # noqa: BLE001 - one panel must not block the rest
                     pass
 
+    # Renaming a probe must repopulate every panel's probe combo (Probes
+    # tip/entry, Ephys) so they show the new label.
+    probe_picker.on_probes_changed = _refresh_panels
+
     def _on_project_loaded() -> None:
         _reload_project_display(viewer, state)
         _refresh_panels()

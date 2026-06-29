@@ -912,7 +912,7 @@ class RegisterPanelWidget(QWidget):
     def _place_landmarks(self) -> None:
         import numpy as np
 
-        from histo_to_ccf.registration.landmarks_warp import auto_landmarks
+        from histo_to_ccf.registration.landmarks_warp import salient_landmarks
 
         section = self._adjust_section()
         if section is None or section.registration is None:
@@ -940,7 +940,7 @@ class RegisterPanelWidget(QWidget):
             source = np.asarray(section.manual_landmarks.source, dtype=float)
             targets = np.asarray(section.manual_landmarks.target, dtype=float)
         else:
-            source = auto_landmarks(labels > 0)
+            source = salient_landmarks(labels)
             targets = source.copy()
         self._landmark_idx = section.index
 

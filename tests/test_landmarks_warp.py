@@ -7,6 +7,7 @@ from histo_to_ccf.atlas.planes import Anchoring
 from histo_to_ccf.registration.landmarks_warp import (
     auto_landmarks,
     invert_points,
+    salient_landmarks,
     warp_contour_image,
     warp_label_image,
     warp_points,
@@ -27,6 +28,47 @@ def test_auto_landmarks_count_and_inside_extent() -> None:
     for x, y in pts:
         assert 0 <= x < 160 and 0 <= y < 120
         assert ext[round(y), round(x)]
+
+
+def _three_region_label(h=160, w=200) -> np.ndarray:
+    """Three regions inside a disk that meet at a junction near the centre."""
+    lbl = np.zeros((h, w), dtype=np.int32)
+    disk = _disk(h, w, h // 2, w // 2, 70)
+    lbl[disk] = 1
+    yy, xx = np.ogrid[:h, :w]
+    lbl[disk & (xx >= w // 2) & (yy < h // 2)] = 2  # top-right wedge
+    lbl[disk & (xx >= w // 2) & (yy >= h // 2)] = 3  # bottom-right wedge
+    return lbl
+
+
+def test_salient_landmarks_targets_region_junction() -> None:
+    lbl = _three_region_label()
+    pts = salient_landmarks(lbl)
+    h, w = lbl.shape
+    assert pts.shape[0] >= 4 and pts.shape[1] == 2
+    # All inside the silhouette.
+    for x, y in pts:
+        assert 0 <= x < w and 0 <= y < h
+        assert (lbl > 0)[int(round(y)), int(round(x))]
+    # The 1/2/3 wedges meet on the vertical mid-line near the centre; at least
+    # one landmark should land close to that junction (x≈w/2, y≈h/2).
+    near = [(x, y) for x, y in pts if abs(x - w / 2) < 18 and abs(y - h / 2) < 30]
+    assert near, f"no landmark near the region junction: {pts}"
+
+
+def test_salient_landmarks_spread_apart() -> None:
+    pts = salient_landmarks(_three_region_label())
+    # No two landmarks coincide (greedy spread enforces a minimum distance).
+    for i in range(len(pts)):
+        for j in range(i + 1, len(pts)):
+            assert np.hypot(*(pts[i] - pts[j])) > 5.0
+
+
+def test_salient_landmarks_falls_back_on_tiny_extent() -> None:
+    tiny = np.zeros((20, 20), dtype=np.int32)
+    tiny[9:11, 9:11] = 1
+    pts = salient_landmarks(tiny)
+    assert pts.shape[0] >= 1  # degenerate -> geometric fallback, never crashes
 
 
 def test_warp_identity_when_undragged() -> None:

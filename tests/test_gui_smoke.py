@@ -97,6 +97,39 @@ def test_slide_loader_widget_creates(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_probe_picker_rename(qtbot) -> None:
+    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
+
+    state = WorkflowState()
+    widget = ProbePickerWidget(state)
+    qtbot.addWidget(widget)
+    fired = []
+    widget.on_probes_changed = lambda: fired.append(True)
+
+    # Add two probes via the UI helper.
+    widget._label_edit.setText("probeA")
+    widget._add_probe()
+    widget._label_edit.setText("probeB")
+    widget._add_probe()
+    assert [p.label for p in state.project.probes] == ["probeA", "probeB"]
+
+    # Rename probeA -> shankL.
+    widget._rename_combo.setCurrentIndex(0)
+    widget._rename_edit.setText("shankL")
+    widget._rename_probe()
+    assert state.project.probes[0].label == "shankL"
+    assert fired, "on_probes_changed should fire so other combos refresh"
+    assert widget._rename_combo.itemText(0) == "shankL"
+
+    # Duplicate label is rejected (labels are export keys).
+    widget._rename_combo.setCurrentIndex(1)
+    widget._rename_edit.setText("shankL")
+    widget._rename_probe()
+    assert state.project.probes[1].label == "probeB"  # unchanged
+    assert "already used" in widget._status.text()
+
+
+@pytest.mark.qt
 def test_image_tools_widget_creates(qtbot) -> None:
     from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
 
