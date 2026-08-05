@@ -147,14 +147,20 @@ class SavePanelWidget(QWidget):
         self._state.project_path = Path(path)
         self._path_edit.setText(str(path))
         self._remember(path)
+        # Restore any stored DeepSlice planes, otherwise a re-register would
+        # rebuild a flat coronal plane and lose the predicted tilt.
+        self._state.deepslice_anchorings.clear()
+        self._state.deepslice_fingerprints.clear()
+        n_pre = self._state.seed_deepslice_cache_from_project()
         n_reg = sum(
             1 for slide in project.slides
             for sec in slide.sections
             if sec.registration is not None
         )
+        pre = f", {n_pre} pre-matched plane(s) restored" if n_pre else ""
         self._status.setText(
             f"Loaded {Path(path).name} - {len(project.slides)} slide(s), "
-            f"{n_reg} registered section(s)."
+            f"{n_reg} registered section(s){pre}."
         )
         if self._on_project_loaded is not None:
             self._on_project_loaded()

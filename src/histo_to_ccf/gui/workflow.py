@@ -13,16 +13,20 @@ if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
 
 
-def crop_fingerprint(arr: np.ndarray) -> tuple:
+def crop_fingerprint(arr: np.ndarray) -> list[float]:
     """Cheap content signature of a section crop (shape + pixel sum).
 
     Used to detect when a cached DeepSlice prediction has gone stale - e.g. after
     swapping the dye image on the *same* section (same bbox/index, new pixels). A
     fingerprint mismatch makes the caller re-run DeepSlice rather than silently
     reuse a prediction for the wrong image.
+
+    Returned as a flat list of floats so it can be stored on the section and
+    survive a save/reload, which is what lets that staleness check still work in a
+    later session rather than only within the one that ran the pre-match.
     """
     a = np.asarray(arr)
-    return (tuple(a.shape), float(a.astype(np.float64).sum()))
+    return [float(len(a.shape)), *(float(s) for s in a.shape), float(a.astype(np.float64).sum())]
 
 
 @dataclass
@@ -44,7 +48,7 @@ class WorkflowState:
     # entry is re-run instead of reused. Lets the Register step skip a second
     # DeepSlice pass when the user already pre-matched in the Atlas matcher.
     deepslice_anchorings: dict[int, list[float]] = field(default_factory=dict)
-    deepslice_fingerprints: dict[int, tuple] = field(default_factory=dict)
+    deepslice_fingerprints: dict[int, list[float]] = field(default_factory=dict)
 
     @property
     def atlas(self) -> "BrainGlobeAtlas | None":
@@ -70,6 +74,29 @@ class WorkflowState:
         self.deepslice_fingerprints.clear()
         self.active_slide_idx = None
         self.active_section_idx = None
+
+    def seed_deepslice_cache_from_project(self) -> int:
+        """Rebuild the in-memory DeepSlice cache from what the project stored.
+
+        The pre-match cache used to live only in this object, so re-opening a
+        project silently lost every predicted plane - and a re-register then fell
+        back to a flat coronal plane rebuilt from ``plane.ap_um``, quietly
+        discarding the obliquity DeepSlice had predicted. Sections now carry their
+        own anchoring and crop fingerprint; this restores them on load. Returns
+        the number of sections restored.
+        """
+        n = 0
+        for slide in self.project.slides:
+            for section in slide.sections:
+                if section.deepslice_anchoring is None:
+                    continue
+                self.deepslice_anchorings[section.index] = list(section.deepslice_anchoring)
+                if section.deepslice_fingerprint is not None:
+                    self.deepslice_fingerprints[section.index] = list(
+                        section.deepslice_fingerprint
+                    )
+                n += 1
+        return n
 
     def add_slide(self, image_path: str | Path, img: np.ndarray) -> int:
         """Append a slide to the project, store its image, return slide_idx."""

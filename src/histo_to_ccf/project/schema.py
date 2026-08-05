@@ -5,6 +5,8 @@ the GUI both read and write. JSON serialization is via :mod:`pydantic` directly.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -137,6 +139,16 @@ class Section(BaseModel):
     # None = the series is evenly sampled and ap_order alone determines spacing.
     slide_number: int | None = None
     plane: PlaneParams | None = None
+    # Where ``plane.ap_um`` came from, so the matcher can show it and the user can
+    # tell a prediction from something they set. None = never assigned.
+    ap_source: Literal["deepslice", "manual", "even_spacing"] | None = None
+    # DeepSlice's raw predicted plane (QuickNII 9-vector). ``PlaneParams`` can only
+    # express a coronal plane plus two tilts, so without this the predicted
+    # obliquity is lost on reload and a re-register silently flattens the plane.
+    deepslice_anchoring: list[float] | None = None
+    # Content signature of the crop the prediction was made from, so a reloaded
+    # anchoring is still rejected if the section's image has since been swapped.
+    deepslice_fingerprint: list[float] | None = None
     # Filled by M3 pipeline; absent for M1 manual-mode sections.
     registration: RegistrationResult | None = None
     flip_h: bool = False

@@ -2,10 +2,19 @@
 
 Replaces the old in-canvas "Atlas preview" vignette. The user scrolls through
 their slide's sections on the left and coronal atlas slices on the right until
-they match, then assigns the AP. With **Link** on, an anchored section drives the
-atlas AP of every other section by an editable spacing (the visual twin of the
-ordering panel's Interpolate AP). An **Overlay** view blends the atlas reference
-(and region boundaries) on top of the section for a finer anatomical check.
+they match, then assigns the AP.
+
+There are two ways to set AP and the dialog keeps them visually separate, because
+they are alternatives rather than steps: **by hand**, which stores one AP on the
+section shown, or **evenly from a reference**, where one pinned section plus an
+editable spacing derives the AP of every section (the visual twin of the ordering
+panel's Interpolate AP). "Preview while scrolling" only previews that series - it
+stores nothing, and "Assign all" applies it whether or not the preview is on.
+
+A separate one-shot **Pre-match all (DeepSlice)** fills every AP at once; it sits
+at the bottom, away from the per-section controls, since it overwrites everything.
+An **Overlay** view blends the atlas reference (and region boundaries) on top of
+the section for a finer anatomical check.
 """
 from __future__ import annotations
 
@@ -24,6 +33,7 @@ from qtpy.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -38,6 +48,15 @@ from qtpy.QtWidgets import (
 
 from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
 from histo_to_ccf.gui.workflow import WorkflowState
+
+# How each section's AP was arrived at, shown next to the section navigation so a
+# prediction is never mistaken for something the user set.
+_AP_SOURCE_LABELS = {
+    "deepslice": "DeepSlice",
+    "manual": "set by hand",
+    "even_spacing": "even spacing",
+    None: "not set",
+}
 
 if TYPE_CHECKING:
     from histo_to_ccf.project.schema import ChannelLevels, Section
@@ -248,7 +267,7 @@ class AtlasMatcherDialog(QDialog):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
-        # Row 1: section navigation + AP.
+        # Row 1: section navigation.
         nav = QHBoxLayout()
         self._prev_btn = QPushButton("◀ Section")
         self._prev_btn.clicked.connect(lambda: self._step_section(-1))
@@ -258,41 +277,93 @@ class AtlasMatcherDialog(QDialog):
         nav.addWidget(self._prev_btn)
         nav.addWidget(self._sec_label, 1)
         nav.addWidget(self._next_btn)
-        nav.addSpacing(16)
-        nav.addWidget(QLabel("AP from bregma (µm):"))
+        root.addLayout(nav)
+
+        # Row 2: the two ways to set AP, side by side so it is obvious they are
+        # alternatives - set one section by hand, or derive every section from a
+        # reference plus a spacing.
+        modes = QHBoxLayout()
+
+        manual_box = QGroupBox("Set this section's AP by hand")
+        manual = QHBoxLayout(manual_box)
+        manual.addWidget(QLabel("AP from bregma (µm):"))
         self._ap_spin = QDoubleSpinBox()
         self._ap_spin.setRange(-15000.0, BREGMA_AP_FROM_ORIGIN_UM)
         self._ap_spin.setSingleStep(25.0)
         self._ap_spin.setValue(0.0)  # bregma
-        self._ap_spin.valueChanged.connect(self._on_ap_changed)
-        nav.addWidget(self._ap_spin)
-        root.addLayout(nav)
-
-        # Row 2: link / spacing / anchor.
-        link_row = QHBoxLayout()
-        self._link_check = QCheckBox("Link")
-        self._link_check.setToolTip(
-            "Drive the atlas AP of every section from one anchored section,\n"
-            "stepping by the spacing below. Off = scroll each side freely."
+        self._ap_spin.setToolTip(
+            "Scroll until this section matches the atlas, then store it.\n"
+            "Affects only the section shown."
         )
-        self._link_check.toggled.connect(self._on_link_toggled)
-        link_row.addWidget(self._link_check)
-        link_row.addWidget(QLabel("spacing (µm):"))
+        self._ap_spin.valueChanged.connect(self._on_ap_changed)
+        manual.addWidget(self._ap_spin)
+        self._assign_btn = QPushButton("Assign to this section")
+        self._assign_btn.setToolTip("Store the AP above on the current section only.")
+        self._assign_btn.clicked.connect(self._assign_current)
+        manual.addWidget(self._assign_btn)
+        manual.addStretch()
+        modes.addWidget(manual_box, 1)
+
+        spacing_box = QGroupBox("Space every section evenly from one reference")
+        spacing_l = QVBoxLayout(spacing_box)
+
+        ref_row = QHBoxLayout()
+        self._anchor_btn = QPushButton("Use this section as reference")
+        self._anchor_btn.setToolTip(
+            "Pin the current section and its AP as the reference the spacing counts from."
+        )
+        self._anchor_btn.clicked.connect(self._set_anchor)
+        ref_row.addWidget(self._anchor_btn)
+        self._anchor_label = QLabel("reference: none set")
+        self._anchor_label.setToolTip(
+            "Which section the even-spacing series counts from. Set automatically\n"
+            "from the current section if you never choose one."
+        )
+        ref_row.addWidget(self._anchor_label, 1)
+        spacing_l.addLayout(ref_row)
+
+        step_row = QHBoxLayout()
+        step_row.addWidget(QLabel("spacing (µm):"))
         self._spacing_spin = QDoubleSpinBox()
         self._spacing_spin.setRange(-5000.0, 5000.0)
         self._spacing_spin.setSingleStep(25.0)
         self._spacing_spin.setValue(100.0)
         self._spacing_spin.setToolTip(
             "AP step between consecutive sections (section thickness x interval).\n"
-            "Sign sets direction; flip it if your ordering runs the other way."
+            "Sign sets direction; flip it if your ordering runs the other way.\n"
+            "This is your value - it is only auto-filled right after a DeepSlice\n"
+            "pre-match, and editing APs afterwards does not update it."
         )
-        link_row.addWidget(self._spacing_spin)
-        self._anchor_btn = QPushButton("Anchor here")
-        self._anchor_btn.setToolTip("Pin the current section + AP as the link reference.")
-        self._anchor_btn.clicked.connect(self._set_anchor)
-        link_row.addWidget(self._anchor_btn)
-        link_row.addStretch()
-        root.addLayout(link_row)
+        step_row.addWidget(self._spacing_spin)
+        self._link_check = QCheckBox("Preview while scrolling")
+        self._link_check.setToolTip(
+            "Show each section at its even-spacing AP as you scroll, instead of\n"
+            "letting the AP box move freely. Preview only - it stores nothing, and\n"
+            "'Assign all' below works whether or not this is ticked."
+        )
+        self._link_check.toggled.connect(self._on_link_toggled)
+        step_row.addWidget(self._link_check)
+        step_row.addStretch()
+        spacing_l.addLayout(step_row)
+
+        self._assign_all_btn = QPushButton("Assign all from reference + spacing")
+        self._assign_all_btn.setToolTip(
+            "Overwrite every section's AP with reference AP + (position x spacing).\n"
+            "Replaces any DeepSlice or hand-set values."
+        )
+        self._assign_all_btn.clicked.connect(self._assign_all)
+        spacing_l.addWidget(self._assign_all_btn)
+        modes.addWidget(spacing_box, 1)
+
+        root.addLayout(modes)
+
+        # Row 3: the AP series health strip. Re-checked on every change rather
+        # than only after a pre-match, because hand-editing a few APs is just as
+        # able to break the series - and used to do so silently.
+        self._order_label = QLabel("")
+        self._order_label.setWordWrap(True)
+        self._order_label.setVisible(False)
+        root.addWidget(self._order_label)
 
         # Row 3: view mode / overlay controls.
         view_row = QHBoxLayout()
@@ -346,29 +417,21 @@ class AtlasMatcherDialog(QDialog):
         self._stack.addWidget(self._overlay_pane)  # page 1: overlay
         root.addWidget(self._stack, 1)
 
-        # Bottom: status + assign.
+        # Bottom: the one-shot automatic pass on the left, well away from the
+        # per-section controls above, then status.
         bottom = QHBoxLayout()
-        self._status = QLabel("")
-        bottom.addWidget(self._status, 1)
         self._prematch_btn = QPushButton("Pre-match all (DeepSlice)")
         self._prematch_btn.setToolTip(
             "Run DeepSlice on every section of the active slide to fill a consistent\n"
-            "set of AP positions in one pass, then fine-tune here. The full predicted\n"
+            "set of AP positions in one pass, then fine-tune above. The full predicted\n"
             "planes (incl. tilt) are cached so Register can reuse them.\n"
             "First run downloads the DeepSlice model and is slow."
         )
         self._prematch_btn.clicked.connect(self._prematch_deepslice)
         bottom.addWidget(self._prematch_btn)
-        assign_btn = QPushButton("Assign")
-        assign_btn.setToolTip("Store this AP on the current section.")
-        assign_btn.clicked.connect(self._assign_current)
-        bottom.addWidget(assign_btn)
-        assign_all_btn = QPushButton("Assign all (linked)")
-        assign_all_btn.setToolTip(
-            "Fill every section's AP from the anchor + spacing (like Interpolate AP)."
-        )
-        assign_all_btn.clicked.connect(self._assign_all)
-        bottom.addWidget(assign_all_btn)
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        bottom.addWidget(self._status, 1)
         root.addLayout(bottom)
 
     def _init_ap_range(self) -> None:
@@ -453,14 +516,53 @@ class AtlasMatcherDialog(QDialog):
 
     def _set_anchor(self) -> None:
         self._anchor = (self._pos, self._ap_spin.value())
+        self._refresh_anchor_label()
         self._status.setText(
-            f"Anchored section position {self._pos + 1} at AP "
+            f"Reference set: section position {self._pos + 1} at AP "
             f"{self._ap_spin.value():.0f} µm (from bregma)."
         )
 
-    def _linked_ap_bregma(self, pos: int) -> float:
+    def _refresh_anchor_label(self) -> None:
+        """Keep the reference visible - it is otherwise invisible state."""
+        if self._anchor is None:
+            self._anchor_label.setText("reference: none set")
+            return
+        pos, ap = self._anchor
+        ordered = self._ordered_sections()
+        name = (
+            f"section {ordered[pos].index}"
+            if 0 <= pos < len(ordered)
+            else f"position {pos + 1}"
+        )
+        self._anchor_label.setText(f"reference: {name} @ AP {ap:.0f} µm")
+
+    def _linked_offsets(self) -> "tuple[list[float], float, str]":
+        """AP offset of every section from the reference, in bregma µm.
+
+        Delegates the stepping to :func:`ap_offsets`, so a series whose sections
+        carry ``slide_number`` is spaced by the real gaps between slides rather
+        than by position - an unevenly sampled series (keep one, skip three) then
+        gets the AP progression it actually has. Falls back to even steps when
+        slide numbers are absent, which reproduces the original behaviour exactly.
+        """
+        from histo_to_ccf.sectioning.ap_series import ap_offsets
+
+        ordered = self._ordered_sections()
         anchor_pos, anchor_ap = self._anchor or (self._pos, self._ap_spin.value())
-        return anchor_ap - (pos - anchor_pos) * self._spacing_spin.value()
+        anchor_pos = max(0, min(anchor_pos, max(len(ordered) - 1, 0)))
+        offsets, mode = ap_offsets(
+            [s.slide_number for s in ordered],
+            anchor_pos=anchor_pos,
+            spacing_um=self._spacing_spin.value(),
+        )
+        # The matcher works in bregma AP, which runs opposite to absolute AP.
+        return [-o for o in offsets], anchor_ap, mode
+
+    def _linked_ap_bregma(self, pos: int) -> float:
+        offsets, anchor_ap, _ = self._linked_offsets()
+        if not offsets:
+            return anchor_ap
+        return anchor_ap + offsets[max(0, min(pos, len(offsets) - 1))]
 
     # -- assignment ------------------------------------------------------
 
@@ -469,7 +571,7 @@ class AtlasMatcherDialog(QDialog):
         if section is None:
             self._status.setText("No section to assign.")
             return
-        self._write_ap(section, self._bregma_to_absolute(self._ap_spin.value()))
+        self._write_ap(section, self._bregma_to_absolute(self._ap_spin.value()), "manual")
         self._status.setText(
             f"Assigned AP={self._ap_spin.value():.0f} µm (from bregma) to "
             f"section {section.index}."
@@ -479,20 +581,35 @@ class AtlasMatcherDialog(QDialog):
         ordered = self._ordered_sections()
         if not ordered:
             return
-        if self._anchor is None:
+        auto_anchored = self._anchor is None
+        if auto_anchored:
             self._set_anchor()
+        offsets, anchor_ap, mode = self._linked_offsets()
         for pos, section in enumerate(ordered):
-            self._write_ap(section, self._bregma_to_absolute(self._linked_ap_bregma(pos)))
-        self._status.setText(f"Assigned AP to all {len(ordered)} sections from anchor + spacing.")
+            self._write_ap(
+                section,
+                self._bregma_to_absolute(anchor_ap + offsets[pos]),
+                "even_spacing",
+            )
+        anchor_pos, _ = self._anchor  # type: ignore[misc]
+        per = "per slide" if mode == "slide_number" else "per section"
+        note = " (reference taken from the current section)" if auto_anchored else ""
+        self._status.setText(
+            f"Assigned AP to all {len(ordered)} sections: section "
+            f"{ordered[anchor_pos].index} @ {anchor_ap:.0f} µm stepping by "
+            f"{self._spacing_spin.value():.0f} µm {per}{note}."
+        )
+        self._refresh()
 
     @staticmethod
-    def _write_ap(section: "Section", ap_abs: float) -> None:
+    def _write_ap(section: "Section", ap_abs: float, source: str) -> None:
         from histo_to_ccf.project.schema import PlaneParams
 
         if section.plane is not None:
             section.plane = section.plane.model_copy(update={"ap_um": ap_abs})
         else:
             section.plane = PlaneParams(ap_um=ap_abs)
+        section.ap_source = source  # type: ignore[assignment]
 
     # -- DeepSlice pre-match ---------------------------------------------
 
@@ -582,12 +699,13 @@ class AtlasMatcherDialog(QDialog):
         anchorings: "dict[int, list[float]]",
         section_images: "dict[int, np.ndarray]",
     ) -> None:
-        """Write DeepSlice's predicted AP onto each section and cache the full planes.
+        """Write DeepSlice's predicted AP onto each section and keep the full planes.
 
-        Only the scalar centre-AP is stored on ``section.plane`` (the matcher displays
-        and lets you fine-tune coronal AP). The full predicted plane - including the
-        tilt DeepSlice is good at - is cached on the state so the Register step can
-        reuse it without baking a possibly-misconverted tilt into the saved project.
+        Only the scalar centre-AP goes on ``section.plane`` (the matcher displays and
+        lets you fine-tune coronal AP). The full predicted plane - including the tilt
+        DeepSlice is good at - is both cached on the state for this session *and*
+        stored on the section, so reloading the project does not silently throw the
+        obliquity away and leave a re-register to flatten the plane.
         """
         from histo_to_ccf.gui.workflow import crop_fingerprint
         from histo_to_ccf.io.ccf_coords import atlas_resolution_um
@@ -605,10 +723,13 @@ class AtlasMatcherDialog(QDialog):
             section = sec_by_idx.get(idx)
             if section is None:
                 continue
-            self._write_ap(section, anchoring_center_ap_um(anch, ap_res))
+            self._write_ap(section, anchoring_center_ap_um(anch, ap_res), "deepslice")
+            section.deepslice_anchoring = list(anch)
             self._state.deepslice_anchorings[idx] = list(anch)
             if idx in section_images:
-                self._state.deepslice_fingerprints[idx] = crop_fingerprint(section_images[idx])
+                fp = crop_fingerprint(section_images[idx])
+                section.deepslice_fingerprint = fp
+                self._state.deepslice_fingerprints[idx] = fp
             n += 1
 
         self._seed_spacing_from_planes()
@@ -621,39 +742,53 @@ class AtlasMatcherDialog(QDialog):
             f"Pre-matched {n} section(s) with DeepSlice. Fine-tune AP here, then "
             "Assign / register."
         )
-        self._warn_if_prematch_disordered()
 
-    def _warn_if_prematch_disordered(self) -> None:
-        """Warn when DeepSlice's predicted APs aren't a clean monotonic series.
+    def _refresh_order_check(self) -> None:
+        """Keep the AP-series health strip current after *any* change.
 
-        DeepSlice only *enforces order*, never spacing, so it can return two
-        sections almost on top of each other or (rarely) a local inversion. Flag
-        AP steps that reverse direction or collapse to a small fraction of the
-        median step, so the user fixes them before registering instead of finding
-        out later (the exact failure that prompted this guard).
+        DeepSlice enforces *order*, never spacing, so it can return two sections
+        almost on top of each other or a local inversion - but hand-editing a few
+        APs afterwards breaks the series just as easily, and that used to go
+        unreported because the check only ran once, right after a pre-match.
         """
         from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
 
         ordered = [s for s in self._ordered_sections() if s.plane is not None]
         aps = [(s.index, s.plane.ap_um) for s in ordered]
         reversed_pairs, close_pairs = prematch_ap_order_issues(aps)
+
         if not reversed_pairs and not close_pairs:
+            if len(aps) >= 3:
+                self._order_label.setText("AP series looks consistent.")
+                self._order_label.setStyleSheet(
+                    "QLabel { background: #1e3d24; color: #b9e6c2; padding: 4px; "
+                    "border-radius: 3px; }"
+                )
+                self._order_label.setVisible(True)
+            else:
+                self._order_label.setVisible(False)
             return
 
         def _fmt(pairs: "list[tuple[int, int]]") -> str:
             return ", ".join(f"{a}↔{b}" for a, b in pairs)
 
-        lines = ["DeepSlice's predicted APs aren't a clean series:"]
+        parts = []
         if reversed_pairs:
-            lines.append(f"\n• Out of order (AP reverses): sections {_fmt(reversed_pairs)}")
+            parts.append(f"AP reverses at {_fmt(reversed_pairs)}")
         if close_pairs:
-            lines.append(f"\n• Too close together: sections {_fmt(close_pairs)}")
-        lines.append(
-            "\n\nFix these before registering - set/confirm the spacing and use "
-            "Link + 'Assign AP to all' to even them out, or correct individual APs "
-            "here."
+            parts.append(f"nearly identical AP at {_fmt(close_pairs)}")
+        # A reversal puts sections in the wrong order outright, so colour on that.
+        severe = bool(reversed_pairs)
+        self._order_label.setText(
+            "AP series problem: " + "; ".join(parts)
+            + " - fix before registering (set the spacing and assign all, or "
+            "correct these sections by hand)."
         )
-        QMessageBox.warning(self, "Check pre-matched AP order", "".join(lines))
+        self._order_label.setStyleSheet(
+            "QLabel { background: %s; color: #ffffff; padding: 4px; "
+            "border-radius: 3px; }" % ("#6d2020" if severe else "#6d5320")
+        )
+        self._order_label.setVisible(True)
 
     def _seed_spacing_from_planes(self) -> None:
         """Seed the link spacing from the median |AP step| between consecutive sections."""
@@ -679,9 +814,11 @@ class AtlasMatcherDialog(QDialog):
         if section is not None:
             self._sec_label.setText(
                 f"Section {section.index}  ({self._pos + 1} / {len(ordered)})"
+                f"   ·   AP: {_AP_SOURCE_LABELS.get(section.ap_source, 'not set')}"
             )
         else:
             self._sec_label.setText("No sections")
+        self._refresh_order_check()
         self._prev_btn.setEnabled(self._pos > 0)
         self._next_btn.setEnabled(bool(ordered) and self._pos < len(ordered) - 1)
 

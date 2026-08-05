@@ -1,6 +1,52 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-03 · version **0.2.47** · branch **dev**_
+_Last updated: 2026-08-05 · version **0.2.48** · branch **dev**_
+
+## Atlas matcher: two AP modes made explicit, and a live series check (v0.2.48)
+
+Driven by a real LO_03 session where the dialog's own warning went stale and
+misled. The user pre-matched, hand-edited three sections, and thereby created an
+**AP reversal** (11000 -> 10782 between sections 2 and 3) that was never reported,
+because the order check only ran once, immediately after the pre-match.
+
+**Layout.** The two ways to set AP were interleaved across a nav row, a "link" row
+and three bottom buttons, so nothing said they were alternatives. They are now two
+titled group boxes side by side - *"Set this section's AP by hand"* (AP spinbox +
+"Assign to this section") and *"Space every section evenly from one reference"*
+(reference button + live reference label + spacing + preview + "Assign all from
+reference + spacing"). "Pre-match all (DeepSlice)" moved to the bottom-left, away
+from the per-section controls, since it overwrites everything in one shot.
+
+Renames follow the actual model: "Link" -> **"Preview while scrolling"** (it only
+previews; "Assign all" applies the series whether or not it is ticked - a real
+trap before), "Anchor here" -> **"Use this section as reference"**, and the anchor
+is no longer invisible state - a label reads `reference: section 3 @ AP -4599 µm`.
+
+**Live order check.** `_refresh_order_check()` re-runs `prematch_ap_order_issues`
+on every change and renders a persistent coloured strip (red for a reversal, amber
+for near-duplicates, green when clean) instead of a one-shot modal. The modal is
+gone.
+
+**AP provenance.** New `Section.ap_source` (`deepslice` / `manual` / `even_spacing`)
+is written by every assign path and shown next to the section navigation, so a
+prediction is never mistaken for something the user set.
+
+**Irregular spacing.** `_assign_all` and the scroll preview now go through
+`ap_offsets()`, so a series whose sections carry `slide_number` is spaced by real
+slide gaps. Without slide numbers the result is identical to the old even stepping.
+
+**DeepSlice planes persist.** `Section.deepslice_anchoring` + `deepslice_fingerprint`
+are saved with the project and re-seeded into the state on load
+(`WorkflowState.seed_deepslice_cache_from_project()`). Previously the cache was
+memory-only, so reopening a project dropped the predicted tilt and a re-register
+silently rebuilt a flat coronal plane from `plane.ap_um` - the same class of bug as
+the CLI anchoring issue fixed in v0.2.47. `crop_fingerprint` now returns a flat
+list of floats so it survives the round trip and the staleness guard still works
+across sessions. Tests: `test_atlas_matcher_ap.py`.
+
+Still open from that review: a one-click **"linearize AP + anchor"** (robust slope
+through the predictions, pinned to one trusted section) - the fix that actually
+worked on LO_06 and the strongest remaining candidate.
 
 ## Lightsheet subjects: brainreg import + a registration bug found (v0.2.47)
 
