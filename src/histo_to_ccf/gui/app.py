@@ -231,7 +231,8 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     # Project save/load/close live in the menu bar (see _install_project_menu),
     # not a tab - they are file actions, not part of the left-to-right workflow.
-    _install_project_menu(viewer, state, on_loaded=_on_project_loaded,
+    _install_project_menu(viewer, state, settings=settings,
+                          on_loaded=_on_project_loaded,
                           on_cleared=_on_project_cleared)
     # A "Registration" menu hosts the parameters dialog (kept out of the panel),
     # and napari's default menus are hidden - the user only wants Project +
@@ -244,6 +245,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     def _on_tab_change(_idx: int) -> None:
         register_panel.collect_settings(settings)
         atlas_browser.collect_settings(settings)
+        viz_panel.collect_settings(settings)
         save_app_settings(settings)
 
     tabs.currentChanged.connect(_on_tab_change)
@@ -251,8 +253,17 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     return container, viz_panel
 
 
+def _recent_label(path: str) -> str:
+    """Menu label for a recent project: parent folder + filename (no long path)."""
+    from pathlib import Path
+
+    p = Path(path)
+    return f"{p.parent.name}/{p.name}" if p.parent.name else p.name
+
+
 def _install_project_menu(
-    viewer: "napari.Viewer", state: "WorkflowState", on_loaded=None, on_cleared=None
+    viewer: "napari.Viewer", state: "WorkflowState", settings=None,
+    on_loaded=None, on_cleared=None,
 ) -> None:
     """Add a "Project" menu (first in the menu bar) with Save / Save As… / Load.
 
@@ -263,6 +274,8 @@ def _install_project_menu(
     just redrawing the canvas. Best-effort: if the Qt main window or menu bar is
     unavailable (headless), do nothing.
     """
+    from pathlib import Path
+
     from qtpy.QtWidgets import QMenu
 
     from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
@@ -276,7 +289,7 @@ def _install_project_menu(
         on_loaded = lambda: _reload_project_display(viewer, state)  # noqa: E731
 
     # A hidden helper widget owns the save/load implementation + file dialogs.
-    helper = SavePanelWidget(state, on_project_loaded=on_loaded)
+    helper = SavePanelWidget(state, on_project_loaded=on_loaded, settings=settings)
     helper.hide()
     # Keep it alive for the session (parent it to the main window).
     try:
@@ -335,6 +348,41 @@ def _install_project_menu(
     menu.addSeparator()
     load_action = menu.addAction("Load Project…")
     load_action.triggered.connect(helper._load)
+
+    # "Load recent ▸" - rebuilt each time it opens from settings.recent_projects.
+    recent_menu = menu.addMenu("Load recent")
+
+    def _rebuild_recent() -> None:
+        recent_menu.clear()
+        entries = list(getattr(settings, "recent_projects", []) or [])
+        # Drop paths that no longer exist so the list stays trustworthy.
+        entries = [p for p in entries if Path(p).exists()]
+        if not entries:
+            empty = recent_menu.addAction("(none yet)")
+            empty.setEnabled(False)
+            return
+        for p in entries:
+            act = recent_menu.addAction(_recent_label(p))
+            act.setToolTip(p)
+            act.triggered.connect(lambda _checked=False, path=p: helper.load_path(path))
+        recent_menu.addSeparator()
+        clear = recent_menu.addAction("Clear recent")
+        clear.triggered.connect(_clear_recent)
+
+    def _clear_recent() -> None:
+        if settings is None:
+            return
+        settings.recent_projects = []
+        try:
+            from histo_to_ccf.config import save_app_settings
+
+            save_app_settings(settings)
+        except Exception:  # noqa: BLE001 - best-effort persistence
+            pass
+
+    recent_menu.aboutToShow.connect(_rebuild_recent)
+    _rebuild_recent()  # populate once so it isn't empty before first open
+
     close_action = menu.addAction("Close Project")
     close_action.triggered.connect(_close)
 
@@ -507,45 +555,17 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
     (click *Load atlas* if you want the overlay or the 3D brain); the atlas-overlay
     transform sidecars are resolved from the project folder when needed.
     """
-    from pathlib import Path
-
-    import numpy as np
-
     from histo_to_ccf.gui.section_display import sections_to_outline_labels
-    from histo_to_ccf.io.image import load_image, merge_images, slide_bands
+    from histo_to_ccf.project.images import rebuild_slide_image
 
     for slide_idx, slide in enumerate(state.project.slides):
         try:
-            # Reproduce a merged slide from its (sorted) source images; a single
-            # source loads directly. merge_images is deterministic, so the
-            # combined pixels - and hence the stored section bboxes - line up.
-            if slide.source_paths and len(slide.source_paths) > 1:
-                sources = [load_image(Path(s)) for s in slide.source_paths]
-                img = merge_images(sources)
-                # Restore per-source bands so a re-detect stays slide-aware.
-                state.slide_bands[slide_idx] = slide_bands([s.shape[0] for s in sources])
-            else:
-                img = load_image(Path(slide.image_path))
-                state.slide_bands[slide_idx] = [(0, int(img.shape[0]))]
+            # Merged sources, whole-slide flips and per-section flips are all
+            # re-applied here - shared with the headless CLI so the two can't drift.
+            img, bands = rebuild_slide_image(slide)
         except Exception:
             continue
-        # Flips are baked into the in-memory array at flip-time and only the
-        # boolean flags are persisted, so the freshly-loaded raw image must be
-        # re-flipped to match the saved orientation (whole-slide then per-section).
-        if slide.flip_h:
-            img = np.fliplr(img)
-        if slide.flip_v:
-            img = np.flipud(img)
-        for section in slide.sections:
-            if not (section.flip_h or section.flip_v):
-                continue
-            x0, y0, x1, y1 = section.bbox_px
-            crop = img[y0:y1, x0:x1]
-            if section.flip_h:
-                crop = np.fliplr(crop)
-            if section.flip_v:
-                crop = np.flipud(crop)
-            img[y0:y1, x0:x1] = crop
+        state.slide_bands[slide_idx] = bands
         state.slide_images[slide_idx] = img
         state.active_slide_idx = slide_idx
         name = f"Slide {slide_idx}"

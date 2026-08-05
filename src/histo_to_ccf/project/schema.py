@@ -131,6 +131,11 @@ class Section(BaseModel):
     slide_idx: int = Field(ge=0)
     bbox_px: tuple[int, int, int, int]  # (x0, y0, x1, y1) in slide coords
     ap_order: int = 0
+    # Physical serial number of the slide/section this came from, when the series
+    # was sampled unevenly (e.g. every 2nd section here, every 5th there). AP is
+    # then spaced by slide-number gaps rather than by position in the list.
+    # None = the series is evenly sampled and ap_order alone determines spacing.
+    slide_number: int | None = None
     plane: PlaneParams | None = None
     # Filled by M3 pipeline; absent for M1 manual-mode sections.
     registration: RegistrationResult | None = None

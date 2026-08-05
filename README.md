@@ -5,7 +5,7 @@ Guided registration of histological brain sections to a reference atlas
 
 A napari desktop app for wet-lab neuroscientists: load slide images, click each
 probe's tip/entry, register every section to the atlas **automatically**, and get
-CCF coordinates plus an interactive 3D view — without dropping dozens of landmark
+CCF coordinates plus an interactive 3D view - without dropping dozens of landmark
 pairs per brain.
 
 ## What it does
@@ -55,10 +55,10 @@ histo2ccf gui                                    # launch the guided workflow
 
 Optional features live behind **extras**:
 
-- `deepslice` — automatic atlas-plane prediction (pulls TensorFlow).
-- `elastix` — the regularized (bending-energy + masked) registration engine
+- `deepslice` - automatic atlas-plane prediction (pulls TensorFlow).
+- `elastix` - the regularized (bending-energy + masked) registration engine
   (pulls ITK ~150 MB). Without it the pipeline uses the plain SimpleITK B-spline.
-- `ephys` — the Ephys-alignment tab: load Open Ephys LFP and refine shank depth
+- `ephys` - the Ephys-alignment tab: load Open Ephys LFP and refine shank depth
   (pulls SpikeInterface + neo/probeinterface).
 
 ```bash
@@ -74,7 +74,7 @@ uv pip install -e ".[deepslice]"                     # with DeepSlice
 uv pip install -e ".[deepslice,elastix,ephys,dev]"   # everything + test/lint tools
 ```
 
-> **Quote the target** (`".[...]"`) and use **no spaces** between extras —
+> **Quote the target** (`".[...]"`) and use **no spaces** between extras -
 > `zsh` and PowerShell otherwise treat `[...]` as a glob and the space splits the
 > argument (e.g. `uv pip install -e .[deepslice, ephys]` fails to parse).
 

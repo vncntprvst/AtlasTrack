@@ -175,6 +175,95 @@ def ordered_endpoints(
     return entry_candidate, tip_candidate
 
 
+def fit_rigid_array(
+    tips: np.ndarray,
+    entries: np.ndarray,
+    *,
+    tolerance: float = 0.25,
+    lock_spacing_um: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Regularize a multi-shank probe to a consistent, parallel, evenly-spaced array.
+
+    A multi-shank silicon probe (e.g. Neuropixels 2.0) is physically **rigid**: its
+    shanks are parallel and evenly spaced. But when each shank's tip/entry is picked
+    independently across sections, the picks are noisy - uneven spacing, one shank
+    off-axis. This fits the rigid model and pulls the picks toward it, keeping a
+    little slack so a genuinely real deviation isn't erased.
+
+    Model: one insertion direction (``mean(tip - entry)``); a row axis ``r`` =
+    the principal axis of the tips *after projecting out the insertion direction*
+    (so the ~mm-scale insertion-depth variance can't hijack it); shanks placed at
+    even positions along ``r``. Spacing is estimated from the tip-row extent
+    (``lock_spacing_um`` overrides it, e.g. 250 for NP2.0). Tips and entries share
+    ``r`` and spacing, so all shanks stay parallel.
+
+    Parameters
+    ----------
+    tips, entries
+        ``(N, 3)`` CCF (AP, ML, DV) µm; ``N >= 3``.
+    tolerance
+        In ``[0, 1]``. ``0`` snaps exactly to the rigid array; ``1`` leaves the
+        picks unchanged. The result is ``rigid + tolerance * (pick - rigid)`` - so
+        a small value (default 0.25) enforces the array while tolerating a little
+        real deviation.
+    lock_spacing_um
+        Force an exact inter-shank spacing (µm). ``None`` estimates it from the
+        picks (floating).
+
+    Returns
+    -------
+    new_tips, new_entries, info
+        The regularized coordinates plus a dict with ``spacing_um``,
+        ``old_tip_gaps_um``, ``max_shift_um`` and ``order`` (shank order along ``r``).
+    """
+    tips = np.asarray(tips, dtype=float)
+    entries = np.asarray(entries, dtype=float)
+    n = len(tips)
+    if n < 3 or entries.shape != tips.shape:
+        return tips, entries, {}
+
+    u = (tips - entries).mean(0)
+    u = u / (np.linalg.norm(u) + 1e-12)
+    ct, ce = tips.mean(0), entries.mean(0)
+    tc = tips - ct
+    tc_perp = tc - (tc @ u)[:, None] * u
+    _, _, vt = np.linalg.svd(tc_perp, full_matrices=False)
+    r = vt[0]
+    r = r / (np.linalg.norm(r) + 1e-12)
+
+    proj = tc_perp @ r
+    order = np.argsort(proj)
+    rank = np.empty(n, dtype=int)
+    rank[order] = np.arange(n)
+    extent = float(proj.max() - proj.min())
+    spacing = float(lock_spacing_um) if lock_spacing_um else (extent / (n - 1) if n > 1 else 0.0)
+
+    offsets = (rank - (n - 1) / 2.0) * spacing
+    rigid_tips = ct + offsets[:, None] * r
+    rigid_entries = ce + offsets[:, None] * r
+
+    t = float(np.clip(tolerance, 0.0, 1.0))
+    new_tips = rigid_tips + t * (tips - rigid_tips)
+    new_entries = rigid_entries + t * (entries - rigid_entries)
+
+    old_gaps = [
+        float(np.linalg.norm(tips[order[i + 1]] - tips[order[i]])) for i in range(n - 1)
+    ]
+    max_shift = float(
+        max(
+            np.linalg.norm(new_tips - tips, axis=1).max(),
+            np.linalg.norm(new_entries - entries, axis=1).max(),
+        )
+    )
+    info = {
+        "spacing_um": spacing,
+        "old_tip_gaps_um": old_gaps,
+        "max_shift_um": max_shift,
+        "order": order.tolist(),
+    }
+    return new_tips, new_entries, info
+
+
 def fit_trajectory(
     points: np.ndarray,
     *,
@@ -216,3 +305,38 @@ def fit_trajectory(
 
     entry, tip = ordered_endpoints(centroid, direction, inlier_pts)
     return entry, tip, mask
+
+
+def enforce_rigid_arrays(
+    project,
+    *,
+    tolerance: float = 0.25,
+    lock_spacing_um: float | None = None,
+) -> dict[str, dict]:
+    """Apply :func:`fit_rigid_array` to every multi-shank probe in ``project``.
+
+    Rewrites each participating shank's ``tip_ccf_um`` / ``entry_ccf_um`` in place.
+    Only shanks carrying both a tip and an entry take part; a probe with fewer than
+    three of those is left alone (the rigid model is underdetermined). Returns the
+    per-probe ``info`` dicts from :func:`fit_rigid_array`, keyed by probe label.
+
+    Call this *after* the pixel→CCF re-map, otherwise the re-map overwrites it.
+    """
+    out: dict[str, dict] = {}
+    for probe in project.probes:
+        shanks = [
+            s for s in probe.shanks
+            if s.tip_ccf_um is not None and s.entry_ccf_um is not None
+        ]
+        if len(shanks) < 3:
+            continue
+        tips = np.array([s.tip_ccf_um for s in shanks], dtype=float)
+        entries = np.array([s.entry_ccf_um for s in shanks], dtype=float)
+        new_tips, new_entries, info = fit_rigid_array(
+            tips, entries, tolerance=tolerance, lock_spacing_um=lock_spacing_um
+        )
+        for s, t, e in zip(shanks, new_tips, new_entries, strict=True):
+            s.tip_ccf_um = tuple(float(v) for v in t)
+            s.entry_ccf_um = tuple(float(v) for v in e)
+        out[probe.label] = info
+    return out

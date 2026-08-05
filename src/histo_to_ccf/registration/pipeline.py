@@ -407,12 +407,20 @@ def register_project_with_atlas(
     use_masks: bool = True,
     prealign: bool = True,
     boundary_snap: bool = True,
+    reuse_stored_anchoring: bool = False,
 ) -> Project:
     """Drive the full M3 pipeline across every section in ``project``.
 
     ``section_images`` maps section index → preprocessed section image array
     (grayscale or RGB). ``transforms_dir`` is where .tfm sidecars get written
     (relative paths stored in the project).
+
+    ``reuse_stored_anchoring`` keeps each section's already-registered atlas plane
+    (``section.registration.anchoring``) instead of rebuilding one from its
+    ``PlaneParams``. ``PlaneParams`` can only express a coronal plane plus two
+    tilts, so rebuilding discards the oblique plane DeepSlice predicted - which is
+    why a re-run could silently move sections. Leave it off when the plane's AP or
+    tilt was edited by hand and should take effect.
     """
     transforms_dir = Path(transforms_dir)
     transforms_dir.mkdir(parents=True, exist_ok=True)
@@ -430,7 +438,16 @@ def register_project_with_atlas(
                     "skipping section {} (missing image or plane)", section.index
                 )
                 continue
-            anchoring = anchoring_from_plane_params(atlas, section.plane)
+            stored = (
+                section.registration.anchoring
+                if reuse_stored_anchoring and section.registration is not None
+                else None
+            )
+            if stored is not None:
+                anchoring = Anchoring.from_iterable(stored)
+                logger.debug("section {}: re-using stored anchoring", section.index)
+            else:
+                anchoring = anchoring_from_plane_params(atlas, section.plane)
             reg, sitk_transform = register_section_image(
                 img,
                 atlas,

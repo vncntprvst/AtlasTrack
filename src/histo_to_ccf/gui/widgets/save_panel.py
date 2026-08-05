@@ -25,12 +25,37 @@ class SavePanelWidget(QWidget):
         state: WorkflowState,
         on_project_loaded: Callable[[], None] | None = None,
         parent: QWidget | None = None,
+        settings=None,
     ) -> None:
         super().__init__(parent)
         self._state = state
         # Fired after a project is loaded so the viewer can redraw (wired in app).
         self._on_project_loaded = on_project_loaded
+        # AppSettings (optional): used to reopen dialogs at the last-used folder and
+        # to maintain the "Load recent" list. None in headless/tests.
+        self._settings = settings
         self._build_ui()
+
+    def _start_dir(self) -> str:
+        """Folder the Load/Save dialogs should open in (last used, else cwd)."""
+        if self._settings is not None:
+            try:
+                return self._settings.project_start_dir()
+            except Exception:  # noqa: BLE001 - never let a bad pref block the dialog
+                return ""
+        return ""
+
+    def _remember(self, path) -> None:
+        """Record ``path`` as most-recent + persist, so the next dialog reopens here."""
+        if self._settings is None:
+            return
+        try:
+            from histo_to_ccf.config import save_app_settings
+
+            self._settings.remember_project(path)
+            save_app_settings(self._settings)
+        except Exception:  # noqa: BLE001 - persistence is best-effort
+            pass
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -69,7 +94,7 @@ class SavePanelWidget(QWidget):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Save project JSON",
-            "",
+            self._start_dir(),
             "JSON files (*.json);;All files (*)",
         )
         if path:
@@ -92,24 +117,36 @@ class SavePanelWidget(QWidget):
         from histo_to_ccf.project.io import save_project
 
         save_project(self._state.project, out_path)
+        self._remember(out_path)
         self._status.setText(f"Saved → {out_path.name}")
 
     def _load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load project JSON", "", "JSON files (*.json);;All files (*)"
+            self, "Load project JSON", self._start_dir(),
+            "JSON files (*.json);;All files (*)",
         )
         if not path:
             return
+        self.load_path(path)
+
+    def load_path(self, path: str | Path) -> bool:
+        """Load a project from an explicit path (used by menu "Load recent").
+
+        Returns True on success. Records the path in the recent list and fires the
+        ``on_project_loaded`` callback so the canvas + tabs refresh, exactly like
+        the file-dialog load.
+        """
         from histo_to_ccf.project.io import load_project
 
         try:
             project = load_project(path)
         except Exception as exc:  # noqa: BLE001
             self._status.setText(f"Load failed: {exc}")
-            return
+            return False
         self._state.project = project
         self._state.project_path = Path(path)
-        self._path_edit.setText(path)
+        self._path_edit.setText(str(path))
+        self._remember(path)
         n_reg = sum(
             1 for slide in project.slides
             for sec in slide.sections
@@ -121,3 +158,4 @@ class SavePanelWidget(QWidget):
         )
         if self._on_project_loaded is not None:
             self._on_project_loaded()
+        return True

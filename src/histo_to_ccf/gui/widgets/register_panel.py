@@ -163,6 +163,18 @@ class RegisterPanelWidget(QWidget):
             "force it to re-register while this is on."
         )
         params_layout.addWidget(self._preserve_manual)
+
+        self._refine_tilt = QCheckBox("Refine plane tilt per section")
+        self._refine_tilt.setChecked(False)
+        self._refine_tilt.setToolTip(
+            "Before fitting each section, search a small tilt of the atlas plane "
+            "(left/right and dorsal/ventral) that lowers the residual - fixes the "
+            "case where a paramedian structure sits on tissue on one side but falls "
+            "into a gap on the other (a slightly wrong DeepSlice tilt). Conservative: "
+            "only a clear improvement is kept, so most sections are unchanged. Slower "
+            "(a few extra fits per section)."
+        )
+        params_layout.addWidget(self._refine_tilt)
         self._on_elastix_toggled(self._use_elastix.isChecked())
 
         method_lbl = QLabel(
@@ -349,6 +361,7 @@ class RegisterPanelWidget(QWidget):
         self._use_mask.setChecked(settings.use_tissue_mask)
         self._prealign.setChecked(settings.prealign_similarity)
         self._boundary_snap.setChecked(settings.boundary_snap)
+        self._refine_tilt.setChecked(getattr(settings, "refine_tilt", False))
         self._on_elastix_toggled(self._use_elastix.isChecked())
 
     def collect_settings(self, settings) -> None:
@@ -360,6 +373,7 @@ class RegisterPanelWidget(QWidget):
         settings.use_tissue_mask = self._use_mask.isChecked()
         settings.prealign_similarity = self._prealign.isChecked()
         settings.boundary_snap = self._boundary_snap.isChecked()
+        settings.refine_tilt = self._refine_tilt.isChecked()
 
     # ------------------------------------------------------------------
     # Registration
@@ -517,6 +531,7 @@ class RegisterPanelWidget(QWidget):
             prealign=self._prealign.isChecked(),
             boundary_snap=self._boundary_snap.isChecked(),
             preserve_manual=self._preserve_manual.isChecked(),
+            refine_tilt=self._refine_tilt.isChecked(),
         )
         worker.yielded.connect(self._on_progress)
         worker.returned.connect(self._on_registration_done)
@@ -672,6 +687,10 @@ class RegisterPanelWidget(QWidget):
                 layer = self._viewer.add_labels(
                     edge_labels, name=name, opacity=0.7, translate=(y0, x0)
                 )
+            # Stash the full region-id image (the displayed layer is only edges) so a
+            # hover callback can name the region under the cursor.
+            layer.metadata["region_ids"] = labels
+            layer.metadata["translate_yx"] = (int(y0), int(x0))
             # Re-apply any stored manual correction so it persists across reloads.
             if section.manual_landmarks is not None:
                 layer.affine = Affine(affine_matrix=np.eye(3))  # warp is in the data
@@ -685,13 +704,78 @@ class RegisterPanelWidget(QWidget):
         if count:
             self._viewer.dims.ndisplay = 2
             self._populate_adjust_combo()
-            self._status.setText(f"Overlaid atlas boundaries on {count} section(s).")
+            self._install_region_hover(atlas)
+            self._status.setText(
+                f"Overlaid atlas boundaries on {count} section(s). "
+                "Hover a section to name the region under the cursor."
+            )
         else:
             _error_dialog(
                 self, "Overlay failed",
                 f"{len(registered)} section(s) are registered but the atlas could not "
                 f"be warped onto them.\n\n{first_error}",
             )
+
+    def _install_region_hover(self, atlas) -> None:
+        """Show the atlas region under the cursor in the status bar (once installed).
+
+        The overlay layers only draw region *edges*, so the region id at the cursor
+        is read from each layer's stashed ``region_ids`` image (see `_render_overlay`)
+        and mapped to an acronym + name.
+        """
+        self._overlay_atlas = atlas
+        if getattr(self, "_hover_installed", False):
+            return
+        self._hover_installed = True
+
+        # Use the canvas text overlay (not viewer.status, which napari overwrites
+        # with the layer name + cursor coords on every move).
+        try:
+            ov = self._viewer.text_overlay
+            ov.color = "yellow"
+            ov.font_size = 14
+            ov.position = "top_left"
+        except Exception:  # noqa: BLE001 - older napari may lack text_overlay
+            ov = None
+
+        def _on_move(_viewer, event) -> None:
+            try:
+                pos = event.position
+                name = self._region_name_at(float(pos[-2]), float(pos[-1]))
+            except Exception:  # noqa: BLE001 - a hover must never raise
+                return
+            if ov is not None:
+                ov.text = name or ""
+                ov.visible = bool(name)
+            elif name:
+                self._viewer.status = name
+
+        self._viewer.mouse_move_callbacks.append(_on_move)
+
+    def _region_name_at(self, world_y: float, world_x: float) -> str | None:
+        """Acronym + name of the atlas region under a world (y, x), or None."""
+        atlas = getattr(self, "_overlay_atlas", None)
+        if atlas is None:
+            return None
+        for layer in self._viewer.layers:
+            if not layer.name.startswith("Atlas overlay "):
+                continue
+            ids = layer.metadata.get("region_ids")
+            tr = layer.metadata.get("translate_yx")
+            if ids is None or tr is None:
+                continue
+            ly, lx = int(round(world_y - tr[0])), int(round(world_x - tr[1]))
+            h, w = ids.shape
+            if 0 <= ly < h and 0 <= lx < w:
+                rid = int(ids[ly, lx])
+                if rid <= 0:
+                    continue
+                try:
+                    s = atlas.structures[rid]
+                    return f"{s['acronym']} - {s['name']}"
+                except Exception:  # noqa: BLE001 - unknown id -> keep scanning
+                    continue
+        return None
 
     # ------------------------------------------------------------------
     # Manual atlas adjustment (drag the overlay in the viewer)
@@ -794,10 +878,8 @@ class RegisterPanelWidget(QWidget):
         if layer is not None:
             layer.mode = "pan_zoom"
             layer.affine = Affine(affine_matrix=np.eye(3))
-        # Drop any landmark points layer.
-        lm_name = f"Atlas landmarks {section.index}"
-        if lm_name in self._viewer.layers:
-            self._viewer.layers.remove(lm_name)
+        # Drop any landmark points layer + leave edit mode (drag pans again).
+        self._exit_landmark_edit()
         if self._adjust_btn.isChecked():
             self._adjust_btn.blockSignals(True)
             self._adjust_btn.setChecked(False)
@@ -927,9 +1009,11 @@ class RegisterPanelWidget(QWidget):
         # Subsample to keep the per-drag forward-TPS cheap on large sections.
         from histo_to_ccf.registration.transforms import annotation_boundaries
 
+        # Keep most of the boundary (dense) so the warped preview reads as lines,
+        # not dots; the forward-TPS is cheap even at ~20k points.
         edge_rc = np.argwhere(annotation_boundaries(labels))
-        if len(edge_rc) > 4000:
-            edge_rc = edge_rc[:: int(np.ceil(len(edge_rc) / 4000))]
+        if len(edge_rc) > 20000:
+            edge_rc = edge_rc[:: int(np.ceil(len(edge_rc) / 20000))]
         self._lm_base_edge_rc = edge_rc
         self._lm_base_shape = (int(labels.shape[0]), int(labels.shape[1]))
         self._lm_origin_xy = (int(section.bbox_px[0]), int(section.bbox_px[1]))
@@ -997,25 +1081,59 @@ class RegisterPanelWidget(QWidget):
         prev = self._lm_prev_data
         sy = np.array(layer.features.get("sy", []), dtype=float)  # copy (Series is read-only)
         sx = np.array(layer.features.get("sx", []), dtype=float)
+        # Keep the source (atlas-anchor) feature aligned to the point count so the
+        # relocate below never silently no-ops on a momentary mismatch.
+        if sy.shape[0] != len(data):
+            sy = np.resize(sy, len(data))
+            sx = np.resize(sx, len(data))
 
         if prev is None or len(data) > len(prev):
             # Added point(s) (appended at the end): anchor each where it was dropped.
             n_new = len(data) if prev is None else len(data) - len(prev)
-            if sy.shape[0] != len(data):  # features not yet grown to match
-                sy = np.resize(sy, len(data))
-                sx = np.resize(sx, len(data))
             sy[-n_new:] = data[-n_new:, 0]
             sx[-n_new:] = data[-n_new:, 1]
             layer.features = {"sy": sy, "sx": sx}
-        elif len(data) == len(prev):
-            # A move. Relocate (Ctrl / 'Move points') shifts the anchor too, so the
-            # displacement is unchanged; a plain drag moves only the target = warp.
-            if (self._lm_ctrl_drag or self._lm_move_btn.isChecked()) and sy.shape[0] == len(data):
-                delta = data - prev
-                layer.features = {"sy": sy + delta[:, 0], "sx": sx + delta[:, 1]}
+        elif len(data) == len(prev) and (self._lm_ctrl_drag or self._lm_move_btn.isChecked()):
+            # Relocate (Ctrl / 'Move points'): shift the atlas anchor WITH the point so
+            # the displacement (target - source) is unchanged - repositions the handle
+            # without warping. A plain drag (below) moves only the target = warp.
+            delta = data - prev
+            layer.features = {"sy": sy + delta[:, 0], "sx": sx + delta[:, 1]}
         # deletes keep features aligned automatically (napari drops the row).
         self._lm_prev_data = data.copy()
+        # ALWAYS re-render so the shown outline matches the current anchors/targets.
+        # (A relocate keeps every displacement, so with undragged handles this changes
+        # nothing; skipping it here desynced the display and made the *next* drag jump.)
         self._preview_landmark_warp()
+
+    def _exit_landmark_edit(self) -> None:
+        """Leave landmark-edit mode: drop the draggable handles + return to pan/zoom.
+
+        Called by "Apply landmark warp" / "Reset adjustment" so the user isn't stuck
+        with the dots showing and every drag drawing a selection rectangle. The final
+        (warped) atlas outline stays; only the editable Points layer is removed.
+        """
+        for layer in list(self._viewer.layers):
+            if layer.name.startswith("Atlas landmarks"):
+                self._viewer.layers.remove(layer)
+        self._landmark_idx = None
+        self._lm_base_edge_rc = None
+        self._lm_prev_data = None
+        for btn in (self._lm_move_btn, self._lm_add_btn):
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(False)
+        # Put every layer back in pan/zoom so a left-drag pans the canvas again,
+        # and make the slide the active layer.
+        for layer in self._viewer.layers:
+            try:
+                layer.mode = "pan_zoom"
+            except Exception:  # noqa: BLE001 - image/labels layers accept it; be safe
+                pass
+        for layer in self._viewer.layers:
+            if layer.name.startswith("Slide"):
+                self._viewer.layers.selection = {layer}
+                break
 
     def _preview_landmark_warp(self) -> None:
         """Live, cheap preview: re-warp just the atlas contour as landmarks move.
@@ -1048,7 +1166,7 @@ class RegisterPanelWidget(QWidget):
         from histo_to_ccf.registration.landmarks_warp import warp_contour_image
 
         img = warp_contour_image(
-            self._lm_base_edge_rc, source, target, self._lm_base_shape
+            self._lm_base_edge_rc, source, target, self._lm_base_shape, thickness=2
         )
         self._viewer.layers[name].data = img
 
@@ -1079,6 +1197,11 @@ class RegisterPanelWidget(QWidget):
         section.manual_affine = None  # landmarks take precedence
         self._rerender_section_overlay(section)
         self._remap_and_save(section)
+        # Leave edit mode so the dots clear and dragging pans again.
+        self._exit_landmark_edit()
+        self._status.setText(
+            self._status.text() + "  ·  editing done (drag pans; 'Place landmarks' to re-edit)."
+        )
 
     def _remap_and_save(self, section) -> None:
         """Re-project probe coords through the manual-corrected transforms, save."""

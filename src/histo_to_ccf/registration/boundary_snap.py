@@ -148,6 +148,37 @@ def _min_jacobian(dx: np.ndarray, dy: np.ndarray) -> float:
     return float(jac.min())
 
 
+def fit_foldproof_tps(
+    src: np.ndarray,
+    dst: np.ndarray,
+    shape: tuple[int, int],
+    *,
+    smoothing_escalation: tuple[float, ...] = _SMOOTHING_ESCALATION,
+    jac_eps: float = _JAC_EPS,
+):
+    """Fit a fold-free ``sitk.DisplacementFieldTransform`` from ``src -> dst`` pairs.
+
+    Escalates the TPS smoothing until the forward field's minimum Jacobian
+    determinant clears ``jac_eps`` (positive => no fold); returns ``None`` if every
+    level still folds or there are too few pairs. Shared by :func:`boundary_snap`
+    and the internal-feature snap so the fold-proof guarantee lives in one place.
+    """
+    import SimpleITK as sitk
+
+    src = np.asarray(src, dtype=float).reshape(-1, 2)
+    dst = np.asarray(dst, dtype=float).reshape(-1, 2)
+    if len(src) < 4 or len(src) != len(dst):
+        return None
+    for smoothing in smoothing_escalation:
+        dx, dy = _forward_field(src, dst, shape, smoothing)
+        if _min_jacobian(dx, dy) > jac_eps:
+            field = np.stack([dx, dy], axis=-1).astype(np.float64)
+            disp = sitk.Cast(sitk.GetImageFromArray(field, isVector=True),
+                             sitk.sitkVectorFloat64)
+            return sitk.DisplacementFieldTransform(disp)
+    return None
+
+
 def boundary_snap_transform(
     extent: np.ndarray,
     tissue: np.ndarray,
@@ -161,8 +192,6 @@ def boundary_snap_transform(
     correspondences) or when every smoothing level still folds - i.e. the caller
     keeps the un-snapped registration rather than a creased one.
     """
-    import SimpleITK as sitk
-
     if extent.shape != tissue.shape:
         return None
     if int(extent.sum()) < 16 or int(tissue.sum()) < 16:
@@ -170,16 +199,9 @@ def boundary_snap_transform(
     src, dst = boundary_correspondences(extent, tissue, drop_frac=drop_frac)
     if len(src) < 8:
         return None
-
-    shape = extent.shape
-    for smoothing in smoothing_escalation:
-        dx, dy = _forward_field(src, dst, shape, smoothing)
-        if _min_jacobian(dx, dy) > _JAC_EPS:
-            field = np.stack([dx, dy], axis=-1).astype(np.float64)
-            disp = sitk.Cast(sitk.GetImageFromArray(field, isVector=True),
-                             sitk.sitkVectorFloat64)
-            return sitk.DisplacementFieldTransform(disp)
-    return None
+    return fit_foldproof_tps(
+        src, dst, extent.shape, smoothing_escalation=smoothing_escalation
+    )
 
 
 def compose_snap(transform, snap):

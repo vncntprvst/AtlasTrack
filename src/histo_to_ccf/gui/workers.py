@@ -187,6 +187,7 @@ def register_worker_progressive(
     prealign: bool = True,
     boundary_snap: bool = True,
     preserve_manual: bool = True,
+    refine_tilt: bool = False,
 ):
     """Registration pipeline that yields per-section progress dicts.
 
@@ -265,6 +266,27 @@ def register_worker_progressive(
         # (see anchoring_for_section); DeepSlice, on by default, otherwise silently
         # overrode every hand-set AP.
         anchoring = anchoring_for_section(section, anchorings, atlas)
+
+        # Optionally nudge the plane's tilt to better fit this section (fixes the
+        # L/R-asymmetry where a paramedian nucleus sits on tissue one side but in a
+        # gap the other). Conservative: only accepts a meaningful residual gain.
+        if refine_tilt:
+            from histo_to_ccf.registration.tilt_refine import refine_tilt as _refine_tilt
+
+            anchoring, tinfo = _refine_tilt(
+                img, atlas, anchoring, reference_volume=ref_vol,
+                register_kwargs=dict(
+                    bspline_grid=bspline_grid, max_iterations=max_iterations,
+                    engine=engine, bending_weight=bending_weight,
+                    use_masks=use_masks, prealign=prealign,
+                ),
+            )
+            if tinfo.get("refined"):
+                logger.info(
+                    "Section {} tilt refined (dux={}, dvx={}, resid {:.3f}->{:.3f})",
+                    section.index, tinfo["d_ux"], tinfo["d_vx"],
+                    tinfo["baseline_residual"], tinfo["residual"],
+                )
 
         # One section failing (e.g. a plane with too little atlas overlap) must
         # not abort the whole batch - log it and carry on.

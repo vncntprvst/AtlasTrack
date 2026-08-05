@@ -268,3 +268,76 @@ def estimate_min_area(image: np.ndarray) -> int:
     floor = max(1_000, int(0.0005 * image_area))
     ceiling = int(0.05 * image_area)
     return max(floor, min(estimate, ceiling))
+
+
+def group_fragmented_sections(
+    sections: list[DetectedSection],
+    *,
+    x_overlap_frac: float = 0.5,
+    max_passes: int = 4,
+) -> list[DetectedSection]:
+    """Re-join pieces of one section that got detected as separate components.
+
+    A coronal brainstem section often arrives on the slide in pieces - cerebellum
+    detached from brainstem, or a slab broken along the 4th ventricle. Connected-
+    component detection then returns each piece separately, and anything that
+    keeps only the largest component silently discards the rest (a probe track in
+    the dropped brainstem piece is simply lost).
+
+    The pieces of one section sit **stacked**: they share the section's horizontal
+    span. Debris carried over from a neighbouring section sits *beside* it, at the
+    left or right edge of the frame. So a piece is absorbed when at least
+    ``x_overlap_frac`` of its own width lies within a larger piece's horizontal
+    span, and left alone otherwise.
+
+    Returns one :class:`DetectedSection` per group, with the union bounding box
+    and mask; input order is not preserved (largest first). Merging is repeated
+    up to ``max_passes`` times so a chain of pieces collapses into one group.
+    """
+    if len(sections) < 2:
+        return list(sections)
+
+    def _x_overlap(a: DetectedSection, b: DetectedSection) -> float:
+        """Fraction of the narrower box's width that lies inside the other's span."""
+        lo = max(a.bbox_px[0], b.bbox_px[0])
+        hi = min(a.bbox_px[2], b.bbox_px[2])
+        overlap = max(0, hi - lo)
+        narrower = min(a.bbox_px[2] - a.bbox_px[0], b.bbox_px[2] - b.bbox_px[0])
+        return overlap / narrower if narrower > 0 else 0.0
+
+    def _merge(a: DetectedSection, b: DetectedSection) -> DetectedSection:
+        x0 = min(a.bbox_px[0], b.bbox_px[0])
+        y0 = min(a.bbox_px[1], b.bbox_px[1])
+        x1 = max(a.bbox_px[2], b.bbox_px[2])
+        y1 = max(a.bbox_px[3], b.bbox_px[3])
+        mask = a.mask | b.mask
+        area = int(a.area_px + b.area_px)
+        # Area-weighted centroid of the combined piece.
+        cx = (a.centroid_px[0] * a.area_px + b.centroid_px[0] * b.area_px) / area
+        cy = (a.centroid_px[1] * a.area_px + b.centroid_px[1] * b.area_px) / area
+        width, height = x1 - x0, y1 - y0
+        ar = max(width / height, height / width) if width and height else 1.0
+        return DetectedSection(
+            bbox_px=(int(x0), int(y0), int(x1), int(y1)),
+            mask=mask,
+            area_px=area,
+            centroid_px=(float(cx), float(cy)),
+            aspect_ratio=float(ar),
+        )
+
+    groups = sorted(sections, key=lambda s: -s.area_px)
+    for _ in range(max_passes):
+        merged_any = False
+        out: list[DetectedSection] = []
+        for piece in groups:
+            for i, group in enumerate(out):
+                if _x_overlap(group, piece) >= x_overlap_frac:
+                    out[i] = _merge(group, piece)
+                    merged_any = True
+                    break
+            else:
+                out.append(piece)
+        groups = sorted(out, key=lambda s: -s.area_px)
+        if not merged_any:
+            break
+    return groups

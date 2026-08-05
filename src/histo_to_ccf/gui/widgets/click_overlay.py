@@ -29,6 +29,7 @@ from qtpy.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
     QRadioButton,
@@ -138,6 +139,11 @@ class ClickOverlayWidget(QWidget):
         probe_row = QHBoxLayout()
         probe_row.addWidget(QLabel("Probe:"))
         self._probe_combo = QComboBox()
+        self._probe_combo.setToolTip(
+            "Selects which probe you're picking for - and highlights that probe's "
+            "existing tip/entry markers (big, white halo) so you can find them; the "
+            "other probes' markers shrink."
+        )
         self._probe_combo.currentIndexChanged.connect(self._on_probe_changed)
         probe_row.addWidget(self._probe_combo, 1)
         layout.addLayout(probe_row)
@@ -176,6 +182,13 @@ class ClickOverlayWidget(QWidget):
         self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels(["Probe", "Shank", "Type", "Coords (px)"])
         self._table.setMaximumHeight(200)
+        # Narrow columns by default: each fits its content (+ a stretchable last
+        # column for the coords), instead of four equal wide columns.
+        header = self._table.horizontalHeader()
+        for col in range(3):
+            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        self._table.verticalHeader().setDefaultSectionSize(20)
         layout.addWidget(self._table)
         layout.addStretch()
 
@@ -234,6 +247,9 @@ class ClickOverlayWidget(QWidget):
     def _on_probe_changed(self, *_args) -> None:
         self._refresh_shank_combo()
         self._apply_current_identity()
+        # Highlight the newly-selected probe's tip/entry markers so they're easy to
+        # find (big + white halo); other probes shrink.
+        self._highlight_selected_probe()
 
     # ------------------------------------------------------------------
     # Layer management
@@ -381,6 +397,7 @@ class ClickOverlayWidget(QWidget):
             self._set_points_mode("select")
         else:
             self._activate_pick_mode()
+        self._highlight_selected_probe()
 
     # ------------------------------------------------------------------
     # Point event handlers
@@ -474,7 +491,8 @@ class ClickOverlayWidget(QWidget):
         self._refresh_table()
 
     def _recolor(self, layer) -> None:
-        """Colour each point by its shank's global ordinal (tip & entry match)."""
+        """Colour each point by its shank's global ordinal (tip & entry match), and
+        highlight the currently-selected probe's points (bigger + white outline)."""
         n = len(layer.data)
         if n == 0:
             return
@@ -485,11 +503,25 @@ class ClickOverlayWidget(QWidget):
             _SHANK_COLORS[ordinals.get((int(p_arr[i]), int(s_arr[i])), 0) % len(_SHANK_COLORS)]
             for i in range(n)
         ]
+        p_sel = self._probe_combo.currentIndex()
+        selected = p_arr.astype(int) == int(p_sel)
+        # Selected probe: large with a thick white halo; others: small + thin.
+        borders = ["#ffffff" if selected[i] else colors[i] for i in range(n)]
+        sizes = np.where(selected, 28.0, 8.0)
+        widths = np.where(selected, 0.55, 0.06)  # relative border width
         try:
             layer.face_color = colors
-            layer.border_color = colors
+            layer.border_color = borders
+            layer.size = sizes
+            layer.border_width = widths
         except Exception:  # noqa: BLE001
             pass
+
+    def _highlight_selected_probe(self) -> None:
+        """Re-apply the per-probe styling so the current probe's markers pop."""
+        for layer in (self._tip_layer, self._entry_layer):
+            if layer is not None and len(layer.data):
+                self._recolor(layer)
 
     def _on_trajectory_changed(self, event=None) -> None:
         """When a trajectory line is drawn, derive the surface entry point."""
@@ -583,15 +615,17 @@ class ClickOverlayWidget(QWidget):
 
     def _refresh_table(self) -> None:
         rows = []
-        for p_idx, probe in enumerate(self._state.project.probes):
+        for probe in self._state.project.probes:
             for shank in probe.shanks:
                 if shank.tip_px is not None:
-                    rows.append((p_idx, shank.index, "tip", shank.tip_px))
+                    rows.append((probe.label, shank.index, "tip", shank.tip_px))
                 if shank.entry_px is not None:
-                    rows.append((p_idx, shank.index, "entry", shank.entry_px))
+                    rows.append((probe.label, shank.index, "entry", shank.entry_px))
         self._table.setRowCount(len(rows))
-        for i, (p, s, t, pt) in enumerate(rows):
-            self._table.setItem(i, 0, QTableWidgetItem(str(p)))
+        for i, (label, s, t, pt) in enumerate(rows):
+            # Show the probe label (updates when a probe is renamed, since this is
+            # rebuilt on the on_probes_changed refresh), not a bare index.
+            self._table.setItem(i, 0, QTableWidgetItem(str(label)))
             self._table.setItem(i, 1, QTableWidgetItem(str(s)))
             self._table.setItem(i, 2, QTableWidgetItem(t))
             self._table.setItem(i, 3, QTableWidgetItem(f"{pt.x_px:.1f}, {pt.y_px:.1f}"))

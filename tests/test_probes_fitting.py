@@ -5,12 +5,69 @@ import numpy as np
 import pytest
 
 from histo_to_ccf.probes.fitting import (
+    fit_rigid_array,
     fit_trajectory,
     line_point_distances,
     ordered_endpoints,
     pca_line_fit,
     ransac_line_fit,
 )
+
+
+# ---------------------------------------------------------------------------
+# fit_rigid_array
+# ---------------------------------------------------------------------------
+
+def _noisy_array():
+    """A 4-shank array (250 µm along ML, inserted along DV) with uneven, noisy picks."""
+    # Ideal even tips at ML = 0,250,500,750; DV=6000; AP=11000. Entries 5000 shallower.
+    ranks = np.array([0, 1, 2, 3], dtype=float)
+    ml = np.array([0.0, 380.0, 470.0, 750.0])   # uneven spacing (picking noise)
+    tips = np.stack([np.full(4, 11000.0), ml, np.full(4, 6000.0)], axis=1)
+    tips[1, 2] += 120.0                          # one shank off-axis in DV
+    entries = tips.copy()
+    entries[:, 2] -= 5000.0                       # 5 mm shallower (toward surface)
+    entries[2, 0] += 90.0                         # noise on an entry
+    return tips, entries, ranks
+
+
+def test_fit_rigid_array_strict_even_spacing() -> None:
+    tips, entries, _ = _noisy_array()
+    nt, ne, info = fit_rigid_array(tips, entries, tolerance=0.0)
+    # Consecutive tip gaps become equal (strict).
+    gaps = np.linalg.norm(np.diff(nt, axis=0), axis=1)
+    assert np.allclose(gaps, gaps[0], atol=1e-6)
+    # Shanks are parallel: every tip→entry vector is identical.
+    dirs = nt - ne
+    assert np.allclose(dirs, dirs[0], atol=1e-6)
+    assert info["spacing_um"] > 0
+
+
+def test_fit_rigid_array_tolerance_blends() -> None:
+    tips, entries, _ = _noisy_array()
+    strict_t, _, _ = fit_rigid_array(tips, entries, tolerance=0.0)
+    mid_t, _, _ = fit_rigid_array(tips, entries, tolerance=0.5)
+    # tolerance=1 leaves the picks untouched.
+    keep_t, keep_e, _ = fit_rigid_array(tips, entries, tolerance=1.0)
+    assert np.allclose(keep_t, tips) and np.allclose(keep_e, entries)
+    # tolerance=0.5 sits between strict and the original picks.
+    assert np.all(np.abs(mid_t - tips) <= np.abs(strict_t - tips) + 1e-9)
+
+
+def test_fit_rigid_array_lock_spacing() -> None:
+    tips, entries, _ = _noisy_array()
+    nt, _, info = fit_rigid_array(tips, entries, tolerance=0.0, lock_spacing_um=250.0)
+    gaps = np.linalg.norm(np.diff(nt, axis=0), axis=1)
+    assert np.allclose(gaps, 250.0, atol=1e-6)
+    assert info["spacing_um"] == 250.0
+
+
+def test_fit_rigid_array_too_few_shanks_noop() -> None:
+    tips = np.array([[0.0, 0, 0], [0, 250, 0]])
+    entries = tips - np.array([0, 0, 5000.0])
+    nt, ne, info = fit_rigid_array(tips, entries)
+    assert np.allclose(nt, tips) and np.allclose(ne, entries)
+    assert info == {}
 
 
 # ---------------------------------------------------------------------------

@@ -210,14 +210,20 @@ def warp_contour_image(
     source: np.ndarray,
     target: np.ndarray,
     shape: tuple[int, int],
+    *,
+    thickness: int = 0,
 ) -> np.ndarray:
     """Forward-TPS boundary pixels and rasterise them into a binary edge image.
 
     ``edge_rc`` is an ``(N, 2)`` array of ``(row, col)`` boundary pixels of the
     *un-warped* atlas overlay. They are pushed source -> target and splatted into
     a fresh ``shape`` image (1 on the warped contour, 0 elsewhere). This is the
-    cheap, live counterpart of :func:`warp_label_image` (a few hundred points, no
-    per-pixel pull-back) used for the real-time landmark-drag preview.
+    cheap, live counterpart of :func:`warp_label_image` used for the real-time
+    landmark-drag preview.
+
+    ``thickness`` grows each splat into a ``(2*thickness+1)²`` block so the warped
+    (and inevitably spread-out) points read as connected **lines** rather than
+    isolated dots. ``0`` keeps the original single-pixel behaviour.
     """
     edge_rc = np.asarray(edge_rc)
     h, w = int(shape[0]), int(shape[1])
@@ -229,7 +235,16 @@ def warp_contour_image(
     cx = np.round(warped[:, 0]).astype(int)
     cy = np.round(warped[:, 1]).astype(int)
     ok = (cx >= 0) & (cx < w) & (cy >= 0) & (cy < h)
-    img[cy[ok], cx[ok]] = 1
+    cx, cy = cx[ok], cy[ok]
+    if thickness <= 0:
+        img[cy, cx] = 1
+        return img
+    for dy in range(-thickness, thickness + 1):
+        yy = cy + dy
+        for dx in range(-thickness, thickness + 1):
+            xx = cx + dx
+            m = (yy >= 0) & (yy < h) & (xx >= 0) & (xx < w)
+            img[yy[m], xx[m]] = 1
     return img
 
 

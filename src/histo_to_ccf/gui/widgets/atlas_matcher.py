@@ -649,7 +649,7 @@ class AtlasMatcherDialog(QDialog):
         if close_pairs:
             lines.append(f"\n• Too close together: sections {_fmt(close_pairs)}")
         lines.append(
-            "\n\nFix these before registering — set/confirm the spacing and use "
+            "\n\nFix these before registering - set/confirm the spacing and use "
             "Link + 'Assign AP to all' to even them out, or correct individual APs "
             "here."
         )

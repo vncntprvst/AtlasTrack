@@ -35,9 +35,9 @@ histo2ccf gui
 A napari viewer opens with the **Registration** panel (5 tabs) docked on the
 **left** - **Histology / Atlas / Probes / Register / Ephys** - and a permanent
 **3D & Export** panel docked on the **right** (3D view + Plotly/HERBS/CSV export,
-always available). The menu bar has two menus: **Project** (Save / Load / Close —
+always available). The menu bar has two menus: **Project** (Save / Load / Close -
 *Close* clears the current project to start fresh without restarting) and
-**Registration** (Parameters — the registration settings, kept out of the panel).
+**Registration** (Parameters - the registration settings, kept out of the panel).
 
 ---
 
@@ -115,7 +115,7 @@ always available). The menu bar has two menus: **Project** (Save / Load / Close 
    **Clear selected** to remove just those. **Clear all points** wipes everything.
 4. The table at the bottom shows the stored coordinates for both tips **and** entries.
 
-**Tip — moving around the canvas:** the mouse wheel zooms; hold **Ctrl** and scroll
+**Tip - moving around the canvas:** the mouse wheel zooms; hold **Ctrl** and scroll
 to pan **left/right**, or **Shift** and scroll to pan **up/down**.
 
 ---

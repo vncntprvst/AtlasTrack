@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -94,6 +96,29 @@ class VizExportPanelWidget(QWidget):
         self._update_btn.clicked.connect(self._update_coordinates)
         layout.addWidget(self._update_btn)
 
+        # Enforce a rigid multi-shank array when re-mapping (physically, a
+        # Neuropixels shank set is parallel + evenly spaced; independent per-section
+        # picks are noisy). Applied on every "Update coordinates" / "View 3D" so it
+        # survives re-mapping. Tolerance leaves a little slack for real deviations.
+        rigid_row = QHBoxLayout()
+        self._rigid_check = QCheckBox("Enforce rigid array")
+        self._rigid_check.setToolTip(
+            "Regularize each multi-shank probe (>=3 shanks) to a parallel, evenly-"
+            "spaced array after mapping tip/entry from pixels. Spacing is estimated "
+            "from your picks. The physical probe is rigid, so this removes picking "
+            "noise (uneven spacing, an off-axis shank) while the tolerance keeps a "
+            "little slack. Re-applied on every Update coordinates / View 3D."
+        )
+        rigid_row.addWidget(self._rigid_check)
+        rigid_row.addWidget(QLabel("tolerance"))
+        self._rigid_tol = QDoubleSpinBox()
+        self._rigid_tol.setRange(0.0, 1.0)
+        self._rigid_tol.setSingleStep(0.05)
+        self._rigid_tol.setValue(0.25)
+        self._rigid_tol.setToolTip("0 = strict even array; 1 = keep picks unchanged.")
+        rigid_row.addWidget(self._rigid_tol)
+        layout.addLayout(rigid_row)
+
         viz_box = QGroupBox("3D Visualization")
         viz_layout = QVBoxLayout(viz_box)
 
@@ -172,8 +197,18 @@ class VizExportPanelWidget(QWidget):
         layout.addStretch()
 
     def apply_settings(self, settings) -> None:
-        """Store AppSettings (for the atlas storage folder used by lazy load)."""
+        """Store AppSettings (atlas folder for lazy load) + rigid-array prefs."""
         self._settings = settings
+        try:
+            self._rigid_check.setChecked(bool(getattr(settings, "rigid_array_enforce", False)))
+            self._rigid_tol.setValue(float(getattr(settings, "rigid_array_tolerance", 0.25)))
+        except Exception:  # noqa: BLE001 - widgets always exist post-build; be safe
+            pass
+
+    def collect_settings(self, settings) -> None:
+        """Write the rigid-array UI state back into ``settings`` for persistence."""
+        settings.rigid_array_enforce = bool(self._rigid_check.isChecked())
+        settings.rigid_array_tolerance = float(self._rigid_tol.value())
 
     # ------------------------------------------------------------------
 
@@ -302,7 +337,21 @@ class VizExportPanelWidget(QWidget):
             for shank in probe.shanks:
                 _apply_to_shank_registered(shank, self._state.project, transforms)
                 n += 1
+        if self._rigid_check.isChecked():
+            self._enforce_rigid_arrays()
         return n
+
+    def _enforce_rigid_arrays(self) -> None:
+        """Regularize every multi-shank probe to a parallel, evenly-spaced array.
+
+        Applied after re-mapping so it isn't overwritten by the pixel→CCF pass. Only
+        shanks with both tip and entry CCF participate; probes with <3 are skipped.
+        """
+        from histo_to_ccf.probes.fitting import enforce_rigid_arrays
+
+        enforce_rigid_arrays(
+            self._state.project, tolerance=float(self._rigid_tol.value())
+        )
 
     def _update_coordinates(self) -> None:
         self._ensure_atlas(self._do_update_coordinates)

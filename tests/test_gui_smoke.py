@@ -151,6 +151,178 @@ def test_probe_picker_rename(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_register_panel_exit_landmark_edit(qtbot) -> None:
+    """_exit_landmark_edit removes the handle layer, clears state, unchecks toggles."""
+    import napari
+    import numpy as np
+
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        panel = RegisterPanelWidget(WorkflowState(), viewer)
+        qtbot.addWidget(panel)
+        viewer.add_image(np.zeros((10, 10)), name="Slide 0")
+        viewer.add_points(np.array([[1.0, 1.0]]), name="Atlas landmarks 5")
+        panel._landmark_idx = 5
+        panel._lm_move_btn.setChecked(True)
+
+        panel._exit_landmark_edit()
+        assert "Atlas landmarks 5" not in viewer.layers  # handles removed
+        assert panel._landmark_idx is None
+        assert panel._lm_move_btn.isChecked() is False
+        # every layer is back in pan/zoom so a drag pans (not rubber-band select).
+        assert all(layer.mode == "pan_zoom" for layer in viewer.layers
+                   if hasattr(layer, "mode"))
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_click_overlay_probe_highlight(qtbot) -> None:
+    """Selecting a probe enlarges its markers; the other probe's shrink."""
+    import napari
+    import numpy as np
+
+    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+    from histo_to_ccf.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        for lbl in ("A", "B"):
+            state.project.probes.append(ProbeSpec(
+                label=lbl, type=ProbeType(name="np", n_shanks=1),
+                shanks=[Shank(index=0, tip_px=Point2D(x_px=10.0, y_px=20.0))],
+            ))
+        widget = ClickOverlayWidget(state, viewer)
+        qtbot.addWidget(widget)
+        widget.refresh_after_load()
+
+        widget._probe_combo.setCurrentIndex(0)  # probe A selected
+        sizes = np.asarray(widget._tip_layer.size, dtype=float)
+        p = np.asarray(widget._tip_layer.features["p"], dtype=int)
+        assert sizes[p == 0].max() > sizes[p == 1].max()  # A big, B small
+        widget._probe_combo.setCurrentIndex(1)  # switch to B
+        sizes = np.asarray(widget._tip_layer.size, dtype=float)
+        assert sizes[p == 1].max() > sizes[p == 0].max()  # now B is big
+
+        # The table's Probe column shows the label, not a numeric index.
+        widget._refresh_table()
+        labels = {widget._table.item(r, 0).text() for r in range(widget._table.rowCount())}
+        assert labels == {"A", "B"}
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_register_panel_region_hover(qtbot) -> None:
+    """_region_name_at reads the stashed region-id image and names the structure."""
+    import napari
+    import numpy as np
+
+    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+    from histo_to_ccf.gui.workflow import WorkflowState
+
+    class _FakeAtlas:
+        structures = {5: {"acronym": "IC", "name": "Inferior colliculus"}}
+
+    viewer = napari.Viewer(show=False)
+    try:
+        panel = RegisterPanelWidget(WorkflowState(), viewer)
+        qtbot.addWidget(panel)
+        ids = np.zeros((20, 20), dtype=np.int32)
+        ids[5:15, 5:15] = 5  # a block of "IC"
+        layer = viewer.add_labels((ids > 0).astype(np.uint8), name="Atlas overlay 0",
+                                  translate=(100, 200))
+        layer.metadata["region_ids"] = ids
+        layer.metadata["translate_yx"] = (100, 200)
+        panel._overlay_atlas = _FakeAtlas()
+
+        # world (110, 210) -> local (10, 10) -> IC; a point outside -> None.
+        assert panel._region_name_at(110.0, 210.0) == "IC - Inferior colliculus"
+        assert panel._region_name_at(101.0, 201.0) is None  # local (1,1) = background
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_viz_panel_enforce_rigid_array(qtbot) -> None:
+    """The viz panel's rigid-array enforcement evens a multi-shank probe's spacing."""
+    import napari
+    import numpy as np
+
+    from histo_to_ccf.config import AppSettings
+    from histo_to_ccf.gui.widgets.viz_export_panel import VizExportPanelWidget
+    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        shanks = []
+        ml = [0.0, 380.0, 470.0, 750.0]  # uneven picks
+        for i, m in enumerate(ml):
+            shanks.append(Shank(
+                index=i, tip_ccf_um=(11000.0, m, 6000.0),
+                entry_ccf_um=(11000.0, m, 1000.0),
+            ))
+        state.project.probes.append(
+            ProbeSpec(label="p", type=ProbeType(name="NP2", n_shanks=4), shanks=shanks)
+        )
+        widget = VizExportPanelWidget(state, viewer)
+        qtbot.addWidget(widget)
+
+        # apply_settings drives the UI; collect_settings reads it back.
+        widget.apply_settings(AppSettings(rigid_array_enforce=True, rigid_array_tolerance=0.0))
+        assert widget._rigid_check.isChecked() is True
+        out = AppSettings()
+        widget.collect_settings(out)
+        assert out.rigid_array_enforce is True
+        assert out.rigid_array_tolerance == 0.0
+
+        widget._enforce_rigid_arrays()
+        tips = np.array([s.tip_ccf_um for s in state.project.probes[0].shanks])
+        gaps = np.linalg.norm(np.diff(tips, axis=0), axis=1)
+        assert np.allclose(gaps, gaps[0], atol=1e-6)  # even spacing now
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_save_panel_load_path_records_recent(qtbot, tmp_path) -> None:
+    """load_path loads a project, fires the callback, and records it as recent."""
+    from histo_to_ccf.config import AppSettings
+    from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
+    from histo_to_ccf.project.io import save_project
+
+    # Write a real project to disk.
+    proj_path = tmp_path / "proj" / "demo.histo2ccf.json"
+    proj_path.parent.mkdir()
+    state0 = WorkflowState()
+    save_project(state0.project, proj_path)
+
+    settings = AppSettings()
+    state = WorkflowState()
+    fired = []
+    widget = SavePanelWidget(
+        state, on_project_loaded=lambda: fired.append(True), settings=settings
+    )
+    qtbot.addWidget(widget)
+
+    assert widget.load_path(proj_path) is True
+    assert fired, "on_project_loaded should fire so the canvas/tabs refresh"
+    assert state.project_path == proj_path
+    # Recent list + last dir updated, and the dialog start dir now points there.
+    assert settings.recent_projects[0] == str(proj_path)
+    assert settings.last_project_dir == str(proj_path.parent)
+    assert widget._start_dir() == str(proj_path.parent)
+
+    # A bad path fails gracefully without touching the recent list.
+    assert widget.load_path(tmp_path / "nope.json") is False
+    assert settings.recent_projects == [str(proj_path)]
+
+
+@pytest.mark.qt
 def test_image_tools_widget_creates(qtbot) -> None:
     from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
 
@@ -1510,6 +1682,12 @@ def test_landmark_warp_apply_and_reset(qtbot, tmp_path) -> None:
         d = np.asarray(lm.data, dtype=float); d[0, 0] += 5.0; lm.data = d  # move row(y) of pt0
         assert np.asarray(lm.features["sy"])[0] == pytest.approx(15.0)  # anchor moved with it
         panel._lm_move_btn.setChecked(False)
+
+        # (2b) After deselecting Move, a plain drag of that same point is a WARP: the
+        # relocated anchor (15) must stay put (the desync bug moved/jumped it).
+        d = np.asarray(lm.data, dtype=float); d[0, 0] += 7.0; lm.data = d
+        assert np.asarray(lm.features["sy"])[0] == pytest.approx(15.0)  # anchor unchanged
+        assert np.asarray(lm.data)[0, 0] == pytest.approx(22.0)          # target moved
 
         # (3) Add a point: its anchor is set to where it was dropped.
         lm.add(np.array([[33.0, 44.0]]))  # (row, col)

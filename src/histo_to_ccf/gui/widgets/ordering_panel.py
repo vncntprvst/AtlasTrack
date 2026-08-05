@@ -197,28 +197,19 @@ class OrderingPanelWidget(QWidget):
             self._status.setText("No sections detected.")
             return
 
+        from histo_to_ccf.sectioning.ap_series import assign_section_ap
+
         spacing = self._spacing.value()
-        anchor_idx = int(self._anchor_spin.value())
-        forward = self._ant_post.isChecked()
-
-        sections = sorted(slide.sections, key=lambda s: s.ap_order)
-        anchor_sec = next((s for s in sections if s.index == anchor_idx), sections[0])
-        anchor_ap = (
-            anchor_sec.plane.ap_um
-            if anchor_sec.plane is not None
-            else BREGMA_AP_FROM_ORIGIN_UM
+        n, mode = assign_section_ap(
+            slide.sections,
+            spacing_um=spacing,
+            anchor_index=int(self._anchor_spin.value()),
+            forward=self._ant_post.isChecked(),
         )
-
-        anchor_order = sections.index(anchor_sec)
-        for i, section in enumerate(sections):
-            delta = i - anchor_order
-            ap = anchor_ap + delta * spacing * (1 if forward else -1)
-            if section.plane is not None:
-                section.plane = section.plane.model_copy(update={"ap_um": ap})
-            else:
-                from histo_to_ccf.project.schema import PlaneParams
-                section.plane = PlaneParams(ap_um=ap)
-        self._status.setText(f"Applied spacing={spacing:.0f} µm to {len(sections)} sections")
+        # With slide numbers the spacing is per slide-number step, so an unevenly
+        # sampled series gets the AP gaps it actually has.
+        per = "per slide" if mode == "slide_number" else "per section"
+        self._status.setText(f"Applied spacing={spacing:.0f} µm {per} to {n} sections")
         self._refresh_list()
 
     def _resort_sections(self) -> None:

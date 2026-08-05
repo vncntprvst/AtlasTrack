@@ -19,6 +19,13 @@ def test_defaults() -> None:
     assert s.bending_energy_weight == 20.0
     assert s.use_tissue_mask is True
     assert s.prealign_similarity is True
+    assert s.rigid_array_enforce is False
+    assert s.rigid_array_tolerance == 0.25
+
+
+def test_rigid_array_tolerance_clamp() -> None:
+    assert AppSettings(rigid_array_tolerance=5.0).rigid_array_tolerance == 1.0
+    assert AppSettings(rigid_array_tolerance=-1.0).rigid_array_tolerance == 0.0
 
 
 def test_engine_validator() -> None:
@@ -81,6 +88,62 @@ def test_load_with_corrupt_file(tmp_path: Path, monkeypatch) -> None:
     assert settings.last_atlas_id == "allen_mouse_25um"  # falls back to defaults
 
 
+def test_remember_project(tmp_path: Path) -> None:
+    proj = tmp_path / "a" / "one.json"
+    proj.parent.mkdir()
+    proj.write_text("{}", encoding="utf-8")
+
+    s = AppSettings()
+    s.remember_project(proj)
+    assert s.last_project_dir == str(proj.parent)
+    assert s.recent_projects[0] == str(proj)
+
+    # A second project goes to the front; the dir follows it.
+    other = tmp_path / "b" / "two.json"
+    other.parent.mkdir()
+    s.remember_project(other)
+    assert s.recent_projects[:2] == [str(other), str(proj)]
+    assert s.last_project_dir == str(other.parent)
+
+    # Re-loading an earlier one moves it to the front without duplicating.
+    s.remember_project(proj)
+    assert s.recent_projects[0] == str(proj)
+    assert s.recent_projects.count(str(proj)) == 1
+
+
+def test_recent_projects_cap(tmp_path: Path) -> None:
+    s = AppSettings()
+    for i in range(20):
+        s.remember_project(tmp_path / f"p{i}.json")
+    from histo_to_ccf.config import _MAX_RECENT_PROJECTS
+
+    assert len(s.recent_projects) == _MAX_RECENT_PROJECTS
+    assert s.recent_projects[0] == str(tmp_path / "p19.json")  # newest first
+
+
+def test_project_start_dir(tmp_path: Path) -> None:
+    s = AppSettings()
+    assert s.project_start_dir() == ""  # unset
+    s.last_project_dir = str(tmp_path)
+    assert s.project_start_dir() == str(tmp_path)  # exists
+    s.last_project_dir = str(tmp_path / "gone")
+    assert s.project_start_dir() == ""  # missing dir -> empty
+
+
+def test_recent_projects_round_trip(tmp_path: Path, monkeypatch) -> None:
+    import histo_to_ccf.config as cfg
+
+    monkeypatch.setattr(cfg, "_PREFS_DIR", tmp_path)
+    monkeypatch.setattr(cfg, "_PREFS_FILE", tmp_path / "settings.json")
+
+    s = AppSettings()
+    s.remember_project(tmp_path / "proj.json")
+    save_app_settings(s)
+    loaded = load_app_settings()
+    assert loaded.recent_projects == [str(tmp_path / "proj.json")]
+    assert loaded.last_project_dir == str(tmp_path)
+
+
 def test_clamp_grid_validator() -> None:
     s = AppSettings(bspline_grid=100)
     assert s.bspline_grid == 24   # clamped to max
@@ -108,7 +171,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from histo_to_ccf import __version__
-    assert __version__ == "0.2.38"
+    assert __version__ == "0.2.47"
 
 
 @pytest.mark.qt

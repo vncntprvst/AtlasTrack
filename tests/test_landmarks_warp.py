@@ -133,6 +133,17 @@ def test_warp_contour_image_clips_out_of_bounds() -> None:
     assert img.sum() == 0  # nothing rasterised outside the image
 
 
+def test_warp_contour_image_thickness_grows_the_line() -> None:
+    # A single point -> a (2t+1)^2 block, so spread-out warped points read as lines.
+    edge_rc = np.array([[50, 50]])
+    src = np.array([[10, 10], [90, 10], [50, 50], [10, 90], [90, 90]], float)
+    thin = warp_contour_image(edge_rc, src, src, (100, 100), thickness=0)
+    thick = warp_contour_image(edge_rc, src, src, (100, 100), thickness=2)
+    assert thin.sum() == 1
+    assert thick.sum() == 25  # 5x5 block centred on the point
+    assert thick[50, 50] == 1
+
+
 def test_landmarks_shift_probe_mapping() -> None:
     anchoring = Anchoring(ox=20.0, oy=0.0, oz=0.0, ux=0.0, uy=0.0, uz=80.0,
                           vx=0.0, vy=40.0, vz=0.0)

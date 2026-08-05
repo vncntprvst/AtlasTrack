@@ -1,6 +1,308 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-06-27 · version **0.2.38** · branch **dev**_
+_Last updated: 2026-08-03 · version **0.2.47** · branch **dev**_
+
+## Lightsheet subjects: brainreg import + a registration bug found (v0.2.47)
+
+LO_03 and LO_04 are SmartSPIM lightsheet, not sectioned histology, so they never
+touch the 2D pipeline. What they need is only the last step - a point picked in the
+sample volume turned into CCF µm. New `io/brainreg.py` does exactly that:
+
+- `BrainregRegistration(dir).sample_voxels_to_ccf_um(voxels)` reads brainreg's
+  `deformation_field_{0,1,2}.tiff` (sample grid, atlas position in **mm**, axes
+  AP/DV/ML) and returns the app's (AP, ML, DV) µm. Verified on both subjects:
+  mapping a voxel to CCF and looking it up in the atlas annotation reproduces the
+  structure id `registered_atlas.tiff` assigns to that voxel for **100%** of test
+  voxels.
+- `check_geometry()` guards the most damaging brainreg mistake - voxel sizes in the
+  wrong axis order, which scales an axis and leaves the registration to absorb it.
+
+**That guard immediately caught a real problem.** Both runs were given
+`-v 1.8 1.8 2`, but the SmartSPIM data is 1.8 µm in-plane with a **2.0 µm z-step**
+(`stitched/metadata.txt`), i.e. the sizes are in the wrong order. Resulting DV
+extents against the ~8000 µm of a mouse brain:
+
+| subject | sample DV | vs brain | registration QC |
+|---|---|---|---|
+| LO_03 | 15875 µm | 1.98x | **good** - atlas boundaries track the tissue, 93% of tissue covered |
+| LO_04 | 4950 µm | 0.62x | **bad** - atlas covers only 60% of the tissue, misses whole slices |
+
+LO_03's freeform registration absorbed the scale error, so its deformation field is
+usable. **LO_04's did not - it should be re-run** with `-v 2 1.8 1.8` before any
+coordinate is taken from it. (LO_03's 561 channel downsampled to the correct
+7925 µm while its 488 registration channel came out at 15875 µm, so the two
+channels disagree by 2x in DV - worth understanding before re-running.)
+
+### Imaris screenshots cannot give coordinates - and what would
+
+The `Imaris_shanks_exports/` folders hold 8 snapshots per subject (4 shanks x
+tip/top) with a marker sphere on each. The spheres extract cleanly (one blob each,
+fill 0.78 = pi/4), and the snapshot metadata gives an orthographic scale
+(`UnitLengthPerPixel`, ~7-8.8 µm/px) and the dataset extent. But they are **not** a
+coordinate source:
+
+- fitting each camera from the yellow dataset bounding box does not converge -
+  chamfer 7-71 px with mutually inconsistent view axes, and overlaying the fit
+  shows it visibly off. Much of the box is off-screen when zoomed in.
+- even a perfect camera leaves depth unknown: an orthographic view gives 2 of 3
+  coordinates, and the remaining one would have to come from intersecting the ray
+  with a dye blob 1.9 mm wide in ML.
+- the user framed each marker near image centre, so the 2D positions carry little
+  absolute information anyway.
+
+Shipping coordinates from that fit would be the LO_06 failure mode exactly - a
+plausible-looking result hiding a several-hundred-µm error. **The fix is one export
+on the Imaris side**: the markers are Spots / Measurement Points in the `.ims`, and
+their XYZ can be written straight out as CSV, in the same µm frame the snapshot
+metadata already records (`[Image] ExtMax` = 10110.6 x 15874.2 x 8816.0 µm at
+1.8/1.8/2.0 µm voxels). With that CSV the rest is mechanical.
+
+### What LO_03's registration does support today
+
+The dye core (brightest 0.1%, largest component, 0.17 mm³) runs from DV 175 µm at
+the surface to DV 3150 µm, length 3228 µm, axis (AP, DV, ML) = (0.233, 0.958,
+0.168), centred at AP 10710 / DV 2371 / ML 5295 µm. Regions crossed: Lobule III
+38%, inferior colliculus (dorsal) 19%, Lobule II 18%, aqueduct 6%, PAG 4%.
+
+That is the **entry path**, not the recording segment: the insertion was 4870 µm
+but the bright track only spans 3228 µm, and a tongue-jaw probe should end in
+IRN/GRN/PARN/VII (where LO_06 and LO_07 tips landed), not cerebellum and IC. The
+deeper, dimmer portion is what the user's Imaris markers mark - which is the other
+reason those exported points are needed rather than automatic detection.
+
+## LO_02 scaffolded from the 10x per-section images (v0.2.47)
+
+`E:\TJO\LO_02\Registration\LO_02_scaffold.json` - 15 sections, boxes, order and
+seeded AP; `README_SCAFFOLD.md` and `qc\` beside it.
+
+The decisive finding: the four **5x whole-slide scans carry no red channel at all**
+(R identically zero; two are single-channel green, two are green+blue). LO_02 was
+DiI-labelled, so the probe track exists *only* in the 10x per-section files - which
+is why the project is built from those and not from the whole-slide images.
+
+That limits it to 15 of the 36 sections on the slides: slide 2 sections 4-7 and
+9-12, slide 3 sections 1-7. Slide 2 section 8 and all 12 sections of slide 1 were
+never imaged at 10x. Slide 2 §12 abuts slide 3 §1 (silhouette IoU 0.76), so the two
+slides are one series and slide 3 continues as `12 + M`; the gap at section 8 is
+handled correctly by the slide-number AP spacing added in v0.2.46.
+`Section6_better_10x` is used over `Section6_10x` (26% more tissue, brighter, less
+clipping, equal sharpness).
+
+Flags recorded in the README: `Slide2_Section9_10x` has a 16384x10239 canvas against
+~7400x4700 for every other 10x frame and its brain occupies visibly more pixels, so
+its magnification is probably different - verify before trusting its scale. Boxes on
+sections 0, 1 and 4 clip tissue. And **no LO_02 TIFF carries a physical pixel size**
+(only the 72 dpi placeholder), so `pixel_size_um` is an anatomical estimate.
+
+Because a full-resolution merge would be ~550 Mpixel, the sources are downscaled 4x
+into `Registration\sections_10x_downscaled\` (still ~4.3 µm/px) and the project
+points at those.
+
+## Sweep of the TJO cohort (v0.2.46)
+
+## Sweep of the TJO cohort (v0.2.46)
+
+Went through `E:\TJO` to see where every subject stands on probe→CCF coordinates.
+State of play:
+
+| subject | histology | project | per-channel CSV |
+|---|---|---|---|
+| LO_02 | 23 tif (5x whole-slide + 10x per-section) | HERBS only | trajectory endpoints only, no per-channel |
+| LO_03 | SmartSPIM lightsheet + brainreg | none | none |
+| LO_04 | SmartSPIM lightsheet + brainreg | none | none |
+| LO_05 | 20 Keyence 4x per-section | **scaffolded here** | none yet |
+| LO_06 | 4 slides 2x per-channel | yes | **was stale - fixed here** |
+| LO_07 | 2x per-channel + per-dye PNGs | yes (3 dyes) | yes, plus unit-level joins |
+
+LO_03/LO_04 are lightsheet volumes, so they need a brainreg-based path rather than
+this 2D-section app; LO_02 has only whole-slide 5x plus per-section 10x with no
+per-channel split. Those three are the remaining gaps and none is a quick win.
+
+**LO_06's shipped coordinates were stale.** `LO_06 - red - far red - ProbeA.csv`
+(Jun 25) predated `LO_06_far_red_whole.json` (Jul 6, the `apfixed` AP correction
+promoted into `Registration/`). The AP fix - the whole point of the redo - never
+reached the exported coordinates: per-channel displacement was **mean 350 µm,
+median 381 µm, max 518 µm**. Regenerated; the Jun 25 files are preserved under
+`Registration/old_2026-06-25_pre-apfixed/`. A `- rigid250` variant is written
+alongside (shank gaps 283/361/278 → 255/277/256 µm for red, 426/532/329 →
+255/316/245 for far_red; the picks are stretched vs the probe's real 250 µm pitch).
+
+**LO_05 scaffolded.** `E:\TJO\LO_05\Registration\LO_05_scaffold.json` - 12 sections
+in AP order with slide numbers from `HERBS/sections.md`, auto-detected boxes, seeded
+AP. `README_SCAFFOLD.md` there records the two provisional numbers (40 µm/slide,
+anchor 10500 µm), which boxes still need a look, and a **measured** table of which
+sections have their tracks on the wrong side (1, 6, 10 need flipping; 7 disagrees
+between channels). QC montage in `Registration/qc/`.
+
+### App changes this drove
+
+- **`histo2ccf export`** (new): per-channel CCF µm + Paxinos mm CSVs straight from a
+  saved project, no re-registration. `--remap` re-projects the pixel picks through
+  the stored transforms; `--rigid-array` / `--lock-spacing-um` regularize a
+  multi-shank probe. This is what makes a stale export a one-command fix.
+- **Export provenance** (`project/provenance.py`): every export now writes a
+  `<name>.provenance.json` with the source project's SHA-256, so
+  `describe_staleness()` can answer "is this CSV current?" - the LO_06 failure was
+  invisible except in file mtimes. Answers GUI_FEEDBACK #2.
+- **`cli.register_cmd` bugs fixed** (GUI_FEEDBACK #5, all three): it loaded only the
+  first `source_paths` entry of a merged slide, and applied neither slide nor
+  section flips. Slide reconstruction now lives in `project/images.py` and the GUI
+  calls the same function, so they cannot drift again. This mattered: **22 of
+  LO_06's 24 sections are flipped**, so a headless re-register would have fitted
+  mirrored tissue. Third bug: `register_project_with_atlas(reuse_stored_anchoring=)`
+  keeps a section's stored (possibly oblique DeepSlice) plane instead of rebuilding
+  a coronal one from `PlaneParams`, which cannot represent obliquity; the CLI
+  defaults it on.
+- **Uneven AP series** (`sectioning/ap_series.py`): `Section.slide_number` plus
+  `assign_section_ap()` space AP by slide-number *gaps* rather than list position,
+  so a series picked unevenly out of a slide box (LO_05: 76, 74, 72, then 59) gets
+  the AP progression it actually has. Falls back to the old even spacing when slide
+  numbers are absent, and agrees with it exactly when they are consecutive. The
+  ordering panel now uses it. This generalizes the LO_06 "linearize AP + anchor"
+  finding that this file called the strongest candidate for a built-in feature.
+- **`group_fragmented_sections()`** (`sectioning/split.py`): re-joins a section that
+  was detected as separate components because its brainstem came away from its
+  cerebellum, while leaving adjacent-section debris beside it alone. On LO_05 this
+  fixed 5 of 12 boxes that had clipped the entire brainstem off - i.e. would have
+  dropped the probe tracks. Addresses the recipe's "fragmented sections" manual case.
+- **`histo2ccf --help` crashed on a stock Windows console** (cp1252 cannot encode
+  `→`). stdout/stderr are now reconfigured to UTF-8 in `cli.py`. Pre-existing.
+
+## Context: LO_06 dogfooding drove v0.2.39–0.2.45
+
+Everything from v0.2.39 on came out of registering one real dataset end-to-end
+(subject **LO_06**, tongue-jaw brainstem, 24 sections, two dye probes) and fixing what
+hurt. The case study - what was tried, what worked, the QC images and the reusable
+findings - lives in `E:\TJO\LO_06\Registration\redo_claude\` (`REGISTRATION_RECIPE.md`,
+`GUI_FEEDBACK.md`, `scripts/`, `qc/`) and in the agent memory note
+`project_lo06_redo_findings.md`. Highlights a maintainer should know:
+
+- **Root cause of most "bad registration":** DeepSlice *compresses AP* on look-alike
+  brainstem/cerebellum sections, so structures land on the wrong section. Fix that
+  worked: even AP progression anchored to one anatomical landmark (see the recipe). This
+  is the strongest candidate for a built-in feature ("linearize AP + anchor").
+- **Residual ≠ probe accuracy.** Two fits with equal residual placed a probe ~500 µm
+  apart in ML; the tilt-refiner (v0.2.40) optimises residual and can *worsen* probe-tip
+  consistency. Trust the overlay, not the number.
+- **The ventricle is metric-blind** (featureless CSF) - only landmarks open it; a
+  sparse, dense-anchored TPS is stable, a dense one folds.
+- Re-registration **invalidates stored landmarks** (they're anchored to the old fit).
+- LO_06's own corrected project is `redo_claude/LO_06_apfixed.json` (not a repo file).
+
+## Fix: Move-points desynced the overlay (v0.2.45)
+
+v0.2.43 made a relocate ("Move points"/Ctrl) *skip* the live preview to keep the
+outline from shifting - but that left the shown outline **stale** vs the moved anchors,
+so the next warp-drag jumped and the point no longer warped from where it was placed.
+Fix in `register_panel._on_landmark_data`: **always** call `_preview_landmark_warp()`
+(display stays in sync), and the source feature is now `np.resize`d to the point count
+up-front so a relocate never silently no-ops on a transient mismatch. A relocate keeps
+every displacement, so with undragged handles the re-render changes nothing - the
+outline only moves on an actual warp-drag. New test coverage:
+`test_gui_smoke.py::test_landmark_warp_apply_and_reset` step 2b (anchor stays after
+Move→deselect→warp).
+
+## Tip/entry table: narrow columns + probe label (v0.2.44)
+
+`click_overlay` tip/entry table: the three left columns (Probe/Shank/Type) are now
+`QHeaderView.ResizeToContents` and the Coords column `Stretch`, so it's compact by
+default instead of four equal-width columns. The **Probe** column shows the probe
+**label** (e.g. `red`), not a numeric index - and updates on rename since the table is
+rebuilt on the `on_probes_changed` refresh. Test:
+`test_gui_smoke.py::test_click_overlay_probe_highlight` (asserts labels in column 0).
+
+## Landmark edit-mode exit + relocate + clearer probe highlight (v0.2.43)
+
+- **Exit landmark mode.** "Apply landmark warp" / "Reset adjustment" now call
+  `register_panel._exit_landmark_edit`: removes the "Atlas landmarks *" handle layer
+  (dots gone), clears `_landmark_idx`, unchecks Move/Add, and sets **every** layer to
+  `pan_zoom` + selects the Slide layer - so a left-drag pans again instead of drawing a
+  rubber-band selection rectangle. (Before, the user was stuck in the edit layer.)
+- **Relocate keeps the outline fixed.** `_on_landmark_data` now skips
+  `_preview_landmark_warp()` on a **relocate** (Ctrl / "Move points"): moving a handle
+  no longer makes the atlas jump; the warp only re-previews on a warp-drag / add / delete.
+- **Probe highlight clearer.** `click_overlay._recolor` selected-probe markers grew to
+  size 28 (others 8) with a thick white halo; `_highlight_selected_probe` is re-applied
+  on probe-combo change AND on the Select/move toggle; the Probe combo gained a tooltip
+  explaining it's the selector. Tests: `test_gui_smoke.py::test_register_panel_exit_landmark_edit`,
+  `::test_click_overlay_probe_highlight`.
+
+## Landmark-drag preview: lines, not dots (v0.2.42)
+
+During a live landmark warp the atlas overlay rendered as tiny scattered dots.
+Cause: `register_panel._preview_landmark_warp` forward-splats the atlas boundary via
+`landmarks_warp.warp_contour_image`, which set **single pixels** on a boundary that
+was subsampled to only 4000 points - so warped points spread into gaps. Fix:
+`warp_contour_image` gains `thickness` (grows each splat to a `(2t+1)²` block); the
+preview passes `thickness=2` and `_place_landmarks` now keeps up to **20000** boundary
+points (the forward-TPS is cheap). Result reads as bold continuous outlines. Tests:
+`test_landmarks_warp.py::test_warp_contour_image_thickness_grows_the_line`.
+
+## Hover-to-name region + highlight selected probe's points (v0.2.41)
+
+**Hover-to-name.** The section atlas overlay draws only region *edges*, so hovering
+couldn't name a region. `register_panel._render_overlay` stashes the full warped
+region-id image in `layer.metadata["region_ids"]` (+ `translate_yx`);
+`_install_region_hover` appends a mouse-move callback that reads the id under the
+cursor (`_region_name_at`) and writes `ACRONYM - name` to the **canvas text overlay**
+(`viewer.text_overlay`, NOT `viewer.status` - napari overwrites status with the layer
+name/coords on every move). Test: `test_gui_smoke.py::test_register_panel_region_hover`.
+
+**Highlight selected probe.** `click_overlay._recolor` now enlarges the currently-
+selected probe's tip/entry markers (size 20) with a white border; other probes stay
+normal. Re-applied on probe-combo change (`_on_probe_changed`). Answers "select a probe
+→ make its points very visible".
+
+## Per-section plane-tilt refinement (v0.2.40)
+
+## Per-section plane-tilt refinement (v0.2.40)
+
+`registration.tilt_refine.refine_tilt(section_image, atlas, anchoring, ...)` searches
+a small perturbation of the anchoring's tilt terms (`ux` = left/right, `vx` = dorsal/
+ventral) that lowers the elastix residual - fixes the L/R-asymmetry where a paramedian
+nucleus sits on tissue one side but in a gap the other (a slightly wrong DeepSlice
+tilt). Coordinate-descent over a small grid using the **real** residual; a cheap
+pre-align+MI `tilt_proxy_score` exists but only finds the neighbourhood, so the search
+uses real fits. **Conservative**: small range + a `min_improvement` bar, so it accepts
+only a clear gain (most sections unchanged) and can't chase a marginal residual into a
+big overfit tilt. Wired into `workers.register_worker_progressive(refine_tilt=...)` and
+the Register panel's **"Refine plane tilt per section"** checkbox (persisted via
+`AppSettings.refine_tilt`). Tests: `test_tilt_refine.py`.
+CAVEAT (LO_06): re-registration invalidates a section's manual landmarks, and residual-
+optimised tilt improved the atlas overlay but made far_red tip regions LESS consistent
+(all-VII → scattered) - residual is an imperfect proxy for probe accuracy. Best used on
+the FIRST registration pass, before landmarks.
+
+## Rigid multi-shank array fit (v0.2.40)
+
+`probes.fitting.fit_rigid_array(tips, entries, tolerance, lock_spacing_um)`
+regularizes a probe's shanks to a parallel, evenly-spaced array (a Neuropixels
+shank set is physically rigid; independent per-section picks are noisy). Row axis =
+PCA of the tips **after projecting out the insertion direction** (else the ~mm
+insertion-depth variance hijacks it); spacing = tip-row extent/(n-1) (or a locked
+value). `tolerance∈[0,1]` blends `rigid + tol*(pick-rigid)` (0 strict, 1 unchanged).
+Wired into the **viz/export panel** as an "Enforce rigid array" checkbox + tolerance
+spin, applied inside `_remap_probes` (so it survives every Update coordinates /
+View 3D, not overwritten by the pixel→CCF pass). Persisted via new AppSettings
+`rigid_array_enforce` / `rigid_array_tolerance` (viz `collect_settings` now wired
+in `app._on_tab_change`). Tests: `test_probes_fitting.py` (strict/tolerance/lock/
+noop), `test_config.py` (defaults+clamp), `test_gui_smoke.py::test_viz_panel_enforce_rigid_array`.
+
+## Project menu remembers last folder + "Load recent" (v0.2.39)
+
+## Project menu remembers last folder + "Load recent" (v0.2.39)
+
+Load/Save Project dialogs used to open at the process cwd every time. Now
+`AppSettings` gains `recent_projects` (newest-first, deduped, capped at
+`_MAX_RECENT_PROJECTS`=8) alongside the existing `last_project_dir`, plus helpers
+`remember_project()` and `project_start_dir()`. `SavePanelWidget` takes the shared
+`settings`, opens its file dialogs at `project_start_dir()`, and records every
+load/save via `_remember()` (persists immediately). Load logic was refactored into
+a public `load_path(path)` so the menu can load a specific file. The Project menu
+gains a **"Load recent"** submenu, rebuilt on `aboutToShow` from
+`settings.recent_projects` (missing files pruned; "Clear recent" action). Tests:
+`test_config.py::test_remember_project/_cap/_project_start_dir/_recent_projects_round_trip`,
+`test_gui_smoke.py::test_save_panel_load_path_records_recent`.
 
 ## Fix: matcher histology showed a saturated-green background (v0.2.38)
 
@@ -34,7 +336,7 @@ are export keys in `probes/channels.py`), and fires a new `on_probes_changed`
 callback wired in `app.py` to `_refresh_panels` so the Probes tip/entry and Ephys
 combos pick up the new name. Tested in `test_gui_smoke.py::test_probe_picker_rename`.
 
-**User manual.** New `MANUAL.md` — cookbook-style reference (concepts, GUI
+**User manual.** New `MANUAL.md` - cookbook-style reference (concepts, GUI
 reference, task recipes, troubleshooting) modeled on the HERBS cookbook,
 complementing the linear `TUTORIAL.md`. Linked from README. `pypdf` was installed
 into the `.venv` to read the cookbook.
@@ -144,7 +446,7 @@ then fires the bound Delete and asserts no crash.
 
 Also **removed the "Click to discard a box…" button** (and its now-dead
 `app.install_discard_handler` one-shot pick handler): with the editor's Delete
-fixed it was redundant — "Edit boxes → select → Delete" covers box removal.
+fixed it was redundant - "Edit boxes → select → Delete" covers box removal.
 
 ## DeepSlice pre-match in the Atlas matcher (v0.2.32)
 

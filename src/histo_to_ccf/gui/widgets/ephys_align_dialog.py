@@ -342,7 +342,7 @@ class EphysAlignmentDialog(QDialog):
                 start = i
 
     def _region_caption(self, acr: str) -> str:
-        """``ACR — full name`` when the atlas knows the structure, else the acronym."""
+        """``ACR - full name`` when the atlas knows the structure, else the acronym."""
         try:
             name = str(self._state.atlas.structures[acr]["name"])
         except Exception:

@@ -1,4 +1,4 @@
-"""histo2ccf - guided histology→atlas registration with probe trajectory mapping.
+"""histo2ccf - guided histology->atlas registration with probe trajectory mapping.
 
 Typical workflow
 ----------------
@@ -6,16 +6,28 @@ Typical workflow
 2. ``histo2ccf split image.tif`` - detect sections in a composite slide.
 3. ``histo2ccf register-one …`` - headless single-section registration.
 4. ``histo2ccf register project.json`` - run the full M3 pipeline on a project.
+5. ``histo2ccf export project.json`` - write per-channel CCF / Paxinos CSVs.
 
 Run ``histo2ccf <command> --help`` for per-command options.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from loguru import logger
+
+# Windows consoles default to a legacy codepage (cp1252), which cannot encode the
+# non-ASCII characters used in help text and messages ("µm", "->"). Without this,
+# even `histo2ccf --help` dies with a UnicodeEncodeError. Reconfiguring the streams
+# is a no-op where the encoding is already UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except (AttributeError, OSError):  # not a reconfigurable text stream
+        pass
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -312,6 +324,17 @@ def register_cmd(
             )
         ),
     ] = None,
+    reuse_anchoring: Annotated[
+        bool,
+        typer.Option(
+            help=(
+                "Re-use each section's already-stored atlas plane instead of "
+                "rebuilding a coronal one from its PlaneParams. Keeps a DeepSlice "
+                "oblique plane intact. Turn off to re-derive the plane from a "
+                "hand-edited AP/tilt."
+            )
+        ),
+    ] = True,
 ) -> None:
     """Run the M3 atlas-registration pipeline on every section in a project.
 
@@ -319,11 +342,9 @@ def register_cmd(
     refines the alignment with a 2D B-spline, and stores a RegistrationResult.
     The updated project JSON is written (overwriting by default).
     """
-    import numpy as np
-
     from brainglobe_atlasapi import BrainGlobeAtlas
 
-    from histo_to_ccf.io.image import crop, load_image
+    from histo_to_ccf.project.images import section_images
     from histo_to_ccf.project.io import load_project, save_project
     from histo_to_ccf.registration.pipeline import register_project_with_atlas
 
@@ -343,28 +364,22 @@ def register_cmd(
     if transforms_dir is None:
         transforms_dir = project_dir / "transforms"
 
-    # Build section_images mapping: section_index -> cropped grayscale array.
-    section_images: dict[int, np.ndarray] = {}
-    for slide in project.slides:
-        slide_img = load_image(slide.image_path)
-        for section in slide.sections:
-            x0, y0, x1, y1 = section.bbox_px
-            crop_img = crop(slide_img, (x0, y0, x1, y1))
-            if crop_img.ndim == 3:
-                crop_img = crop_img[..., :3].astype(np.float32).mean(axis=-1)
-            section_images[section.index] = crop_img.astype(np.float32)
+    # Rebuild the exact pixels the stored bboxes were drawn against: merged
+    # multi-source slides, whole-slide flips, per-section flips.
+    images = section_images(project, base_dir=project_dir)
 
     logger.info(
-        "registering {} section(s) with atlas={} grid={}",
-        len(section_images), atlas, grid,
+        "registering {} section(s) with atlas={} grid={} reuse_anchoring={}",
+        len(images), atlas, grid, reuse_anchoring,
     )
     register_project_with_atlas(
         project,
         bg_atlas,
-        section_images=section_images,
+        section_images=images,
         transforms_dir=transforms_dir,
         bspline_grid=grid,
         max_iterations=max_iterations,
+        reuse_stored_anchoring=reuse_anchoring,
     )
 
     registered_count = sum(
@@ -378,6 +393,147 @@ def register_cmd(
     out_path = output_json or project_json
     save_project(project, out_path)
     typer.echo(f"wrote project -> {out_path}")
+
+
+@app.command("export")
+def export_cmd(
+    project_json: Annotated[
+        Path, typer.Argument(help="Path to a registered project JSON.")
+    ],
+    out_dir: Annotated[
+        Path | None,
+        typer.Option(help="Output directory. Defaults to the project's own folder."),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(help="Base name for the CSVs. Defaults to the project JSON stem."),
+    ] = None,
+    remap: Annotated[
+        bool,
+        typer.Option(
+            help=(
+                "Re-project every shank's tip/entry pixel through the stored "
+                "transforms before exporting (needs the atlas). Off by default: the "
+                "coordinates already saved in the project are used as-is."
+            )
+        ),
+    ] = False,
+    atlas: Annotated[
+        str, typer.Option(help="BrainGlobe atlas id, used only with --remap.")
+    ] = "allen_mouse_25um",
+    rigid_array: Annotated[
+        bool,
+        typer.Option(
+            help=(
+                "Regularize each multi-shank probe to a parallel, evenly-spaced "
+                "array before exporting."
+            )
+        ),
+    ] = False,
+    rigid_tolerance: Annotated[
+        float,
+        typer.Option(
+            help="0 snaps exactly to the rigid array, 1 leaves picks unchanged."
+        ),
+    ] = 0.25,
+    lock_spacing_um: Annotated[
+        float | None,
+        typer.Option(
+            help="Force an exact inter-shank spacing in µm (e.g. 250 for NP2.0)."
+        ),
+    ] = None,
+    paxinos_alignment: Annotated[
+        str | None,
+        typer.Option(help="CCF→stereotaxic preset (none/allen_forum/qiu2018/dorr2008)."),
+    ] = None,
+    save_project_to: Annotated[
+        Path | None,
+        typer.Option(
+            help=(
+                "Also write the (re-mapped / regularized) project JSON here. "
+                "Without this the project file is never modified."
+            )
+        ),
+    ] = None,
+) -> None:
+    """Write per-channel CCF µm and Paxinos mm CSVs from a registered project.
+
+    Regenerates coordinates from a project without re-running registration, so an
+    export can be refreshed after the project has been corrected. Writes
+    ``<name>.csv`` (CCF µm) and ``<name> - Paxinos.csv`` (stereotaxic mm).
+    """
+    from histo_to_ccf.probes.channels import export_channel_csv, export_paxinos_csv
+    from histo_to_ccf.project.io import load_project, save_project
+    from histo_to_ccf.project.provenance import write_export_provenance
+
+    project = load_project(project_json)
+    out_dir = out_dir or project_json.parent
+    base = name or project_json.stem
+
+    if remap:
+        from brainglobe_atlasapi import BrainGlobeAtlas
+
+        from histo_to_ccf.registration.pipeline import (
+            _apply_to_shank_registered,
+            reload_registered_transforms,
+        )
+
+        logger.info("loading atlas {}", atlas)
+        bg_atlas = BrainGlobeAtlas(atlas)
+        transforms = reload_registered_transforms(
+            project, bg_atlas, project_dir=project_json.parent
+        )
+        n_remapped = 0
+        for probe in project.probes:
+            for shank in probe.shanks:
+                _apply_to_shank_registered(shank, project, transforms)
+                n_remapped += 1
+        typer.echo(f"re-mapped {n_remapped} shank(s) from the stored transforms")
+
+    if rigid_array:
+        from histo_to_ccf.probes.fitting import enforce_rigid_arrays
+
+        infos = enforce_rigid_arrays(
+            project, tolerance=rigid_tolerance, lock_spacing_um=lock_spacing_um
+        )
+        for label, info in sorted(infos.items()):
+            typer.echo(
+                f"rigid array '{label}': spacing {info['spacing_um']:.0f} µm, "
+                f"max shift {info['max_shift_um']:.0f} µm"
+            )
+
+    ccf_path = out_dir / f"{base}.csv"
+    pax_path = out_dir / f"{base} - Paxinos.csv"
+    n_ccf = export_channel_csv(project, ccf_path)
+    n_pax = export_paxinos_csv(project, pax_path, alignment=paxinos_alignment)
+
+    if n_ccf == 0:
+        typer.echo(
+            "warning: no shank had both a tip and an entry in CCF - nothing exported. "
+            "Register the sections and map the probes first."
+        )
+    typer.echo(f"wrote {n_ccf} channel row(s) -> {ccf_path}")
+    typer.echo(f"wrote {n_pax} channel row(s) -> {pax_path}")
+
+    prov_path = out_dir / f"{base}.provenance.json"
+    write_export_provenance(
+        prov_path,
+        project_json=project_json,
+        outputs=[ccf_path, pax_path],
+        n_rows=n_ccf,
+        options={
+            "remap": remap,
+            "rigid_array": rigid_array,
+            "rigid_tolerance": rigid_tolerance if rigid_array else None,
+            "lock_spacing_um": lock_spacing_um if rigid_array else None,
+            "paxinos_alignment": paxinos_alignment,
+        },
+    )
+    typer.echo(f"wrote provenance -> {prov_path}")
+
+    if save_project_to is not None:
+        save_project(project, save_project_to)
+        typer.echo(f"wrote project -> {save_project_to}")
 
 
 if __name__ == "__main__":
