@@ -98,9 +98,14 @@ class OrderingPanelWidget(QWidget):
         layout.addWidget(resort_btn)
 
         anchor_row = QHBoxLayout()
-        anchor_row.addWidget(QLabel("Anchor section idx:"))
+        anchor_lbl = QLabel("Anchor section (1 = first):")
+        anchor_lbl.setToolTip(
+            "Which section in the AP order keeps its AP while the rest are\n"
+            "spaced around it. Counted from 1, matching the list below."
+        )
+        anchor_row.addWidget(anchor_lbl)
         self._anchor_spin = QDoubleSpinBox()
-        self._anchor_spin.setRange(0, 9999)
+        self._anchor_spin.setRange(1, 9999)
         self._anchor_spin.setDecimals(0)
         anchor_row.addWidget(self._anchor_spin)
         layout.addLayout(anchor_row)
@@ -179,13 +184,18 @@ class OrderingPanelWidget(QWidget):
         return self._state.project.slides[slide_idx]
 
     @staticmethod
-    def _item_text(section) -> str:
+    def _item_text(section, position: int) -> str:
+        """One list row. ``position`` is the 1-based place in the AP order.
+
+        Counted from 1 for display; ``section.index`` stays the stored id that
+        names the transform sidecar and that shank picks point at.
+        """
         if section.plane is not None:
             ap_bregma = BREGMA_AP_FROM_ORIGIN_UM - section.plane.ap_um
             ap_str = f"AP {ap_bregma:+.0f} µm"
         else:
             ap_str = "AP -"
-        return f"Section {section.index}   ·   {ap_str}"
+        return f"Section {position}   ·   {ap_str}"
 
     def _apply_spacing(self) -> None:
         """Propagate evenly-spaced AP values from the anchor section outward."""
@@ -200,10 +210,13 @@ class OrderingPanelWidget(QWidget):
         from histo_to_ccf.sectioning.ap_series import assign_section_ap
 
         spacing = self._spacing.value()
+        # The spin counts from 1; assign_section_ap wants the stored section id.
+        ordered = sorted(slide.sections, key=lambda s: s.ap_order)
+        pos = max(0, min(int(self._anchor_spin.value()) - 1, len(ordered) - 1))
         n, mode = assign_section_ap(
             slide.sections,
             spacing_um=spacing,
-            anchor_index=int(self._anchor_spin.value()),
+            anchor_index=ordered[pos].index,
             forward=self._ant_post.isChecked(),
         )
         # With slide numbers the spacing is per slide-number step, so an unevenly
@@ -264,7 +277,7 @@ class OrderingPanelWidget(QWidget):
         self._list.blockSignals(True)
         self._list.clear()
         for i, s in enumerate(sections):
-            text = self._item_text(s)
+            text = self._item_text(s, i + 1)
             if i == 0:
                 text += f"   ◄ {first_end} end"
             elif i == len(sections) - 1:
@@ -285,5 +298,5 @@ class OrderingPanelWidget(QWidget):
             section = by_index.get(item.data(Qt.UserRole))
             if section is not None:
                 section.ap_order = pos
-                item.setText(self._item_text(section))
+                item.setText(self._item_text(section, pos + 1))
         self._status.setText("Reordered sections - apply spacing to update AP values.")

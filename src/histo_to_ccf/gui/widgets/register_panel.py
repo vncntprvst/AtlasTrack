@@ -339,6 +339,12 @@ class RegisterPanelWidget(QWidget):
         self._params_dialog.raise_()
         self._params_dialog.activateWindow()
 
+    def _display_no(self, section) -> int:
+        """What the UI calls this section: its 1-based position in the AP order."""
+        from histo_to_ccf.gui.workflow import section_display_no
+
+        return section_display_no(self._state.project, section)
+
     def _on_elastix_toggled(self, on: bool) -> None:
         """Enable the elastix-only controls only when elastix is selected."""
         self._bending_spin.setEnabled(on)
@@ -839,7 +845,7 @@ class RegisterPanelWidget(QWidget):
             layer.mode = "transform"
             self._adjust_btn.setText("Apply adjustment")
             self._status.setText(
-                f"Adjusting section {section.index}: drag to move, box handles to "
+                f"Adjusting section {self._display_no(section)}: drag to move, box handles to "
                 f"scale / stretch / rotate. Click 'Apply adjustment' when done."
             )
         else:
@@ -918,7 +924,7 @@ class RegisterPanelWidget(QWidget):
         self._rerender_section_overlay(section)
         self._remap_and_save(section)
         self._status.setText(
-            f"Section {section.index}: morph dropped, atlas plane (AP/ML) kept. "
+            f"Section {self._display_no(section)}: morph dropped, atlas plane (AP/ML) kept. "
             "Click 'Place landmarks' to fit it by hand."
         )
 
@@ -1047,7 +1053,7 @@ class RegisterPanelWidget(QWidget):
         self._lm_move_btn.setChecked(False)
         self._lm_add_btn.setChecked(False)
         self._status.setText(
-            f"Section {section.index}: drag landmarks onto the tissue (warp); Ctrl+drag "
+            f"Section {self._display_no(section)}: drag landmarks onto the tissue (warp); Ctrl+drag "
             f"or 'Move points' to relocate; 'Add points' + click to add, Delete to remove. "
             f"Then 'Apply landmark warp'."
         )
@@ -1225,9 +1231,9 @@ class RegisterPanelWidget(QWidget):
                         _apply_to_shank_registered(shank, self._state.project, transforms)
                 remapped = True
             except Exception as exc:  # noqa: BLE001
-                self._status.setText(f"Section {section.index}: probe re-map failed: {exc}")
+                self._status.setText(f"Section {self._display_no(section)}: probe re-map failed: {exc}")
 
-        msg = f"Section {section.index} adjustment applied"
+        msg = f"Section {self._display_no(section)} adjustment applied"
         msg += " (probes re-mapped)" if remapped else ""
         path = self._ensure_project_path()
         if path is not None:

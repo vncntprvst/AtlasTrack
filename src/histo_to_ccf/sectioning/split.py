@@ -71,6 +71,7 @@ def detect_sections(
     expected_count: int | None = None,
     equalize_boxes: bool = True,
     box_min_frac: float = 0.85,
+    margin_frac: float = 0.06,
 ) -> list[DetectedSection]:
     """Find brain sections in a composite slide image.
 
@@ -105,6 +106,14 @@ def detect_sections(
     box_min_frac
         A box is expanded when its width or height is below this fraction of
         the median box width/height.
+    margin_frac
+        Background kept around the tissue, as a fraction of the box's own size,
+        added to every side. A box that ends flush against the tissue leaves the
+        registration nothing to work with on that side: the mask and the boundary
+        snap then take the *image border* for the tissue edge, which flattens the
+        atlas contour there (most visibly along the bottom). Growth is capped at
+        half the gap to the nearest other section so the margin never eats into a
+        neighbour, and clipped to the image. 0 disables.
     """
     gray = _to_gray(image)
     fg = _binarize(gray)
@@ -148,7 +157,93 @@ def detect_sections(
     if equalize_boxes:
         sections = _equalize_box_sizes(sections, (h, w), min_frac=box_min_frac)
 
+    if margin_frac > 0:
+        sections = _add_box_margin(sections, (h, w), margin_frac=margin_frac)
+
     return sections
+
+
+# Past this many boxes the pairwise neighbour cap would need an n^2 array; skip it.
+_MARGIN_PAIRWISE_MAX = 2000
+
+
+def _add_box_margin(
+    sections: list[DetectedSection],
+    image_shape: tuple[int, int],
+    *,
+    margin_frac: float,
+) -> list[DetectedSection]:
+    """Grow every box outwards so tissue is not flush against its edge.
+
+    Each box grows by ``margin_frac`` of its own width/height on each side, but
+    never by more than half the clear gap to the nearest other box - otherwise a
+    dense slide grid would have neighbouring sections bleeding into each other's
+    crops. Growth is clipped to the image. Masks are left untouched: the margin is
+    background by definition, so the mask stays exactly the detected tissue.
+    """
+    if not sections:
+        return []
+    h_img, w_img = image_shape
+    boxes = np.array([s.bbox_px for s in sections], dtype=float)
+    x0, y0, x1, y1 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+
+    want = margin_frac * np.minimum(x1 - x0, y1 - y0)
+
+    # Cap by the gap to any other box, measured only where the two actually face
+    # each other (their spans overlap on the other axis). Vectorised, because a
+    # Python-level pairwise loop is far too slow once detection returns a lot of
+    # components - but the vectorised form is O(n^2) in *memory*, so past a few
+    # thousand boxes the cap is skipped rather than allocating gigabytes. A slide
+    # with that many "sections" is noise, where neighbour spacing is meaningless.
+    if len(sections) > _MARGIN_PAIRWISE_MAX:
+        margins = np.maximum(0.0, want).astype(int)
+        return _apply_margins(sections, boxes, margins, image_shape)
+
+    big = np.float64(np.inf)
+    share_rows = ~((y1[:, None] <= y0[None, :]) | (y0[:, None] >= y1[None, :]))
+    share_cols = ~((x1[:, None] <= x0[None, :]) | (x0[:, None] >= x1[None, :]))
+    np.fill_diagonal(share_rows, False)
+    np.fill_diagonal(share_cols, False)
+
+    right = np.where(share_rows & (x0[None, :] >= x1[:, None]),
+                     x0[None, :] - x1[:, None], big)
+    left = np.where(share_rows & (x1[None, :] <= x0[:, None]),
+                    x0[:, None] - x1[None, :], big)
+    below = np.where(share_cols & (y0[None, :] >= y1[:, None]),
+                     y0[None, :] - y1[:, None], big)
+    above = np.where(share_cols & (y1[None, :] <= y0[:, None]),
+                     y0[:, None] - y1[None, :], big)
+    nearest = np.minimum.reduce([
+        right.min(axis=1), left.min(axis=1), below.min(axis=1), above.min(axis=1)
+    ])
+    want = np.minimum(want, nearest / 2.0)
+    margins = np.maximum(0.0, want).astype(int)
+    return _apply_margins(sections, boxes, margins, image_shape)
+
+
+def _apply_margins(
+    sections: list[DetectedSection],
+    boxes: np.ndarray,
+    margins: np.ndarray,
+    image_shape: tuple[int, int],
+) -> list[DetectedSection]:
+    """Grow each box by its margin, clipped to the image. Masks are untouched."""
+    h_img, w_img = image_shape
+    return [
+        DetectedSection(
+            bbox_px=(
+                int(max(0, boxes[i, 0] - m)),
+                int(max(0, boxes[i, 1] - m)),
+                int(min(w_img, boxes[i, 2] + m)),
+                int(min(h_img, boxes[i, 3] + m)),
+            ),
+            mask=sec.mask,
+            area_px=sec.area_px,
+            centroid_px=sec.centroid_px,
+            aspect_ratio=sec.aspect_ratio,
+        )
+        for i, (sec, m) in enumerate(zip(sections, margins, strict=True))
+    ]
 
 
 def _equalize_box_sizes(

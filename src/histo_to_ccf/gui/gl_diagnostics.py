@@ -32,6 +32,14 @@ _EMPTY_REPORT = {
     "version": None, "glsl": None, "error": None,
 }
 
+# The probe's QApplication. This MUST be a module-level reference: in PyQt the
+# Python wrapper owns the C++ object, so ``QApplication([])`` with the result
+# discarded is garbage-collected immediately - ``QApplication.instance()`` is
+# then None and the next GL call dereferences a destroyed application, which
+# segfaults. That made the probe crash on *every* machine and report a broken
+# GPU driver to users whose GPU was perfectly healthy.
+_probe_app = None
+
 
 def gl_report() -> dict:
     """Probe the GL context in a **subprocess** and return the diagnostic dict.
@@ -71,13 +79,17 @@ def gl_report() -> dict:
 
 def _probe_gl() -> dict:
     """Actually create an offscreen GL context and query it. Runs in the child."""
+    global _probe_app
+
     report: dict = dict(_EMPTY_REPORT)
     try:
         from qtpy.QtGui import QOffscreenSurface, QOpenGLContext
         from qtpy.QtWidgets import QApplication
 
+        _probe_app = QApplication.instance() or QApplication([])
         if QApplication.instance() is None:
-            QApplication([])  # noqa: F841 - kept alive by Qt
+            report["error"] = "QApplication could not be created - no GUI session"
+            return report
 
         ctx = QOpenGLContext()
         if not ctx.create():

@@ -445,6 +445,9 @@ class SlideLoaderWidget(QWidget):
         worker.start()
 
     def _on_detected(self, sections) -> None:
+        from histo_to_ccf.gui import crashlog
+
+        crashlog.note(f"detected {len(sections)} sections")
         slide_idx = self._state.active_slide_idx
         if slide_idx is None:
             return

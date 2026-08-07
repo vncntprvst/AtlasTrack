@@ -11,6 +11,14 @@ def launch() -> None:
     """Open the napari viewer with the histo-to-ccf workflow docked."""
     import napari
 
+    from histo_to_ccf.gui import crashlog
+
+    # Armed before anything else: a fault in Qt/vispy/the GL driver kills the
+    # process with no traceback and no dialog, and this is the only thing that
+    # records what the app was doing when it happened.
+    log_path = crashlog.install()
+    print(f"Crash log: {log_path}", file=sys.stderr)
+
     _install_exception_handler()
     try:
         viewer = napari.Viewer(title="Histo-to-CCF")
@@ -23,6 +31,8 @@ def launch() -> None:
         report_launch_failure(exc)
         raise SystemExit(1) from exc
 
+    crashlog.log_gl_info()
+    crashlog.install_input_tracer()
     panel, viz_panel = _build_panel(viewer)
     # Workflow (Registration) on the left; 3D visualization + export on the right.
     viewer.window.add_dock_widget(panel, area="left", name="Registration", tabify=False)

@@ -1,6 +1,276 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-05 · version **0.2.48** · branch **dev**_
+_Last updated: 2026-08-06 · version **0.2.56** · branch **dev**_
+
+## The crash is heap corruption, and the breadcrumbs proved where it is *not* (v0.2.56)
+
+Second captured crash, pid 84172, with breadcrumbs running. Two things settled it:
+
+1. **The log ends on `refresh done`.** The whole matcher redraw - crop, atlas
+   slice, edges, overlay - completed. The fault is not in our redraw path.
+2. **The fault landed 7 s later** (last breadcrumb 14:34:35.963, crash 14:34:43)
+   at ntdll offset `0x3e717` - a **different** offset from the previous crash's
+   `0xb1154`.
+
+Two different crash sites in the heap allocator, arriving well after the last
+logged work, is the classic signature of **heap corruption**: something writes to
+freed or out-of-bounds memory, and the process dies later at an unrelated
+allocation. That is why chasing it through Python breadcrumbs alone will not find
+it - the corrupting write leaves no trace where it happens.
+
+Also ruled out this round: 600 section steps driven from a QTimer on the real
+event loop **with a live napari viewer and GL canvas** (the earlier repro had no
+viewer) are clean.
+
+So v0.2.56 closes the blind spot rather than guessing:
+`crashlog.install_input_tracer()` filters the QApplication and logs every mouse
+press, double-click, key press, wheel and window close with the receiving widget's
+class - mouse *moves* excluded, or the log would drown. Plus breadcrumbs on the
+paths that had none: opacity, zoom, matcher close and tab sync. The session header
+now records `PYTHONMALLOC`, because the next useful run is with the guard bytes on.
+
+**Next**: `$env:PYTHONMALLOC="debug"` before launching makes CPython check its
+allocations and report corruption *where it is detected* rather than crashing
+later. For the native stack, WER `LocalDumps` for python.exe needs an elevated
+shell - not done, it is the user's machine to change.
+
+## The GL diagnostic was crashing itself and blaming the GPU (v0.2.55)
+
+Found while reading the first real crash log. `_probe_gl` did:
+
+```python
+if QApplication.instance() is None:
+    QApplication([])  # noqa: F841 - kept alive by Qt   <-- wrong
+```
+
+In PyQt the Python wrapper **owns** the C++ object, so a discarded
+`QApplication([])` is collected immediately: `QApplication.instance()` is `None`
+on the very next line, and `QOpenGLContext.create()` then dereferences a
+destroyed application and takes the process down with an access violation.
+
+The probe therefore crashed **100% of the time, on every machine**, and
+`gl_report()` turned that into *"No usable OpenGL context could be created at all.
+This is a GPU / driver / session problem"* - accusing the driver on hardware that
+was fine. On this machine the fixed probe reports NVIDIA RTX 5070 Ti, GL 4.6,
+driver 591.74. The fix is a module-level `_probe_app` reference.
+
+Worth keeping in mind: this false report was in the user's crash log and would have
+sent the whole investigation after a driver problem that does not exist.
+`tests/test_gl_diagnostics.py` covers both the reference and a real subprocess run.
+
+## Breadcrumbs, because faulthandler was defeated (v0.2.55)
+
+The first captured crash (pid 68548, 14:00:49, matching the log's own session
+header) died with `ntdll.dll` / `0xc0000005` and **faulthandler wrote nothing** -
+verified armed, and verified working through the whole napari startup by a separate
+test. Some faults never reach CPython's vectored handler.
+
+So `crashlog.note()` writes a flushed breadcrumb *before* each step, making the
+**last line in the log the operation that killed the process**. Wired into the
+matcher (section change, view change, each stage of `_refresh` - crop, atlas slice,
+edges, overlay), the DeepSlice pre-match, section detection, and opening the
+matcher. Coarse by design: one line per user action or expensive step, never per
+repaint. The log rolls over at 5 MB keeping one previous file.
+
+## The GUI now records its own crashes (v0.2.54)
+
+Reported: the whole GUI vanishing, with no error message, while stepping through
+sections in the Atlas matcher on LO_04. "No error message" was the useful clue -
+`_install_exception_handler` puts a `QMessageBox` on every unhandled Python
+exception, so a silent disappearance means the process died **natively**, below
+Python.
+
+Windows had recorded it. `Get-WinEvent -ProviderName 'Application Error'` plus the
+WER report under `C:\ProgramData\Microsoft\Windows\WER\ReportArchive\` (a UTF-16
+`Report.wer`, whose `LoadedModule[...]` lines confirm the process was the napari
+GUI - vispy, PyQt6, `nvoglv64.dll`, SimpleITK):
+
+```
+python.exe  faulting module ntdll.dll  exception 0xc0000005  offset 0xb1174
+```
+
+An access violation inside ntdll's heap code. That kills the process instantly -
+no traceback, no dialog, nothing to send.
+
+**The matcher logic is not the cause, and this was checked rather than assumed.**
+Driving the real LO_04 project headlessly - detect, a real DeepSlice pre-match, its
+actual returned APs, then 240+ section steps across all three views, plus a
+120-notch wheel-zoom stress on the panes - is clean. So is slicing the atlas across
+the whole AP spin range (-15000..5400 bregma), and RSS is flat over hundreds of
+steps.
+
+So `gui/crashlog.py` arms three recorders at `launch()`, writing to
+`~/.histo2ccf/logs/crash.log`:
+
+- **`faulthandler`** - the one that matters. On a native fault it dumps the Python
+  stack of every thread, which is exactly what the WER entry cannot tell us.
+- **a Qt message handler** - Qt warnings, and `qFatal`, which is how PyQt6 ends the
+  process when a Python exception escapes back into C++ (it aborts *silently* if
+  there is no console). The handler dumps the Python stack before returning,
+  because the abort happens the moment it does.
+- **`sys.excepthook` / `threading.excepthook`** - chained, so the existing error
+  dialog still shows; worker-thread exceptions previously went nowhere.
+
+`tests/test_crashlog.py` includes a subprocess test that faults for real and
+asserts the faulting frame appears in the log.
+
+Also fixed while in there: `_ImagePane` / `_StackPane` wheel zoom was unbounded, so
+scrolling drove the view transform to ~1e11 (visible scene rect a billionth of a
+pixel) with no way back by hand. Clamped to 0.02..200 (`_zoom_view`).
+
+**Still open:** the crash itself. It needs one more occurrence to identify - ask
+for `~/.histo2ccf/logs/crash.log` after it next happens. Note that machine also
+logged `LiveKernelEvent 117` (display-driver timeout) and `BlueScreen 0x9f` on the
+same day, though no driver-reset event (System log id 4101) accompanies them.
+
+## Detected boxes keep a margin around the tissue (v0.2.53)
+
+`detect_sections(margin_frac=0.06)` now grows every box outwards. A box that ends
+flush against the tissue leaves the registration nothing to work with on that side:
+the mask and the boundary snap take the *crop border* for the tissue edge, and the
+atlas contour flattens along it - most visibly along the bottom. The user spotted
+this on LO_03 and the before/after QC confirms it (`_add_box_margin`).
+
+Growth is capped at half the clear gap to the nearest other box, so a dense slide
+grid never has neighbouring sections bleeding into each other's crops, and it is
+clipped to the image. Masks are untouched - the margin is background by definition.
+
+The neighbour cap is vectorised, not a Python pairwise loop, because detection on a
+noisy slide can return thousands of components. Past `_MARGIN_PAIRWISE_MAX` (2000)
+boxes it is skipped entirely rather than allocating an n² array - a slide with that
+many "sections" is noise, where neighbour spacing means nothing anyway. Tests:
+`test_split_margin.py` (10), including a performance guard at 2000 boxes.
+
+**Known flaky test, NOT caused by this change.**
+`test_gui_smoke.py::test_open_slides_replaces_image_keeping_registration` started
+hanging indefinitely late in the 2026-08-05 session. It was initially mis-diagnosed
+as a margin regression - one run with `margin_frac=0` passed and one with `0.06`
+hung - but repeating the experiment showed **it hangs with the margin disabled too**,
+so the feature is exonerated. `detect_sections` on that test's uniform image returns
+zero components, so `_add_box_margin` is not even on its path. Everything except
+that file passes: **311 tests, 29 s**. Worth investigating with a fresh machine
+state; running two pytest sessions against this repo at once also reliably deadlocks
+the Qt tests, which may be related.
+
+## LO_03 refined + probe placed (2026-08-05)
+
+Written to **new** files; the user's `LO_03_all.json` was not touched. See
+`E:\TJO\LO_03\Registration\README_REFINED.md`.
+
+- **Boxes** grown ~23 px/side, which fixed the flattened ventral contour.
+- **AP was compressed and it is measurable.** The series had pairs 7-12 µm apart.
+  Consecutive section image correlation is **0.88-0.95 regardless of the claimed
+  step** - a real 7 µm neighbour would correlate ~0.99, and the "301 µm" pair
+  correlates 0.942 against the "7 µm" pair's 0.951 - while correlation falls off
+  smoothly with *position*. So the sections are evenly spaced and the APs were two
+  clusters 300 µm apart: the LO_06 DeepSlice compression again. Replaced with a
+  Theil-Sen line anchored on the middle section: 87.8 µm/section. Mean residual
+  0.219 -> 0.210, worst 0.278 -> 0.202. **The absolute step is inherited, not
+  measured.**
+- **Probe.** Every dye pixel in every section mapped to CCF (1200 points), RANSAC
+  line fitted: entry (11194, 4735, 1137), tip (11198, 4387, 6450), length 5324 µm.
+  Two independent checks pass - within 9% of the 4870 µm insertion depth in
+  `docs/dataset.md`, and the tip lands in **PARN/IRN**, where LO_06 and LO_07 tips
+  landed for the same target. The four shanks are **modelled**, not observed: the
+  dye is one diffuse column, so they are a rigid 250 µm array on the documented 45°
+  roll. Exported 1536 per-channel rows + Paxinos.
+- The Imaris marker sphere is baked into these renders (bright round yellow disc,
+  RGB ~211,182,72) and is excluded by shape+brightness so it cannot pull the fit.
+
+## View controls are enabled only where they act (v0.2.52)
+
+Reported as "opacity and Atlas edges don't work in the Stack view" - they were live
+but had nothing to act on, which reads as broken. The three view controls each apply
+to a different subset of views:
+
+| control | Split | Overlay | Stack | what it drives |
+|---|---|---|---|---|
+| spread | - | - | yes | sheet positions along AP |
+| opacity | - | yes | - | atlas blended over the section (`_overlay_pane` only) |
+| Atlas edges | yes | yes | - | region boundaries on the atlas pane and the overlay |
+
+`_update_view_controls()` now greys out the ones that do not apply, and is called
+both at build time and on every view change; `_current_page()` replaces the inline
+page arithmetic. Same treatment the spread slider already had in v0.2.49 - it was
+just never extended to the other two. Tooltips added to both so their scope is
+stated rather than inferred. Test:
+`test_view_controls_are_enabled_only_where_they_act`.
+
+## Stack view: label placement fixed (v0.2.51)
+
+The first cut placed sheet labels badly on a real 8-section series - pairs a few µm
+apart still collided, and with labels scattered across several rows there was no way
+to tell which label belonged to which sheet. Three causes, all fixed:
+
+- **Row height was a guessed constant (20 units) smaller than the rendered font**, so
+  "staggered" labels still touched. Row height is now `max(measured label height) + 2`.
+- **The collision test compared centre distances against a fixed 110-unit gap**,
+  ignoring how wide the text actually is. It is now a proper interval-overlap test on
+  the measured text width plus `_STACK_LABEL_PAD`, so a long label reserves the room
+  it needs and a short one doesn't waste it.
+- **Nothing tied a dropped label to its sheet.** Each label now has a dotted leader in
+  its own colour from the sheet's bottom-left corner down to the label row.
+
+Labels are also laid out from a shared baseline (below the lowest sheet corner)
+rather than per-sheet, so rows line up across the whole series. `_StackPane` keeps
+`_label_boxes` = `(x0, x1, row, pos)` purely so the placement can be asserted without
+scraping the scene. Tests: no two labels overlap on a row for the real
+three-near-pairs series, and rows collapse back to one when the spread is wide.
+
+## Sections are counted from 1 in the UI, and only in the UI (v0.2.50)
+
+The matcher showed `Section 3  (4 / 8)` - a 0-based id and a 1-based position side
+by side - while the order-check strip named its pairs by the id (`2↔3`). Two
+numbering schemes for the same thing, in one row.
+
+**`Section.index` is deliberately unchanged.** It is a stable internal id: it names
+the transform sidecar (`transforms/section_003.h5`), keys the registered-transform
+and DeepSlice caches, and is what `Shank.tip_section_idx` / `entry_section_idx`
+point at. Renumbering it would mean migrating every project JSON *and* renaming
+every `.h5` sidecar *and* rewriting shank references - real risk for a cosmetic
+gain. So the display counts from 1 and the stored ids never move.
+
+Changed: the matcher's nav label is now `Section 4 of 8` (one number), with a
+tooltip giving the stored index and sidecar name; the order strip, the reference
+label, the assign statuses and the Stack sheet labels all use the same 1-based
+position (`AtlasMatcherDialog._positions_by_index`). The ordering panel's list rows
+follow suit, and its anchor spin is now "Anchor section (1 = first)" - it converts
+to the stored id before calling `assign_section_ap`.
+
+On LO_03 the two now agree: nav reads `Section 4 of 8` and the warning reads
+`AP reverses at 3↔4`, so the section on screen is visibly one of the offending
+pair. Before, they read `Section 3 (4/8)` and `2↔3`.
+
+Not yet converted: the shank pickers (`Shank {index}` in `click_overlay` /
+`ephys_panel`) - those are probe shanks, a separate numbering, left alone here.
+
+## Atlas matcher: Stack view - the AP series as sheets spaced by AP (v0.2.49)
+
+A third view next to Split / Overlay (`_StackPane`, page 2 of the existing
+`QStackedWidget`). Every section is drawn as a parallel sheared sheet, labelled
+`#index  AP ±nnnn`, positioned along x **by its AP** rather than by list position.
+
+That one choice is what makes it a diagnostic rather than decoration:
+
+- two sections DeepSlice put 0.9 µm apart render as coincident sheets;
+- a section whose AP runs backwards visibly folds back past its neighbour;
+- a compressed series bunches instead of fanning out evenly.
+
+On LO_03's real APs the picture shows the hand-set sections (green) interleaved
+among the predicted ones (blue) - which *is* the 2↔3 reversal - with #3/#4 and
+#5/#6 overlapping. After "Assign all" the same view is an even fan in amber.
+
+Details: outline colour comes from `Section.ap_source` (`_AP_SOURCE_COLORS`,
+sharing the provenance added in v0.2.48), the current section is white and thicker,
+and a **spread** slider sets pixels per 100 µm of AP (enabled only in this view) so
+close sections can be pulled apart. Labels of near-coincident sheets are pushed
+onto successive rows, otherwise exactly the interesting case is unreadable.
+Double-click a sheet to jump to that section. Thumbnails are cached on
+`(section.index, bbox)` - re-cropping 24 large sections per redraw is far too slow.
+
+Deliberately **not** a true 3D view: the sheets carry no tilt, so this maps where
+each section sits along AP and nothing more. It also needs no atlas, so it is drawn
+before the atlas guard in `_refresh`. Tests: `test_atlas_matcher_ap.py` (21).
 
 ## Atlas matcher: two AP modes made explicit, and a live series check (v0.2.48)
 

@@ -175,7 +175,7 @@ def test_reference_label_shows_the_anchor(qtbot) -> None:
     dlg._ap_spin.setValue(-1500.0)
     dlg._set_anchor()
 
-    assert "section 1" in dlg._anchor_label.text()
+    assert "section 2" in dlg._anchor_label.text()  # 1-based display of position 1
     assert "-1500" in dlg._anchor_label.text()
 
 
@@ -234,3 +234,175 @@ def test_crop_fingerprint_is_json_safe_and_still_discriminates() -> None:
     assert crop_fingerprint(a) == crop_fingerprint(a.copy())
     assert crop_fingerprint(a) != crop_fingerprint(b)
     assert crop_fingerprint(a) != crop_fingerprint(c)
+
+
+# ---------------------------------------------------------------------------
+# Stack view: the series drawn as sheets spaced by AP
+# ---------------------------------------------------------------------------
+
+@pytest.mark.qt
+def test_stack_view_is_a_third_page_with_its_own_spread_control(qtbot) -> None:
+    state = _state(aps=[10000.0, 10100.0, 10200.0], n=3)
+    dlg = _dialog(qtbot, state)
+
+    assert not dlg._spread.isEnabled(), "spread means nothing outside the stack view"
+    dlg._stack_radio.setChecked(True)
+    assert dlg._stack.currentIndex() == 2
+    assert dlg._spread.isEnabled()
+
+    dlg._overlay_radio.setChecked(True)
+    assert dlg._stack.currentIndex() == 1
+    assert not dlg._spread.isEnabled()
+
+
+@pytest.mark.qt
+def test_sheets_are_positioned_by_ap_not_by_index(qtbot) -> None:
+    # Sections 1 and 2 are 1000 um apart; 0 and 1 only 100 um.
+    state = _state(aps=[10000.0, 10100.0, 11100.0], n=3)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._spread.setValue(100)  # 100 px per 100 um
+    dlg._refresh_stack()
+
+    xs = {pos: x0 for x0, _, pos in dlg._stack_pane._hit}
+    # Bregma AP runs opposite to absolute AP, so the most posterior sits leftmost.
+    assert xs[2] == pytest.approx(0.0)
+    assert xs[1] - xs[2] == pytest.approx(1000.0)
+    assert xs[0] - xs[1] == pytest.approx(100.0)
+
+
+@pytest.mark.qt
+def test_near_duplicate_aps_land_on_top_of_each_other(qtbot) -> None:
+    """The LO_03 pair DeepSlice put 0.9 um apart must visibly coincide."""
+    state = _state(aps=[10782.3, 10783.2, 11500.0], n=3)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._spread.setValue(60)
+    dlg._refresh_stack()
+
+    xs = {pos: x0 for x0, _, pos in dlg._stack_pane._hit}
+    assert abs(xs[0] - xs[1]) < 1.0
+    assert abs(xs[2] - xs[0]) > 100.0
+
+
+@pytest.mark.qt
+def test_spread_slider_scales_the_separation(qtbot) -> None:
+    state = _state(aps=[10000.0, 10500.0], n=2)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+
+    dlg._spread.setValue(50)
+    dlg._refresh_stack()
+    narrow = {p: x for x, _, p in dlg._stack_pane._hit}
+    dlg._spread.setValue(200)
+    dlg._refresh_stack()
+    wide = {p: x for x, _, p in dlg._stack_pane._hit}
+
+    assert wide[0] - wide[1] == pytest.approx(4 * (narrow[0] - narrow[1]))
+
+
+@pytest.mark.qt
+def test_section_without_an_ap_is_shown_beside_its_predecessor(qtbot) -> None:
+    state = _state(n=3)
+    state.project.slides[0].sections[0].plane = PlaneParams(ap_um=10000.0)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._refresh_stack()
+
+    # All three sheets exist; the two unplaced ones are parked, not dropped.
+    assert len(dlg._stack_pane._hit) == 3
+
+
+@pytest.mark.qt
+def test_double_clicking_a_sheet_navigates_to_that_section(qtbot) -> None:
+    state = _state(aps=[10000.0, 10100.0, 10200.0], n=3)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._refresh_stack()
+
+    dlg._on_stack_clicked(2)
+    assert dlg._pos == 2
+    # Displayed 1-based: position 2 is "Section 3 of 3".
+    assert "Section 3 of 3" in dlg._sec_label.text()
+
+
+@pytest.mark.qt
+def test_stack_renders_without_an_atlas(qtbot) -> None:
+    """The stack maps the sections' own APs, so it must not need an atlas."""
+    state = _state(aps=[10000.0, 10100.0], n=2)
+    state.atlas = None
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._refresh(fit=True)
+    assert len(dlg._stack_pane._hit) == 2
+
+
+@pytest.mark.qt
+def test_thumbnails_are_cached_across_redraws(qtbot) -> None:
+    state = _state(aps=[10000.0, 10100.0], n=2)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+
+    dlg._refresh_stack()
+    assert len(dlg._thumb_cache) == 2
+    cached = dict(dlg._thumb_cache)
+    dlg._refresh_stack()
+    assert all(dlg._thumb_cache[k] is v for k, v in cached.items())
+
+
+@pytest.mark.qt
+def test_stack_labels_never_overlap_on_a_row(qtbot) -> None:
+    """Coincident sheets are the signal; their labels must still be readable."""
+    # The user's real series: three pairs only a few um apart.
+    bregma = [-5475, -5550, -5600, -5607, -5908, -5920, -6025, -6033]
+    state = _state(aps=[5400.0 - b for b in bregma], n=8)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._spread.setValue(190)
+    dlg._refresh_stack()
+
+    boxes = dlg._stack_pane._label_boxes
+    assert len(boxes) == 8
+    by_row: dict[int, list[tuple[float, float]]] = {}
+    for x0, x1, row, _ in boxes:
+        by_row.setdefault(row, []).append((x0, x1))
+    for row, spans in by_row.items():
+        spans.sort()
+        for (_, a1), (b0, _) in zip(spans, spans[1:]):
+            assert a1 <= b0, f"labels overlap on row {row}"
+
+    # The near-coincident pairs must have been pushed apart, not left stacked.
+    assert max(row for _, _, row, _ in boxes) >= 1
+
+
+@pytest.mark.qt
+def test_stack_label_rows_collapse_when_spread_is_wide(qtbot) -> None:
+    state = _state(aps=[10000.0, 10400.0, 10800.0], n=3)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+
+    dlg._spread.setValue(400)
+    dlg._refresh_stack()
+    assert {row for _, _, row, _ in dlg._stack_pane._label_boxes} == {0}
+
+
+@pytest.mark.qt
+def test_view_controls_are_enabled_only_where_they_act(qtbot) -> None:
+    """opacity and Atlas edges have nothing to act on in the Stack view."""
+    dlg = _dialog(qtbot, _state(aps=[10000.0, 10100.0], n=2))
+
+    # Split: the atlas pane can draw edges, but there is no blend to adjust.
+    assert not dlg._spread.isEnabled()
+    assert not dlg._opacity.isEnabled()
+    assert dlg._edges_check.isEnabled()
+
+    dlg._overlay_radio.setChecked(True)
+    assert not dlg._spread.isEnabled()
+    assert dlg._opacity.isEnabled()
+    assert dlg._edges_check.isEnabled()
+
+    # Stack shows no atlas at all - only the spread applies.
+    dlg._stack_radio.setChecked(True)
+    assert dlg._spread.isEnabled()
+    assert not dlg._opacity.isEnabled()
+    assert not dlg._edges_check.isEnabled()

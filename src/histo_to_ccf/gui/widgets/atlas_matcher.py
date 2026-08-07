@@ -23,15 +23,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from qtpy.QtCore import Qt
-from qtpy.QtGui import QImage, QPainter, QPixmap
+from qtpy.QtCore import QPointF, Qt, Signal
+from qtpy.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF, QTransform
 from qtpy.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QDialog,
     QDoubleSpinBox,
+    QGraphicsLineItem,
     QGraphicsPixmapItem,
+    QGraphicsPolygonItem,
     QGraphicsScene,
+    QGraphicsTextItem,
     QGraphicsView,
     QGroupBox,
     QHBoxLayout,
@@ -47,6 +50,7 @@ from qtpy.QtWidgets import (
 )
 
 from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+from histo_to_ccf.gui import crashlog
 from histo_to_ccf.gui.workflow import WorkflowState
 
 # How each section's AP was arrived at, shown next to the section navigation so a
@@ -179,8 +183,216 @@ class _ImagePane(QGraphicsView):
             self.fitInView(self._base, Qt.KeepAspectRatio)
 
     def wheelEvent(self, event) -> None:  # noqa: N802 (Qt signature)
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
-        self.scale(factor, factor)
+        _zoom_view(self, event)
+
+
+# Zoom bounds for the wheel. Unclamped, a user who keeps scrolling drives the
+# view transform to ~1e11 (or ~1e-12 the other way), where the visible scene
+# rectangle is a billionth of a pixel and the view is unrecoverable by hand.
+_ZOOM_MIN = 0.02
+_ZOOM_MAX = 200.0
+
+
+def _zoom_view(view: QGraphicsView, event) -> None:
+    """Wheel-zoom ``view`` about the cursor, clamped to a usable range."""
+    factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+    scale = view.transform().m11() * factor
+    if not _ZOOM_MIN <= scale <= _ZOOM_MAX:
+        return
+    crashlog.note(f"matcher: zoom {view.__class__.__name__} -> {scale:.3g}")
+    view.scale(factor, factor)
+
+
+# Outline colour per AP provenance, so a predicted plane and a hand-set one are
+# distinguishable at a glance. Keys match ``Section.ap_source``.
+_AP_SOURCE_COLORS = {
+    "deepslice": "#4da6ff",
+    "manual": "#5fd35f",
+    "even_spacing": "#e0b040",
+    None: "#8a8a8a",
+}
+
+# Vertical shear applied to every sheet, giving the "stack of slides seen from
+# the side" look. Identical for all sheets, so they stay parallel and the only
+# thing that varies along the row is AP.
+_STACK_SHEAR = 0.38
+_STACK_THUMB_H = 210
+# Clear space demanded to the right of a label before another may share its row.
+# Row height and label width are measured from the rendered text, not guessed.
+_STACK_LABEL_PAD = 14.0
+
+
+class _StackPane(QGraphicsView):
+    """The AP series drawn as a row of parallel sheets, positioned **by AP**.
+
+    Spacing the sheets by AP rather than by list position is the whole point: two
+    sections DeepSlice put 1 µm apart render as coincident sheets, and a section
+    whose AP runs backwards visibly folds back past its neighbour. Problems the
+    warning strip states in words become things you can see.
+
+    Deliberately schematic - the sheets carry no tilt, so this is not a 3D view of
+    the cutting planes, just a map of where each section sits along AP.
+    """
+
+    section_clicked = Signal(int)  # position in ap_order
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._scene = QGraphicsScene(self)
+        self.setScene(self._scene)
+        self.setRenderHint(QPainter.Antialiasing, True)
+        self.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setBackgroundBrush(Qt.black)
+        self._hit: list[tuple[float, float, int]] = []  # (x0, x1, position)
+        self._label_boxes: list[tuple[float, float, int, int]] = []  # (x0, x1, row, pos)
+
+    def set_series(
+        self,
+        entries: "list[dict]",
+        *,
+        current_pos: int,
+        px_per_100um: float,
+    ) -> None:
+        """Draw one sheet per entry.
+
+        Each entry is ``{pos, index, ap_bregma, ap_source, pixmap, has_ap}``.
+        ``px_per_100um`` is the spread: how far apart 100 µm of AP is drawn.
+        """
+        self._scene.clear()
+        self._hit = []
+        self._label_boxes = []
+        if not entries:
+            self._scene.setSceneRect(0, 0, 1, 1)
+            return
+
+        aps = [e["ap_bregma"] for e in entries]
+        ap0 = min(aps)
+        scale = px_per_100um / 100.0
+
+        # --- 1. geometry of every sheet, and its label built but not yet placed.
+        sheets: list[dict] = []
+        for entry in entries:
+            pix = entry["pixmap"]
+            if pix is None or pix.isNull():
+                w, h, scaled = 120.0, float(_STACK_THUMB_H), None
+            else:
+                scaled = pix.scaledToHeight(_STACK_THUMB_H, Qt.SmoothTransformation)
+                w, h = float(scaled.width()), float(scaled.height())
+
+            ap_text = f"AP {entry['ap_bregma']:+.0f}" if entry["has_ap"] else "AP -"
+            label = QGraphicsTextItem(f"#{entry['display_no']}   {ap_text}")
+            # Measure the label rather than guessing: a fixed row height smaller
+            # than the font left staggered labels still touching, and a fixed
+            # minimum gap ignored how wide the text actually is.
+            bounds = label.boundingRect()
+            sheets.append(
+                {
+                    "entry": entry,
+                    "x": (entry["ap_bregma"] - ap0) * scale,
+                    "w": w,
+                    "h": h,
+                    "pixmap": scaled,
+                    "label": label,
+                    "label_w": float(bounds.width()),
+                    "label_h": float(bounds.height()),
+                }
+            )
+
+        row_h = max(s["label_h"] for s in sheets) + 2.0
+        baseline = max(_STACK_SHEAR * s["w"] + s["h"] for s in sheets) + 10.0
+
+        # --- 2. drop each label to the first row where its text does not overlap
+        # one already placed. Sections at nearly the same AP *should* pile up -
+        # that is the signal - but their labels must stay readable.
+        placed: list[tuple[float, float, int]] = []  # (x0, x1, row)
+        for sheet in sorted(sheets, key=lambda s: s["x"]):
+            x0 = sheet["x"]
+            x1 = x0 + sheet["label_w"] + _STACK_LABEL_PAD
+            row = 0
+            while any(
+                r == row and not (x1 <= ox0 or x0 >= ox1) for ox0, ox1, r in placed
+            ):
+                row += 1
+            sheet["row"] = row
+            placed.append((x0, x1, row))
+        # Kept so the placement can be asserted on without scraping the scene.
+        self._label_boxes = [
+            (s["x"], s["x"] + s["label_w"] + _STACK_LABEL_PAD, s["row"], s["entry"]["pos"])
+            for s in sheets
+        ]
+
+        # --- 3. draw.
+        for sheet in sheets:
+            entry = sheet["entry"]
+            x, w, h = sheet["x"], sheet["w"], sheet["h"]
+            is_current = entry["pos"] == current_pos
+            colour = QColor(_AP_SOURCE_COLORS.get(entry["ap_source"], "#8a8a8a"))
+            pen_colour = QColor("#ffffff") if is_current else colour
+
+            if sheet["pixmap"] is not None:
+                item = QGraphicsPixmapItem(sheet["pixmap"])
+                item.setTransform(QTransform(1.0, _STACK_SHEAR, 0.0, 1.0, 0.0, 0.0))
+                item.setPos(x, 0.0)
+                item.setZValue(1.0)
+                self._scene.addItem(item)
+
+            outline = QGraphicsPolygonItem(
+                QPolygonF(
+                    [
+                        QPointF(x, 0.0),
+                        QPointF(x + w, _STACK_SHEAR * w),
+                        QPointF(x + w, _STACK_SHEAR * w + h),
+                        QPointF(x, h),
+                    ]
+                )
+            )
+            pen = QPen(pen_colour)
+            pen.setWidthF(4.0 if is_current else 2.0)
+            pen.setCosmetic(True)
+            outline.setPen(pen)
+            outline.setZValue(2.0)
+            self._scene.addItem(outline)
+
+            label_y = baseline + sheet["row"] * row_h
+            # A leader from the sheet's own bottom-left corner down to its label,
+            # so a label pushed onto a lower row still reads as belonging to it.
+            leader = QGraphicsLineItem(x, h, x, label_y + sheet["label_h"] * 0.5)
+            leader_pen = QPen(pen_colour)
+            leader_pen.setWidthF(2.0 if is_current else 1.0)
+            leader_pen.setCosmetic(True)
+            leader_pen.setStyle(Qt.DotLine)
+            leader.setPen(leader_pen)
+            leader.setZValue(2.5)
+            self._scene.addItem(leader)
+
+            label = sheet["label"]
+            label.setDefaultTextColor(pen_colour)
+            label.setPos(x + 4.0, label_y)
+            label.setZValue(3.0)
+            self._scene.addItem(label)
+
+            self._hit.append((x, x + w, entry["pos"]))
+
+        rect = self._scene.itemsBoundingRect()
+        self._scene.setSceneRect(rect.adjusted(-40, -40, 40, 40))
+
+    def fit(self) -> None:
+        if not self._scene.sceneRect().isEmpty():
+            self.fitInView(self._scene.sceneRect(), Qt.KeepAspectRatio)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+        """Double-click a sheet to jump to that section."""
+        x = self.mapToScene(event.pos()).x()
+        # Later sheets are drawn on top, so pick the last one whose span contains x.
+        for x0, x1, pos in reversed(self._hit):
+            if x0 <= x <= x1:
+                self.section_clicked.emit(pos)
+                return
+        super().mouseDoubleClickEvent(event)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+        _zoom_view(self, event)
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +417,7 @@ class AtlasMatcherDialog(QDialog):
         self._pos = 0  # index into the AP-ordered section list
         self._anchor: tuple[int, float] | None = None  # (position, AP-from-bregma)
         self._updating = False
+        self._thumb_cache: dict[tuple, QPixmap] = {}
         self._build_ui()
         self._init_ap_range()
         self._sync_from_tab()
@@ -225,6 +438,7 @@ class AtlasMatcherDialog(QDialog):
 
     def _sync_to_tab(self) -> None:
         """Write AP + spacing back to the Atlas-tab widgets when closing."""
+        crashlog.note("matcher: syncing back to the Atlas tab")
         if self._browser is not None:
             self._browser.set_ap_bregma(self._ap_spin.value())
         panel = self._ordering_panel()
@@ -233,8 +447,10 @@ class AtlasMatcherDialog(QDialog):
             panel.refresh()  # section ordering / AP may have changed
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+        crashlog.note("matcher: closing")
         self._sync_to_tab()
         super().closeEvent(event)
+        crashlog.note("matcher: closed")
 
     # -- ordered sections ------------------------------------------------
 
@@ -244,6 +460,17 @@ class AtlasMatcherDialog(QDialog):
             return []
         slide = self._state.project.slides[idx]
         return sorted(slide.sections, key=lambda s: s.ap_order)
+
+    def _positions_by_index(self) -> dict[int, int]:
+        """``section.index`` -> the 1-based position the UI calls it.
+
+        ``Section.index`` is a stable internal id: it names the transform sidecar
+        (``section_003.h5``), keys the registered-transform and DeepSlice caches,
+        and is what ``Shank.tip_section_idx`` points at. Renumbering it would mean
+        migrating every project file and renaming every sidecar, so the UI counts
+        from 1 for display only and the stored ids never move.
+        """
+        return {s.index: i + 1 for i, s in enumerate(self._ordered_sections())}
 
     def _current_section(self) -> "Section | None":
         ordered = self._ordered_sections()
@@ -370,27 +597,60 @@ class AtlasMatcherDialog(QDialog):
         self._split_radio = QRadioButton("Split")
         self._split_radio.setChecked(True)
         self._overlay_radio = QRadioButton("Overlay")
+        self._stack_radio = QRadioButton("Stack")
+        self._stack_radio.setToolTip(
+            "The whole series as parallel sheets, spaced by AP.\n"
+            "Sections at nearly the same AP overlap; one running backwards folds\n"
+            "back past its neighbour. Double-click a sheet to jump to it."
+        )
         mode_grp = QButtonGroup(self)
         mode_grp.addButton(self._split_radio)
         mode_grp.addButton(self._overlay_radio)
+        mode_grp.addButton(self._stack_radio)
         self._split_radio.toggled.connect(self._on_mode_changed)
+        self._stack_radio.toggled.connect(self._on_mode_changed)
         view_row.addWidget(QLabel("View:"))
         view_row.addWidget(self._split_radio)
         view_row.addWidget(self._overlay_radio)
+        view_row.addWidget(self._stack_radio)
         view_row.addSpacing(16)
-        view_row.addWidget(QLabel("opacity:"))
+        self._spread_label = QLabel("spread:")
+        view_row.addWidget(self._spread_label)
+        self._spread = QSlider(Qt.Horizontal)
+        self._spread.setRange(2, 400)
+        self._spread.setValue(60)  # pixels per 100 µm of AP
+        self._spread.setFixedWidth(120)
+        self._spread.setToolTip(
+            "How far apart 100 µm of AP is drawn in the Stack view.\n"
+            "Turn it up to separate sections that sit close together."
+        )
+        self._spread.valueChanged.connect(self._on_spread_changed)
+        view_row.addWidget(self._spread)
+        view_row.addSpacing(16)
+        self._opacity_label = QLabel("opacity:")
+        view_row.addWidget(self._opacity_label)
         self._opacity = QSlider(Qt.Horizontal)
         self._opacity.setRange(0, 100)
         self._opacity.setValue(50)
         self._opacity.setFixedWidth(120)
+        self._opacity.setToolTip(
+            "How strongly the atlas is blended over the section in the Overlay view."
+        )
         self._opacity.valueChanged.connect(self._update_overlay_only)
         view_row.addWidget(self._opacity)
         self._edges_check = QCheckBox("Atlas edges")
         self._edges_check.setChecked(True)
+        self._edges_check.setToolTip(
+            "Draw atlas region boundaries in green, on the atlas pane (Split) and\n"
+            "over the section (Overlay)."
+        )
         self._edges_check.toggled.connect(lambda: self._refresh())
         view_row.addWidget(self._edges_check)
         view_row.addStretch()
         root.addLayout(view_row)
+        # Each control only acts on some of the views; grey out the ones the
+        # current view has nothing for, rather than leaving them looking broken.
+        self._update_view_controls()
 
         # Center: stacked split / overlay panes.
         self._hist_pane = _ImagePane()
@@ -412,9 +672,13 @@ class AtlasMatcherDialog(QDialog):
         split.addWidget(right)
         split.setSizes([500, 500])
 
+        self._stack_pane = _StackPane()
+        self._stack_pane.section_clicked.connect(self._on_stack_clicked)
+
         self._stack = QStackedWidget()
-        self._stack.addWidget(split)            # page 0: split
+        self._stack.addWidget(split)               # page 0: split
         self._stack.addWidget(self._overlay_pane)  # page 1: overlay
+        self._stack.addWidget(self._stack_pane)    # page 2: AP stack
         root.addWidget(self._stack, 1)
 
         # Bottom: the one-shot automatic pass on the left, well away from the
@@ -480,6 +744,7 @@ class AtlasMatcherDialog(QDialog):
 
     def _on_section_changed(self) -> None:
         """Section navigation: update the AP shown, then redraw."""
+        crashlog.note(f"matcher: go to section {self._pos + 1}")
         section = self._current_section()
         if section is None:
             self._refresh(fit=True)
@@ -503,9 +768,45 @@ class AtlasMatcherDialog(QDialog):
             self._set_ap_silent(self._linked_ap_bregma(self._pos))
         self._refresh()
 
+    def _current_page(self) -> int:
+        if self._stack_radio.isChecked():
+            return 2
+        return 0 if self._split_radio.isChecked() else 1
+
+    def _update_view_controls(self) -> None:
+        """Enable only the controls the current view actually acts on.
+
+        - **spread** positions the sheets, so it means something in Stack only.
+        - **opacity** blends the atlas over the section, which only the Overlay
+          view does.
+        - **Atlas edges** draws region boundaries on the atlas pane (Split) and
+          over the section (Overlay); the Stack view shows no atlas at all.
+
+        Leaving all three live everywhere made two of them look broken in Stack.
+        """
+        page = self._current_page()
+        for widget, active in (
+            (self._spread, page == 2),
+            (self._spread_label, page == 2),
+            (self._opacity, page == 1),
+            (self._opacity_label, page == 1),
+            (self._edges_check, page in (0, 1)),
+        ):
+            widget.setEnabled(active)
+
     def _on_mode_changed(self) -> None:
-        self._stack.setCurrentIndex(0 if self._split_radio.isChecked() else 1)
+        crashlog.note(f"matcher: view page {self._current_page()}")
+        self._stack.setCurrentIndex(self._current_page())
+        self._update_view_controls()
         self._refresh(fit=True)
+
+    def _on_spread_changed(self) -> None:
+        if self._stack_radio.isChecked():
+            self._refresh_stack(fit=True)
+
+    def _on_stack_clicked(self, pos: int) -> None:
+        self._pos = pos
+        self._on_section_changed()
 
     def _set_ap_silent(self, ap_bregma: float) -> None:
         self._updating = True
@@ -530,7 +831,7 @@ class AtlasMatcherDialog(QDialog):
         pos, ap = self._anchor
         ordered = self._ordered_sections()
         name = (
-            f"section {ordered[pos].index}"
+            f"section {pos + 1}"
             if 0 <= pos < len(ordered)
             else f"position {pos + 1}"
         )
@@ -574,7 +875,7 @@ class AtlasMatcherDialog(QDialog):
         self._write_ap(section, self._bregma_to_absolute(self._ap_spin.value()), "manual")
         self._status.setText(
             f"Assigned AP={self._ap_spin.value():.0f} µm (from bregma) to "
-            f"section {section.index}."
+            f"section {self._pos + 1}."
         )
 
     def _assign_all(self) -> None:
@@ -596,7 +897,7 @@ class AtlasMatcherDialog(QDialog):
         note = " (reference taken from the current section)" if auto_anchored else ""
         self._status.setText(
             f"Assigned AP to all {len(ordered)} sections: section "
-            f"{ordered[anchor_pos].index} @ {anchor_ap:.0f} µm stepping by "
+            f"{anchor_pos + 1} @ {anchor_ap:.0f} µm stepping by "
             f"{self._spacing_spin.value():.0f} µm {per}{note}."
         )
         self._refresh()
@@ -685,6 +986,7 @@ class AtlasMatcherDialog(QDialog):
         self._status.setText(
             f"Running DeepSlice on {len(section_images)} section(s) (first run is slow)…"
         )
+        crashlog.note(f"DeepSlice pre-match starting on {len(section_images)} sections")
         worker = deepslice_worker(section_images, atlas, ds_dir, order=order)
         worker.returned.connect(lambda anch: self._apply_prematch(anch, section_images))
         worker.errored.connect(self._on_prematch_error)
@@ -732,6 +1034,7 @@ class AtlasMatcherDialog(QDialog):
                 self._state.deepslice_fingerprints[idx] = fp
             n += 1
 
+        crashlog.note(f"DeepSlice pre-match applied to {n} sections")
         self._seed_spacing_from_planes()
         # Show the current section's freshly-assigned AP, then redraw.
         section = self._current_section()
@@ -742,6 +1045,56 @@ class AtlasMatcherDialog(QDialog):
             f"Pre-matched {n} section(s) with DeepSlice. Fine-tune AP here, then "
             "Assign / register."
         )
+
+    def _stack_thumbnail(self, section: "Section") -> "QPixmap | None":
+        """Cached, display-windowed thumbnail of a section, for the Stack view.
+
+        Cached on the section's identity *and* its bbox, so re-cropping every
+        section on every redraw (24 large crops) doesn't make the view crawl.
+        """
+        key = (section.index, tuple(section.bbox_px))
+        hit = self._thumb_cache.get(key)
+        if hit is not None:
+            return hit
+        crop = self._section_crop(section)
+        if crop is None:
+            return None
+        pix = _to_pixmap(_display_histology(crop, section.levels))
+        if pix.height() > _STACK_THUMB_H:
+            pix = pix.scaledToHeight(_STACK_THUMB_H, Qt.SmoothTransformation)
+        self._thumb_cache[key] = pix
+        return pix
+
+    def _refresh_stack(self, fit: bool = False) -> None:
+        """Redraw the AP stack from the current section list."""
+        ordered = self._ordered_sections()
+        entries: list[dict] = []
+        last_ap = 0.0
+        for pos, section in enumerate(ordered):
+            has_ap = section.plane is not None
+            if has_ap:
+                last_ap = self._absolute_to_bregma(section.plane.ap_um)
+            entries.append(
+                {
+                    "pos": pos,
+                    "index": section.index,
+                    # 1-based, matching what the rest of the UI calls this section.
+                    "display_no": pos + 1,
+                    # A section with no AP yet is parked beside its predecessor
+                    # rather than dropped, so it is visibly still to be placed.
+                    "ap_bregma": last_ap,
+                    "has_ap": has_ap,
+                    "ap_source": section.ap_source,
+                    "pixmap": self._stack_thumbnail(section),
+                }
+            )
+        self._stack_pane.set_series(
+            entries,
+            current_pos=self._pos,
+            px_per_100um=float(self._spread.value()),
+        )
+        if fit:
+            self._stack_pane.fit()
 
     def _refresh_order_check(self) -> None:
         """Keep the AP-series health strip current after *any* change.
@@ -769,8 +1122,12 @@ class AtlasMatcherDialog(QDialog):
                 self._order_label.setVisible(False)
             return
 
+        pos_of = self._positions_by_index()
+
         def _fmt(pairs: "list[tuple[int, int]]") -> str:
-            return ", ".join(f"{a}↔{b}" for a, b in pairs)
+            return ", ".join(
+                f"{pos_of.get(a, a)}↔{pos_of.get(b, b)}" for a, b in pairs
+            )
 
         parts = []
         if reversed_pairs:
@@ -803,6 +1160,7 @@ class AtlasMatcherDialog(QDialog):
 
     def _update_overlay_only(self) -> None:
         """Cheap path for the opacity slider - just retint the existing overlay."""
+        crashlog.note(f"matcher: opacity {self._opacity.value()}")
         self._overlay_pane.set_overlay(
             self._overlay_pane._overlay.pixmap(), self._opacity.value() / 100.0
         )
@@ -812,21 +1170,39 @@ class AtlasMatcherDialog(QDialog):
         section = self._current_section()
         ordered = self._ordered_sections()
         if section is not None:
+            # One number, counted from 1 - showing both a 0-based id and a 1-based
+            # position side by side ("Section 3 (4/8)") was just confusing.
             self._sec_label.setText(
-                f"Section {section.index}  ({self._pos + 1} / {len(ordered)})"
+                f"Section {self._pos + 1} of {len(ordered)}"
                 f"   ·   AP: {_AP_SOURCE_LABELS.get(section.ap_source, 'not set')}"
+            )
+            self._sec_label.setToolTip(
+                f"Stored as index {section.index} in the project file and in "
+                f"transforms/section_{section.index:03d}.h5."
             )
         else:
             self._sec_label.setText("No sections")
+            self._sec_label.setToolTip("")
         self._refresh_order_check()
         self._prev_btn.setEnabled(self._pos > 0)
         self._next_btn.setEnabled(bool(ordered) and self._pos < len(ordered) - 1)
+
+        # The stack needs no atlas - it is a map of the sections' own APs - so
+        # draw it before the atlas guard below returns.
+        if self._stack_radio.isChecked():
+            self._refresh_stack(fit=fit)
 
         if atlas is None:
             self._status.setText("Load an atlas in the Atlas tab first.")
             return
 
         crop = self._section_crop(section) if section is not None else None
+
+        # Breadcrumbs through the redraw. The GUI has been dying here with an
+        # access violation that leaves faulthandler nothing to dump, so the last
+        # breadcrumb on disk is what names the step that killed it.
+        crashlog.note(f"matcher refresh: section {self._pos + 1}, crop "
+                      f"{None if crop is None else crop.shape}")
 
         # Histology pane.
         if crop is not None:
@@ -838,13 +1214,16 @@ class AtlasMatcherDialog(QDialog):
 
         # Atlas pane (native DV x ML aspect).
         dv, ml = atlas.reference.shape[1], atlas.reference.shape[2]
+        crashlog.note(f"  atlas slice at AP {ap_abs:.0f} um -> {dv}x{ml}")
         ref, ann = self._atlas_slice(ap_abs, (dv, ml))
         self._atlas_pane.set_base(_to_pixmap(_display_reference(ref)), fit=fit)
+        crashlog.note("  atlas edges")
         self._atlas_pane.set_edges(_edges_pixmap(ann) if self._edges_check.isChecked() else None)
 
         # Overlay pane (atlas resampled onto the section grid).
         if crop is not None:
             h, w = crop.shape[:2]
+            crashlog.note(f"  overlay slice -> {h}x{w}")
             o_ref, o_ann = self._atlas_slice(ap_abs, (h, w))
             self._overlay_pane.set_base(_to_pixmap(_display_histology(crop, section_levels)), fit=fit)
             self._overlay_pane.set_overlay(
@@ -853,3 +1232,4 @@ class AtlasMatcherDialog(QDialog):
             self._overlay_pane.set_edges(
                 _edges_pixmap(o_ann) if self._edges_check.isChecked() else None
             )
+        crashlog.note("  refresh done")

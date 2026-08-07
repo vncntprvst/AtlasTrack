@@ -13,6 +13,23 @@ if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
 
 
+def section_display_no(project, section) -> int:
+    """1-based position of ``section`` in its slide's AP order - what the UI calls it.
+
+    ``Section.index`` stays 0-based and is never renumbered: it names the transform
+    sidecar (``transforms/section_003.h5``), keys the registered-transform and
+    DeepSlice caches, and is what ``Shank.tip_section_idx`` points at. Only the
+    display counts from 1, so every panel says the same number for a section.
+    Falls back to ``index + 1`` if the section isn't found.
+    """
+    for slide in project.slides:
+        ordered = sorted(slide.sections, key=lambda s: s.ap_order)
+        for pos, candidate in enumerate(ordered):
+            if candidate is section or candidate.index == section.index:
+                return pos + 1
+    return int(section.index) + 1
+
+
 def crop_fingerprint(arr: np.ndarray) -> list[float]:
     """Cheap content signature of a section crop (shape + pixel sum).
 

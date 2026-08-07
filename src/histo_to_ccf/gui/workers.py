@@ -258,7 +258,7 @@ def register_worker_progressive(
 
     failed: list[int] = []
     for i, (slide_idx, slide, section) in enumerate(tasks):
-        yield {"current": i, "total": n_total, "msg": f"Registering section {section.index} ({i + 1}/{n_total})…"}
+        yield {"current": i, "total": n_total, "msg": f"Registering section {i + 1} of {n_total}…"}
         logger.info("Registering section {} ({}/{})", section.index, i + 1, n_total)
 
         img = section_images[section.index]
@@ -309,7 +309,7 @@ def register_worker_progressive(
             logger.warning("Section {} failed: {}", section.index, exc)
             yield {
                 "current": i + 1, "total": n_total,
-                "msg": f"Section {section.index} FAILED: {str(exc).splitlines()[-1][:120]}",
+                "msg": f"Section {i + 1} FAILED: {str(exc).splitlines()[-1][:120]}",
             }
             continue
         logger.info("Section {} done (residual={})", section.index, reg.residual)
@@ -326,7 +326,7 @@ def register_worker_progressive(
             atlas_resolution_um=res_um,
         )
         res_str = f"{reg.residual:.4f}" if reg.residual is not None else "n/a"
-        yield {"current": i + 1, "total": n_total, "msg": f"Section {section.index} done (residual={res_str})"}
+        yield {"current": i + 1, "total": n_total, "msg": f"Section {i + 1} done (residual={res_str})"}
 
     if failed:
         yield {

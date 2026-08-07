@@ -241,8 +241,10 @@ class AtlasBrowserWidget(QWidget):
         if self._state.active_slide_idx is None:
             self._assign_status.setText("Load a slide with sections first.")
             return
+        from histo_to_ccf.gui import crashlog
         from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
 
+        crashlog.note("opening the Atlas matcher")
         # Keep a reference so the non-modal dialog is not garbage-collected.
         # Pass this browser so the matcher seeds its AP/spacing from the tab on
         # open and writes them back on close (sync with the Atlas tab).
