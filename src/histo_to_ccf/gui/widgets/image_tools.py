@@ -75,11 +75,11 @@ class ImageToolsWidget(QWidget):
         # Refresh the section list whenever section scope is chosen.
         self._scope_section.toggled.connect(self._on_scope_section_toggled)
 
-        # Everything below heads a single "Adjustments" block, set apart from the
-        # slide-loading controls above it in this tab. Scope is added last (see
-        # the end of this method): it qualifies Flip and Levels, so it reads
-        # better after the things it qualifies than before them.
+        # "Adjustments" heads this block, set apart from the slide-loading
+        # controls above it in this tab. Scope comes first: it says what Flip and
+        # Levels below will act on.
         layout.addWidget(section_header("Adjustments", top_margin=4))
+        layout.addWidget(scope_box)
 
         # Flip controls
         flip_box = QGroupBox("Flip")
@@ -124,7 +124,6 @@ class ImageToolsWidget(QWidget):
         auto_btn.clicked.connect(self._auto_levels)
         levels_layout.addWidget(auto_btn)
         layout.addWidget(levels_box)
-        layout.addWidget(scope_box)
         layout.addStretch()
 
     # ------------------------------------------------------------------

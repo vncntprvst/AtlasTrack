@@ -53,12 +53,13 @@ def test_hline_is_a_horizontal_rule(qtbot) -> None:
     assert line.frameShape() == QFrame.HLine
 
 
-def test_histology_groups_run_adjustments_flip_levels_scope(qtbot) -> None:
+def test_histology_groups_run_adjustments_scope_flip_levels(qtbot) -> None:
+    """Scope first: it says what Flip and Levels below will act on."""
     widget = ImageToolsWidget(WorkflowState())
     qtbot.addWidget(widget)
 
     labels = _labels(widget)
-    order = [labels.index(t) for t in ("Adjustments", "Flip", "Levels (display)", "Scope")]
+    order = [labels.index(t) for t in ("Adjustments", "Scope", "Flip", "Levels (display)")]
 
     assert order == sorted(order), f"unexpected order: {labels}"
 
@@ -79,10 +80,44 @@ def test_probes_tab_heads_the_marker_controls(qtbot) -> None:
     assert labels.index("Probe markers") < labels.index("Marker type:")
 
 
-def test_landmark_contour_is_thin_enough_to_see_through(qtbot) -> None:
-    """The drag preview drew a 5px contour that covered the anatomy."""
-    from histo_to_ccf.gui.widgets.register_panel import _LANDMARK_CONTOUR_THICKNESS
+def test_landmark_preview_matches_the_normal_overlay_width() -> None:
+    """The drag preview must be a 1px contour like the ordinary overlay.
 
-    assert _LANDMARK_CONTOUR_THICKNESS < 2
-    # 0 would break the contour into dots once the points spread under the warp.
-    assert _LANDMARK_CONTOUR_THICKNESS >= 1
+    Thickening the splat was the old fix for the holes the warp opens; it hid
+    the anatomy. Gaps are closed instead.
+    """
+    from histo_to_ccf.gui.widgets.register_panel import (
+        _LANDMARK_CONTOUR_CLOSE_GAPS,
+        _LANDMARK_CONTOUR_THICKNESS,
+    )
+
+    assert _LANDMARK_CONTOUR_THICKNESS == 0
+    assert _LANDMARK_CONTOUR_CLOSE_GAPS >= 3
+
+
+def test_closing_mends_the_warped_contour_without_widening_it() -> None:
+    """Closing must bridge holes at roughly the ink of a plain 1px splat."""
+    import numpy as np
+    from scipy import ndimage as ndi
+
+    from histo_to_ccf.registration.landmarks_warp import warp_contour_image
+
+    # A dense ring, warped by a mild stretch that pulls its pixels apart.
+    theta = np.linspace(0, 2 * np.pi, 900, endpoint=False)
+    edge_rc = np.column_stack([60 + 40 * np.sin(theta), 60 + 40 * np.cos(theta)])
+    source = np.array([[20.0, 20.0], [100.0, 20.0], [20.0, 100.0], [100.0, 100.0]])
+    target = source * 1.25
+
+    plain = warp_contour_image(edge_rc, source, target, (160, 160))
+    closed = warp_contour_image(edge_rc, source, target, (160, 160), close_gaps=3)
+    thick = warp_contour_image(edge_rc, source, target, (160, 160), thickness=1)
+
+    n_plain = int(plain.sum())
+    struct = np.ones((3, 3))
+    frag_plain = ndi.label(plain, structure=struct)[1]
+    frag_closed = ndi.label(closed, structure=struct)[1]
+
+    assert frag_closed <= frag_plain, "closing must not fragment the contour further"
+    # Far less ink than thickening, which is the whole point.
+    assert int(closed.sum()) < int(thick.sum())
+    assert int(closed.sum()) < 2 * n_plain

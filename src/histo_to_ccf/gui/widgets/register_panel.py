@@ -33,11 +33,14 @@ def _error_dialog(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.critical(parent, title, str(message)[:2000])
 
 
-# Half-width of the block each warped boundary point is splatted into during the
-# live landmark drag, so the re-warped contour reads as lines rather than dots.
-# 1 gives a 3px line; 2 (the original) gave 5px, which at typical section zoom
-# painted over the anatomy the landmarks are being aligned against.
-_LANDMARK_CONTOUR_THICKNESS = 1
+# The live landmark-drag preview must look like the ordinary atlas overlay: a
+# 1-pixel contour. Thickening the splat was the old way to stop the warped
+# points reading as dots, but it doubled (thickness=1) or trebled (=2) the ink
+# and hid the anatomy being aligned against. Instead splat 1 pixel and close the
+# holes the warp opens: measured on a real section that is 1.1x the un-warped
+# overlay's ink with 7 fragments, against 2.1x and 2 for thickness=1.
+_LANDMARK_CONTOUR_THICKNESS = 0
+_LANDMARK_CONTOUR_CLOSE_GAPS = 3
 
 
 class RegisterPanelWidget(QWidget):
@@ -232,7 +235,10 @@ class RegisterPanelWidget(QWidget):
         self._overlay_btn.clicked.connect(self._show_overlay)
         layout.addWidget(self._overlay_btn)
 
-        # Manual per-section atlas correction (drag in the viewer).
+        # Manual per-section atlas correction (drag in the viewer). Set well
+        # apart from the automatic registration controls above - it is the
+        # by-hand fallback for sections the automatic fit got wrong.
+        layout.addSpacing(18)
         adjust_box = QGroupBox("Manual atlas adjustment")
         av = QVBoxLayout(adjust_box)
         sec_row = QHBoxLayout()
@@ -1201,6 +1207,7 @@ class RegisterPanelWidget(QWidget):
         img = warp_contour_image(
             self._lm_base_edge_rc, source, target, self._lm_base_shape,
             thickness=_LANDMARK_CONTOUR_THICKNESS,
+            close_gaps=_LANDMARK_CONTOUR_CLOSE_GAPS,
         )
         self._viewer.layers[name].data = img
 

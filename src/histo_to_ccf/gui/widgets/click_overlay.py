@@ -97,7 +97,8 @@ class ClickOverlayWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        layout.addWidget(section_header("Probe markers", top_margin=4))
+        # First thing in the panel, so no gap above it.
+        layout.addWidget(section_header("Probe markers", top_margin=0))
 
         mode_row = QHBoxLayout()
         # "Mode" said nothing about what it selected; these radios choose which

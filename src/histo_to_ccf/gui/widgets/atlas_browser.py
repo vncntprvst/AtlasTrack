@@ -93,8 +93,8 @@ class AtlasBrowserWidget(QWidget):
         layout.addWidget(self._atlas_status)
 
         # The AP controls are a distinct job from choosing and loading an atlas
-        # above, so they get their own heading.
-        layout.addWidget(section_header("AP assignment"))
+        # above, so they get their own heading and a clear gap before it.
+        layout.addWidget(section_header("AP assignment", top_margin=22))
 
         # AP position, shown relative to bregma (bregma = 0, anterior positive).
         ap_row = QHBoxLayout()

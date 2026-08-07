@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.gui.widgets.separators import section_header
 from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
 from histo_to_ccf.gui.workflow import WorkflowState
 from histo_to_ccf.sectioning.ordering import geometric_order
@@ -37,6 +38,10 @@ class OrderingPanelWidget(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+
+        # This panel sits below the atlas browser in the Atlas tab, so it needs
+        # its own heading to read as a separate job from AP assignment above.
+        layout.addWidget(section_header("Section order and spacing", top_margin=22))
 
         spacing_row = QHBoxLayout()
         spacing_row.addWidget(QLabel("Section spacing (µm):"))

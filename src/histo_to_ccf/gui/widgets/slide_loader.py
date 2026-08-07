@@ -16,6 +16,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.gui.widgets.separators import section_header
 from histo_to_ccf.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
@@ -74,6 +75,7 @@ class SlideLoaderWidget(QWidget):
         self._on_sections_detected = on_sections_detected
         self._box_layer = None  # editable rectangle Shapes layer
         self._syncing_boxes = False  # re-entrancy guard for the data handler
+        self._committing_drawn = False  # same, for the draw-to-add handler
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -97,6 +99,10 @@ class SlideLoaderWidget(QWidget):
         layout.addWidget(load_box)
 
         # --- Detection params -------------------------------------------
+        # Detection and box editing are one job - finding each section's
+        # bounding box - so they sit under a shared heading, apart from loading.
+        layout.addWidget(section_header("Section bounding boxes", top_margin=18))
+
         params_box = QGroupBox("Section detection")
         params_layout = QVBoxLayout(params_box)
 
@@ -153,36 +159,29 @@ class SlideLoaderWidget(QWidget):
         layout.addWidget(self._status)
 
         # --- Edit detected sections ------------------------------------
-        edit_box = QGroupBox("Edit sections")
+        edit_box = QGroupBox("Edit section boxes")
         edit_layout = QVBoxLayout(edit_box)
 
-        boxes_btn = QPushButton("Edit boxes (resize / move / add / delete)")
+        boxes_btn = QPushButton("Edit boxes (resize / move / delete)")
         boxes_btn.setToolTip(
             "Turn the detections into draggable rectangles:\n"
             "  • hover an edge or corner handle and drag to resize\n"
             "  • drag inside a box to move it\n"
             "  • press Delete to remove the selected box\n"
-            "  • use the rectangle tool to add a missed section\n"
-            "Edits are saved to the project as you go."
+            "Edits are saved to the project as you go.\n"
+            "To add a box that detection missed, use 'Draw new bounding box'."
         )
         boxes_btn.clicked.connect(self._edit_boxes)
         edit_layout.addWidget(boxes_btn)
 
-        draw_btn = QPushButton("Draw new section…")
+        draw_btn = QPushButton("Draw new bounding box")
         draw_btn.setToolTip(
-            "Activate rectangle-draw mode in the viewer.\n"
-            "Draw a box around a missed or under-detected section,\n"
-            "then click 'Add drawn section' to register it."
+            "Activate rectangle-draw mode in the viewer. Each rectangle you draw\n"
+            "becomes a section straight away - keep drawing for several, and\n"
+            "delete any you don't want with 'Edit boxes'."
         )
         draw_btn.clicked.connect(self._start_draw)
-
-        self._add_drawn_btn = QPushButton("Add drawn section")
-        self._add_drawn_btn.setToolTip("Commit the rectangle you just drew as a new section.")
-        self._add_drawn_btn.setEnabled(False)
-        self._add_drawn_btn.clicked.connect(self._commit_drawn)
-
         edit_layout.addWidget(draw_btn)
-        edit_layout.addWidget(self._add_drawn_btn)
         layout.addWidget(edit_box)
         layout.addStretch()
 
@@ -495,38 +494,60 @@ class SlideLoaderWidget(QWidget):
         )
         draw_layer.mode = "add_rectangle"
         self._viewer.layers.selection.active = draw_layer
-        self._add_drawn_btn.setEnabled(True)
-        self._status.setText("Draw a rectangle in the viewer, then click 'Add drawn section'.")
+        # Each finished rectangle becomes a section immediately - the old flow
+        # needed a separate "Add drawn section" click, which was easy to forget
+        # and silently lost the box.
+        draw_layer.events.data.connect(self._commit_drawn)
+        self._status.setText(
+            "Draw a rectangle in the viewer - each one is added as a section. "
+            "Keep drawing for more."
+        )
 
-    def _commit_drawn(self) -> None:
+    def _commit_drawn(self, event=None) -> None:
+        """Turn every rectangle drawn since the last commit into a section."""
+        if self._committing_drawn:
+            return  # our own clear of the temp layer re-fires this event
         if self._viewer is None or _DRAW_LAYER not in self._viewer.layers:
-            self._status.setText("No drawn rectangle found.")
             return
         draw_layer = self._viewer.layers[_DRAW_LAYER]
-        if len(draw_layer.data) == 0:
-            self._status.setText("No rectangle drawn yet.")
+        shapes = [np.asarray(s) for s in draw_layer.data]
+        if not shapes:
+            return
+        slide_idx = self._state.active_slide_idx
+        if slide_idx is None:
             return
 
-        shape = np.asarray(draw_layer.data[-1])   # (4, 2) [row, col]
-        y0 = int(shape[:, 0].min())
-        y1 = int(shape[:, 0].max())
-        x0 = int(shape[:, 1].min())
-        x1 = int(shape[:, 1].max())
-
-        slide_idx = self._state.active_slide_idx
-        slide = self._state.project.slides[slide_idx]
-        next_idx = max((s.index for s in slide.sections), default=-1) + 1
         from histo_to_ccf.project.schema import Section
 
-        slide.sections.append(Section(
-            index=next_idx,
-            slide_idx=slide_idx,
-            bbox_px=(x0, y0, x1, y1),
-            ap_order=len(slide.sections),
-        ))
-        self._viewer.layers.remove(_DRAW_LAYER)
-        self._add_drawn_btn.setEnabled(False)
-        self._status.setText(f"Added section {next_idx} ({x1 - x0}×{y1 - y0} px)")
+        self._committing_drawn = True
+        try:
+            slide = self._state.project.slides[slide_idx]
+            added = []
+            for shape in shapes:                       # (4, 2) [row, col]
+                y0, y1 = int(shape[:, 0].min()), int(shape[:, 0].max())
+                x0, x1 = int(shape[:, 1].min()), int(shape[:, 1].max())
+                if x1 <= x0 or y1 <= y0:
+                    continue  # a click without a drag
+                next_idx = max((s.index for s in slide.sections), default=-1) + 1
+                slide.sections.append(Section(
+                    index=next_idx,
+                    slide_idx=slide_idx,
+                    bbox_px=(x0, y0, x1, y1),
+                    ap_order=len(slide.sections),
+                ))
+                added.append(next_idx)
+            if not added:
+                return
+            # Clear the temp layer: the box is now drawn by the section outlines,
+            # and leaving it would double up and re-commit on the next rectangle.
+            draw_layer.data = []
+        finally:
+            self._committing_drawn = False
+
+        self._status.setText(
+            f"Added section(s) {added} - keep drawing, or use 'Edit boxes' to "
+            "adjust or delete."
+        )
         self._redraw_outlines()
 
     # ------------------------------------------------------------------

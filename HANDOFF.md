@@ -1,6 +1,33 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-07 · version **0.2.58** · branch **dev**_
+_Last updated: 2026-08-07 · version **0.2.59** · branch **dev**_
+
+## Panel grouping pass, round 2 (v0.2.59)
+
+- **Landmark preview contour now matches the normal overlay.** `thickness=1` was
+  still 2.1x the ink of the un-warped overlay. The warp perforates a plain 1px
+  splat (39 fragments vs the overlay's 3, measured on a real section), and
+  thickening was the wrong cure - it widens the whole line. `warp_contour_image`
+  gained `close_gaps`: splat 1px, then binary-close. Measured **1.1x the ink,
+  7 fragments**. Preview now uses `thickness=0, close_gaps=3`.
+- **Drawn boxes commit themselves.** "Add drawn section" is gone; `_start_draw`
+  connects the temp layer's `events.data`, so each finished rectangle becomes a
+  section at once and the layer clears for the next (re-entrancy guarded by
+  `_committing_drawn`, since clearing re-fires the event). Draw several in a row;
+  delete unwanted ones with Edit boxes.
+- Renames: group "Edit sections" → **"Edit section boxes"**; "Edit boxes (resize /
+  move / **add** / delete)" → drops the `add` (it was redundant with the draw
+  button, which is now the one way to add); "Draw new section…" → **"Draw new
+  bounding box"**. New "Section bounding boxes" header over detection + editing.
+- Scope moved back **above** Flip/Levels, under the Adjustments header.
+- Atlas tab: bigger gap above "AP assignment"; new "Section order and spacing"
+  header over the ordering panel. Register: 18px above "Manual atlas adjustment".
+  Probes: "Probe markers" flush to the top of the panel.
+
+**`test_gui_smoke.py` is not hanging - it is slow.** `test_open_slides_replaces_
+image_keeping_registration` takes ~42 s on its own (the whole file runs in 20 s
+when warm), so a short timeout cuts it off mid-run and it looks hung. That is
+what the 2026-08-05/06 "indefinite hang" was. Full suite: 398 passed.
 
 ## Panel grouping pass (v0.2.58)
 
