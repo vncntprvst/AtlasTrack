@@ -32,6 +32,11 @@ class RegisterResult:
     transform: sitk.Transform
     residual_rms: float
     n_iterations: int
+    # Set when the masked attempt failed and the section was rescued by an
+    # unmasked retry (see ``register_section_image``). Worth surfacing: the
+    # section IS registered, but without the label-excluding mask, so it
+    # deserves a look.
+    used_mask_fallback: bool = False
 
 
 def _to_sitk(image: np.ndarray) -> sitk.Image:

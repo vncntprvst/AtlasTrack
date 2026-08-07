@@ -192,11 +192,13 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     ephys_panel = EphysPanelWidget(state, viewer)
     ephys_layout.addWidget(ephys_panel)
 
-    # Tab order: Histology → Atlas → Probes → Register → Ephys.
+    # Tab order follows the workflow: load the histology, set each section's AP
+    # against the atlas, register, then mark probes on the registered sections
+    # and align ephys to them.
     tabs.addTab(tab_load, "Histology")
     tabs.addTab(tab_atlas, "Atlas")
-    tabs.addTab(tab_annotate, "Probes")
     tabs.addTab(tab_register, "Register")
+    tabs.addTab(tab_annotate, "Probes")
     tabs.addTab(tab_ephys, "Ephys")
 
     # 3D visualization + export live in their own permanent panel (right dock),

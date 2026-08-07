@@ -126,7 +126,7 @@ The app opens a napari viewer with a **left dock** of five workflow tabs -
    (first download is slow; later loads are instant and offline-safe).
 2. Quick manual path: set **AP from bregma (µm)** and a section index, then
    **Assign AP to section**.
-3. Interactive path: **Open atlas matcher…**
+3. Interactive path: **Open atlas matcher**
    - **Split** view shows histology left / atlas right; **Overlay** blends them
      (use the **opacity** slider and **Atlas edges**).
    - Step with **◀ Section / Section ▶**; tune **AP from bregma (µm)** until the

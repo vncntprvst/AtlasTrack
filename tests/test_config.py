@@ -171,7 +171,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from histo_to_ccf import __version__
-    assert __version__ == "0.2.56"
+    assert __version__ == "0.2.58"
 
 
 @pytest.mark.qt

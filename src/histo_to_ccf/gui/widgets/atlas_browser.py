@@ -15,6 +15,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.gui.widgets.separators import section_header
 from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
 from histo_to_ccf.gui.workflow import WorkflowState
 
@@ -91,12 +92,9 @@ class AtlasBrowserWidget(QWidget):
         self._atlas_status.setWordWrap(True)
         layout.addWidget(self._atlas_status)
 
-        matcher_btn = QPushButton("Open atlas matcher…")
-        matcher_btn.setToolTip(
-            "Side-by-side / overlay tool to match each section to an atlas AP."
-        )
-        matcher_btn.clicked.connect(self._open_matcher)
-        layout.addWidget(matcher_btn)
+        # The AP controls are a distinct job from choosing and loading an atlas
+        # above, so they get their own heading.
+        layout.addWidget(section_header("AP assignment"))
 
         # AP position, shown relative to bregma (bregma = 0, anterior positive).
         ap_row = QHBoxLayout()
@@ -124,6 +122,15 @@ class AtlasBrowserWidget(QWidget):
         assign_btn = QPushButton("Assign AP to section")
         assign_btn.clicked.connect(self._assign_ap)
         layout.addWidget(assign_btn)
+
+        # Below the one-section-at-a-time controls it replaces: the matcher is
+        # the fuller way to do the same job, not a prerequisite for it.
+        matcher_btn = QPushButton("Open atlas matcher")
+        matcher_btn.setToolTip(
+            "Side-by-side / overlay tool to match each section to an atlas AP."
+        )
+        matcher_btn.clicked.connect(self._open_matcher)
+        layout.addWidget(matcher_btn)
 
         self._assign_status = QLabel("")
         layout.addWidget(self._assign_status)

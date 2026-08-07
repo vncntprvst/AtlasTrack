@@ -104,6 +104,11 @@ class RegistrationResult(BaseModel):
     output_size_px: tuple[int, int]
     bspline_transform_path: str | None = None
     residual: float | None = None
+    # True when the masked fit failed and the section was rescued by an
+    # unmasked retry. It IS registered, but without the label-excluding mask,
+    # so it is worth a visual check. Defaults False, so projects written before
+    # this field load unchanged.
+    used_mask_fallback: bool = False
 
 
 class ChannelLevels(BaseModel):

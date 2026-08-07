@@ -332,6 +332,7 @@ def register_worker_progressive(
         yield {
             "current": n_total, "total": n_total,
             "msg": f"Done with {len(failed)} failure(s): sections {failed}",
+            "failed": list(failed),
         }
 
     # Project CCF positions onto shanks.

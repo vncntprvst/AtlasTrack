@@ -1,6 +1,71 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-06 · version **0.2.56** · branch **dev**_
+_Last updated: 2026-08-07 · version **0.2.58** · branch **dev**_
+
+## Panel grouping pass (v0.2.58)
+
+User-requested layout work, plus a new `gui/widgets/separators.py` (`hline()`,
+`section_header(title)`) so a titled rule is one call instead of the four-line
+`QFrame` incantation repeated per panel.
+
+- **Landmark drag preview** drew a 5 px contour (`thickness=2` = a 5x5 splat per
+  boundary point) that covered the anatomy the landmarks are being aligned
+  against. Now `_LANDMARK_CONTOUR_THICKNESS = 1` (3 px). Not 0: under the warp
+  the points spread and a 1 px splat breaks the contour into dots, which is why
+  the thickness exists at all.
+- **Tab order** is now Histology → Atlas → **Register** → Probes → Ephys, which
+  is the actual workflow (probes are marked on registered sections).
+- **Histology**: "Adjustments" header, then Flip, Levels, Scope. Scope moved
+  below the controls it qualifies.
+- **Atlas**: "AP assignment" header above the AP spin; "Open atlas matcher"
+  moved below "Assign AP to section" - it is the fuller way to do that same job,
+  not a step before it.
+- **Probes**: "Probe markers" header; "Mode:" renamed **"Marker type:"**, which
+  says what the radios actually choose.
+
+`tests/test_panel_layout.py` pins the ordering and the naming.
+
+Note: `test_gui_smoke.py` passes again (54 tests, 20 s). The indefinite hang seen
+on 2026-08-05/06 has not recurred - it was environmental, as the margin-change
+post-mortem concluded.
+
+## Half of LO_03 failed to register, and the run said "8/8 - 100%" (v0.2.57)
+
+Two separate defects, found from the user's report that only 4 of 8 sections drew
+an atlas outline.
+
+**1. Failures were invisible.** `register_worker_progressive` catches a failing
+section, logs it and carries on - right, batches should not abort - and yields a
+final `Done with N failure(s)` message. But `_on_registration_done` then overwrote
+the status with `Done - N section(s) registered`, and the progress bar had already
+read 100%. The user saw a clean success over four sections with no transform.
+Now the failures ride on the progress dict (`"failed"`), the summary reads
+`N of M section(s) registered` and names any section left without a fit.
+
+**2. Why they failed.** elastix aborted with
+
+```
+AdvancedMattesMutualInformationMetric: Too many samples map outside
+moving image buffer: 101 / 2048
+```
+
+101/2048 = **0.049**, just under the `RequiredRatioOfValidSamples` of 0.05 already
+set in `_parameter_object`. The cause is the **moving mask**, measured across all
+eight sections: tissue mask ~41-45% of the crop against the atlas mask's ~67-73%.
+Every section at or below ~43% failed, every one above passed - and the failure is
+deterministic, not sampler noise (identical on re-run). These are Imaris lightsheet
+renders with a faint periphery that `section_tissue_mask` cuts away.
+
+Lowering the ratio further was rejected: at 5% valid samples the fit is
+meaningless, so it would convert a loud failure into a quiet wrong answer. Instead
+`register_section_image` retries **once without masks** when a masked elastix fit
+fails, which rescues all 8 (residuals 0.185-0.267). The mask is an accuracy aid -
+it excludes fluorescent labels - not a requirement, so a section it sinks is better
+registered without it. `RegistrationResult.used_mask_fallback` records it and the
+summary names those sections as worth a look.
+
+Config matrix behind the choice (`no masks` rescued every section; `no prealign`
+rescued the four but broke section 0; the sitk engine's residual is not comparable).
 
 ## The crash is heap corruption, and the breadcrumbs proved where it is *not* (v0.2.56)
 
@@ -1108,7 +1173,7 @@ Tab order left→right: **Histology → Atlas → Probes → Register → Ephys*
    tools: flip H/V and per-channel levels, scoped to the whole (merged) slide or a
    **Selected section** chosen from a dropdown.
 2. **Atlas** - choose atlas + storage folder; **AP shown relative to bregma**
-   (0 = bregma). **Open atlas matcher…** (side-by-side / overlay AP matching;
+   (0 = bregma). **Open atlas matcher** (side-by-side / overlay AP matching;
    syncs AP + spacing with this tab on open/close). Assign AP per section, or
    reorder/space them in the ordering panel (spacing persists on the project;
    "Interpolate AP" fills gaps between hand-assigned sections).

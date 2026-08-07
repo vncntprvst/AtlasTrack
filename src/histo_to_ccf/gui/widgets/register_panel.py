@@ -33,6 +33,13 @@ def _error_dialog(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.critical(parent, title, str(message)[:2000])
 
 
+# Half-width of the block each warped boundary point is splatted into during the
+# live landmark drag, so the re-warped contour reads as lines rather than dots.
+# 1 gives a 3px line; 2 (the original) gave 5px, which at typical section zoom
+# painted over the anatomy the landmarks are being aligned against.
+_LANDMARK_CONTOUR_THICKNESS = 1
+
+
 class RegisterPanelWidget(QWidget):
     """Register button, progress bar, residuals table, and section overlay."""
 
@@ -552,6 +559,11 @@ class RegisterPanelWidget(QWidget):
         self._progress.setValue(pct)
         self._progress.setFormat(f"{current}/{total} - {pct}%")
         self._status.setText(msg)
+        # Kept for the final summary: the per-section failure messages scroll
+        # past and the "Done" line used to overwrite them, so a run could report
+        # 8/8 - 100% while half the sections had silently failed.
+        if "failed" in info:
+            self._failed_sections = list(info["failed"])
 
     def _ensure_project_path(self) -> "Path | None":
         """Return the project path, defaulting to one next to the input data."""
@@ -566,18 +578,33 @@ class RegisterPanelWidget(QWidget):
 
     def _on_registration_done(self, project) -> None:
         self._state.project = project
-        n = sum(
-            1 for slide in project.slides
-            for sec in slide.sections
+        sections = [sec for slide in project.slides for sec in slide.sections]
+        n = sum(1 for sec in sections if sec.registration is not None)
+        unregistered = [
+            sec.index for sec in sections
+            if sec.registration is None and sec.plane is not None
+        ]
+        fallback = [
+            sec.index for sec in sections
             if sec.registration is not None
-        )
+            and getattr(sec.registration, "used_mask_fallback", False)
+        ]
         self._progress.setValue(100)
         self._reg_btn.setEnabled(True)
         self._refresh_residuals()
 
         # Auto-save so the registration (results + transform sidecars) persists
         # and can be reloaded without re-running.
-        msg = f"Done - {n} section(s) registered"
+        msg = f"Done - {n} of {len(sections)} section(s) registered"
+        if unregistered:
+            # Loudly, and in the count itself: a run that leaves sections
+            # unregistered used to still read "Done" over a 100% progress bar.
+            msg += f"  ·  FAILED: section(s) {unregistered} have no atlas fit"
+        if fallback:
+            msg += (
+                f"  ·  section(s) {fallback} needed an unmasked retry - check "
+                "their alignment"
+            )
         path = self._ensure_project_path()
         if path is not None:
             try:
@@ -1172,7 +1199,8 @@ class RegisterPanelWidget(QWidget):
         from histo_to_ccf.registration.landmarks_warp import warp_contour_image
 
         img = warp_contour_image(
-            self._lm_base_edge_rc, source, target, self._lm_base_shape, thickness=2
+            self._lm_base_edge_rc, source, target, self._lm_base_shape,
+            thickness=_LANDMARK_CONTOUR_THICKNESS,
         )
         self._viewer.layers[name].data = img
 

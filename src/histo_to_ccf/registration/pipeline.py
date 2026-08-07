@@ -262,6 +262,28 @@ def _refine(
     )
 
 
+# What elastix actually raises. The useful detail - "Too many samples map
+# outside moving image buffer: 101 / 2048" - goes to elastix's own log, and the
+# Python exception carries only the generic line, so that is what we match. The
+# specific markers are kept in case a future itk-elastix propagates the detail.
+_RETRYABLE_ELASTIX_MARKERS = (
+    "internal elastix error",
+    "map outside moving image buffer",
+    "too many samples",
+)
+
+
+def _is_sample_coverage_failure(exc: BaseException) -> bool:
+    """Is this an elastix abort that an unmasked retry can rescue?
+
+    Deliberately narrow in effect rather than in matching: the caller only ever
+    consults this when masks were **on**, and the retry simply turns them off.
+    A failure that is not about the mask fails again and propagates.
+    """
+    text = str(exc).lower()
+    return any(marker in text for marker in _RETRYABLE_ELASTIX_MARKERS)
+
+
 def register_section_image(
     section_image: np.ndarray,
     atlas: "BrainGlobeAtlas",
@@ -328,17 +350,46 @@ def register_section_image(
         # Use luminance for registration; preserves brain outline.
         moving = moving[..., :3].astype(np.float32).mean(axis=-1)
 
-    result = _refine(
-        reference,
-        moving.astype(np.float32),
+    refine_kwargs = dict(
         engine=engine,
         bspline_grid=bspline_grid,
         max_iterations=max_iterations,
         bending_weight=bending_weight,
-        use_masks=use_masks,
-        moving_mask=moving_mask,
         prealign=prealign,
     )
+    try:
+        result = _refine(
+            reference,
+            moving.astype(np.float32),
+            use_masks=use_masks,
+            moving_mask=moving_mask,
+            **refine_kwargs,
+        )
+    except Exception as exc:
+        # elastix aborts the whole section when too few metric samples stay
+        # inside the moving mask. On a low-contrast section (lightsheet renders,
+        # faint periphery) the tissue mask under-covers the brain - measured at
+        # ~42% of the crop against the atlas mask's ~73% on LO_03 - and the
+        # valid-sample ratio collapses to ~5%, right on elastix's limit. Every
+        # section below that line failed and every one above it passed.
+        #
+        # The mask is an accuracy aid (it excludes fluorescent labels), not a
+        # requirement, so a section it sinks is better registered without it
+        # than not at all. Retry once, unmasked, and let the caller say so.
+        if not (use_masks and _is_sample_coverage_failure(exc)):
+            raise
+        logger.warning(
+            "masked registration failed ({}); retrying without the tissue mask",
+            str(exc).splitlines()[-1][:160],
+        )
+        result = _refine(
+            reference,
+            moving.astype(np.float32),
+            use_masks=False,
+            moving_mask=None,
+            **refine_kwargs,
+        )
+        result.used_mask_fallback = True
 
     transform = result.transform
     if boundary_snap:
@@ -351,6 +402,7 @@ def register_section_image(
         output_size_px=(out_shape[0], out_shape[1]),
         bspline_transform_path=None,
         residual=result.residual_rms,
+        used_mask_fallback=getattr(result, "used_mask_fallback", False),
     )
     return reg, transform
 

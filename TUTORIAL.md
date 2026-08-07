@@ -74,7 +74,7 @@ always available). The menu bar has two menus: **Project** (Save / Load / Close 
    First run downloads ~400 MB; subsequent runs are instant because the atlas is
    reused from the folder above (the status line shows where it loaded from).
 3. Set **AP from bregma (µm)** to match a section - **0 = bregma**, negative = posterior,
-   positive = anterior. Click **Open atlas matcher…** to compare your section against
+   positive = anterior. Click **Open atlas matcher** to compare your section against
    atlas slices side-by-side / overlaid and assign the AP.
 4. For each section: set **Assign to section idx**, then click **Assign AP to section**.
    (Midline / dorsal-surface anchoring is handled automatically by registration - no

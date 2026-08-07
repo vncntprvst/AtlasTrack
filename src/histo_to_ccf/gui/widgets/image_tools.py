@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.gui.widgets.separators import section_header
 from histo_to_ccf.gui.workflow import WorkflowState
 
 _CHANNELS = ("R", "G", "B")
@@ -73,7 +74,12 @@ class ImageToolsWidget(QWidget):
         scope_layout.addLayout(sec_row)
         # Refresh the section list whenever section scope is chosen.
         self._scope_section.toggled.connect(self._on_scope_section_toggled)
-        layout.addWidget(scope_box)
+
+        # Everything below heads a single "Adjustments" block, set apart from the
+        # slide-loading controls above it in this tab. Scope is added last (see
+        # the end of this method): it qualifies Flip and Levels, so it reads
+        # better after the things it qualifies than before them.
+        layout.addWidget(section_header("Adjustments", top_margin=4))
 
         # Flip controls
         flip_box = QGroupBox("Flip")
@@ -118,6 +124,7 @@ class ImageToolsWidget(QWidget):
         auto_btn.clicked.connect(self._auto_levels)
         levels_layout.addWidget(auto_btn)
         layout.addWidget(levels_box)
+        layout.addWidget(scope_box)
         layout.addStretch()
 
     # ------------------------------------------------------------------

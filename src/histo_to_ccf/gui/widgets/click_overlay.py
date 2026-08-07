@@ -39,6 +39,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.gui.widgets.separators import section_header
 from histo_to_ccf.gui.workflow import WorkflowState
 from histo_to_ccf.project.schema import Point2D
 
@@ -96,8 +97,12 @@ class ClickOverlayWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
+        layout.addWidget(section_header("Probe markers", top_margin=4))
+
         mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Mode:"))
+        # "Mode" said nothing about what it selected; these radios choose which
+        # kind of marker a click on the section places.
+        mode_row.addWidget(QLabel("Marker type:"))
         self._mode_tip = QRadioButton("Tip")
         self._mode_tip.setChecked(True)
         self._mode_entry = QRadioButton("Entry")
