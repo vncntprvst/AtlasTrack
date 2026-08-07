@@ -1,6 +1,51 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-07 · version **0.2.59** · branch **dev**_
+_Last updated: 2026-08-07 · version **0.2.60** · branch **dev**_
+
+## Ephys alignment rebuild - Phase 1 core (v0.2.60)
+
+Plan: `C:\Users\Vincent\.claude\plans\wobbly-gliding-pike.md`. Headless core only;
+the pyqtgraph panels are next.
+
+**Why.** A Neuropixels 2.0 bank is 96 sites/shank = 48 rows x 15 µm = **720 µm of
+shank**, against insertion depths of 4.5-5.4 mm - so one recording constrains ~15 %
+of a track. The dataset is collected to fix that (LO_06 2026-02-07 has four banks on
+one insertion; LO_07 advances the probe between recordings), and the tab did not use
+it. Verified on real data: two LO_06 banks stitch to **1395 µm contiguous, 28 % of
+the 4945 µm track**, against 705 µm from one recording.
+
+New headless modules, all under the `ephys` import contract (now added to
+`.importlinter`, so this code cannot acquire a Qt dependency):
+
+- `ephys/recordings.py` - bank arithmetic and the shared axis. The key identity is
+  `depth_below_surface = insertion_depth - depth_from_tip`: depth-from-tip is a
+  probe property, but only depth-below-surface is comparable across recordings taken
+  at *different insertion depths*.
+- `ephys/epochs.py` - excerpt choice. Artifact and activity are separated by whether
+  the excursion is **shared across depth**: lick artifacts hit many channels at once,
+  real activity is local. Rejected windows are kept with the reason, never dropped.
+- `ephys/analyzer.py` - SortingAnalyzer reader. Spike depth/amplitude come
+  precomputed, so the raster and depth profiles need **no raw access** (3.5 GB of
+  analyzers vs 52 GB of raw per recording).
+- `ephys/features.py` - added `lfp_band_power` (IBL's 5 bands), `depth_profiles`
+  (10 µm bins, NaN under 50 spikes as IBL does) and `raster_points` (uniform
+  subsample, so visible density stays proportional).
+
+**A bug the real data caught, worth remembering.** `resolve_bank_offset` exists
+because SpikeInterface reports **absolute** shank positions when the probe map covers
+the whole shank: LO_06/001 (bank 1-96) reports y = 0-705 µm but LO_06/002
+(bank 97-192) reports y = **720-1410 µm**, not 0-690. Adding the bank offset to those
+double-counted it, pushed the recording 720 µm too shallow and opened a phantom
+735 µm gap between two banks that actually abut. Both conventions are now detected.
+
+Schema additions are all optional, so old projects load unchanged: `EphysEpoch`,
+`EphysRecordingRef` (bank + insertion depth + epochs), `ProbeSpec.recordings`,
+`ProbeSpec.track_offset_ccf_um` / `array_roll_deg`, and `EphysAlignment.feature_um` /
+`track_um` (the IBL landmark arrays) alongside the existing `anchors`.
+
+**Still to do:** pyqtgraph panels (1e), the IBL fit/undo model (Phase 2), roll fitting
+(Phase 3), and wiring `Shank.ephys` into `export_channel_csv` - which today ignores it
+entirely, so an alignment currently changes nothing downstream.
 
 ## Panel grouping pass, round 2 (v0.2.59)
 

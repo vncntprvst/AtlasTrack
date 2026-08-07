@@ -16,6 +16,7 @@ source_modules =
     histo_to_ccf.landmarks
     histo_to_ccf.registration
     histo_to_ccf.probes
+    histo_to_ccf.ephys
     histo_to_ccf.viz.plotly3d
 forbidden_modules =
     napari

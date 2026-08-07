@@ -74,3 +74,114 @@ def power_image(psd: np.ndarray, *, log: bool = True, per_freq: bool = False) ->
         hi = float(np.nanmax(a))
     rng = np.where(np.asarray(hi) <= np.asarray(lo), 1.0, np.asarray(hi) - np.asarray(lo))
     return (np.clip((a - lo) / rng, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+# The bands IBL's alignment GUI plots on the probe view. Splitting the spectrum this
+# way separates effects that a single broadband number merges: slow-wave power and
+# high-frequency power change at different anatomical boundaries.
+LFP_BANDS_HZ: tuple[tuple[float, float], ...] = (
+    (0.0, 4.0),
+    (4.0, 10.0),
+    (10.0, 30.0),
+    (30.0, 80.0),
+    (80.0, 200.0),
+)
+
+
+def lfp_band_power(
+    psd: np.ndarray,
+    freqs: np.ndarray,
+    *,
+    bands: "tuple[tuple[float, float], ...]" = LFP_BANDS_HZ,
+) -> np.ndarray:
+    """Mean power per band for each channel: ``(n_channels, n_bands)``.
+
+    Bands with no frequency bin in range come back as NaN rather than 0, so a band
+    that simply was not sampled is distinguishable from one with no power.
+    """
+    psd = np.asarray(psd, dtype=float)
+    freqs = np.asarray(freqs, dtype=float)
+    if psd.ndim != 2 or psd.shape[1] != freqs.size:
+        raise ValueError(
+            f"psd {psd.shape} does not match {freqs.size} frequencies; expected "
+            "(n_channels, n_freq)"
+        )
+    out = np.full((psd.shape[0], len(bands)), np.nan, dtype=float)
+    for i, (lo, hi) in enumerate(bands):
+        mask = (freqs >= lo) & (freqs < hi)
+        if mask.any():
+            out[:, i] = psd[:, mask].mean(axis=1)
+    return out
+
+
+def depth_profiles(
+    depths_um: np.ndarray,
+    amplitudes: np.ndarray,
+    duration_s: float,
+    *,
+    bin_um: float = 10.0,
+    min_spikes: int = 50,
+    depth_range: "tuple[float, float] | None" = None,
+) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+    """Firing rate and mean amplitude against depth.
+
+    Returns ``(bin_centres_um, rate_hz, mean_amplitude)``. Bins holding fewer than
+    ``min_spikes`` come back as NaN, following IBL: a bin with a handful of spikes
+    produces a wild rate and a meaningless mean amplitude, and plotting it as a real
+    value invites aligning to noise. NaN leaves a visible gap instead.
+    """
+    depths = np.asarray(depths_um, dtype=float)
+    amps = np.asarray(amplitudes, dtype=float)
+    if depths.shape != amps.shape:
+        raise ValueError(
+            f"depths {depths.shape} and amplitudes {amps.shape} must match"
+        )
+    if bin_um <= 0:
+        raise ValueError("bin_um must be positive")
+    if depths.size == 0:
+        return np.empty(0), np.empty(0), np.empty(0)
+
+    lo, hi = depth_range if depth_range is not None else (depths.min(), depths.max())
+    if hi <= lo:
+        hi = lo + bin_um
+    edges = np.arange(lo, hi + bin_um, bin_um, dtype=float)
+    centres = 0.5 * (edges[:-1] + edges[1:])
+
+    counts, _ = np.histogram(depths, bins=edges)
+    amp_sum, _ = np.histogram(depths, bins=edges, weights=amps)
+
+    enough = counts >= int(min_spikes)
+    rate = np.full(centres.shape, np.nan)
+    mean_amp = np.full(centres.shape, np.nan)
+    if duration_s > 0:
+        rate[enough] = counts[enough] / float(duration_s)
+    mean_amp[enough] = amp_sum[enough] / counts[enough]
+    return centres, rate, mean_amp
+
+
+def raster_points(
+    times_s: np.ndarray,
+    depths_um: np.ndarray,
+    amplitudes: np.ndarray,
+    *,
+    max_points: int = 200_000,
+    seed: int = 0,
+) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+    """Thin a spike raster down to something a plot can draw.
+
+    A recording here holds ~1e6 spikes (960,899 in the LO_03 export) and drawing
+    them all makes the panel unusable. Thinning is a **uniform random subsample**,
+    not a time or depth crop, so the visible density stays proportional to the real
+    density everywhere - which is the only property the raster is read for.
+    """
+    times = np.asarray(times_s, dtype=float)
+    depths = np.asarray(depths_um, dtype=float)
+    amps = np.asarray(amplitudes, dtype=float)
+    if not (times.shape == depths.shape == amps.shape):
+        raise ValueError("times, depths and amplitudes must have the same shape")
+    if times.size <= max_points:
+        return times, depths, amps
+    rng = np.random.default_rng(seed)
+    pick = rng.choice(times.size, size=int(max_points), replace=False)
+    pick.sort()
+    return times[pick], depths[pick], amps[pick]

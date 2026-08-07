@@ -29,6 +29,57 @@ class ProbeType(BaseModel):
     shank_tip_length_um: float = 175.0
 
 
+class EphysEpoch(BaseModel):
+    """One excerpt of a recording, and whether it is fit to use.
+
+    Alignment features are built from a handful of short windows rather than the
+    whole recording: it is far cheaper, and the useful signal is in *responsive*
+    periods anyway. Rejected windows are kept (not dropped) with the reason, so a
+    figure can be regenerated exactly and a questionable rejection can be reviewed.
+    """
+
+    t_start_s: float
+    t_end_s: float
+    kept: bool = True
+    reject_reason: str | None = None
+
+
+class EphysRecordingRef(BaseModel):
+    """One recording contributing ephys features to a penetration.
+
+    A single Neuropixels 2.0 bank spans only ~720 µm of shank (96 sites, 2 columns,
+    15 µm row pitch) against insertion depths of 4.5-5.4 mm, so one recording
+    constrains a small fraction of the track. Several recordings on the same
+    insertion - different banks, or the probe advanced between them - together cover
+    most of it, which is why these belong to the **probe**, not to one shank.
+
+    The two fields that place a recording on the shared axis:
+
+    * ``electrode_range`` gives ``bank_offset_um`` (how far up the shank its sites
+      start),
+    * ``insertion_depth_um`` gives how deep the tip was for *this* recording.
+
+    See :func:`histo_to_ccf.ephys.recordings.depth_below_surface_um` - depth below
+    the brain surface is the only axis on which recordings taken at different
+    insertion depths can be compared.
+    """
+
+    path: str
+    label: str = ""
+    stream_name: str | None = None
+    # SpikeInterface SortingAnalyzer / AIND postprocessed zarr. Spike depths and
+    # amplitudes come from here, so most features need no raw access.
+    analyzer_path: str | None = None
+    insertion_depth_um: float = 0.0
+    # 1-based inclusive electrode numbers, as the lab records them ("all shanks
+    # 97-192"). None means the bank starts at the tip.
+    electrode_range: tuple[int, int] | None = None
+    # Derived from electrode_range by default; overridable when the numbering is
+    # known to be wrong (see the LO_04 2025-08-26 bank discrepancy in dataset.md).
+    bank_offset_um: float | None = None
+    epochs: list[EphysEpoch] = []
+
+
 class EphysAlignment(BaseModel):
     """Ephys-based refinement of a shank's depth->CCF mapping.
 
@@ -44,6 +95,19 @@ class EphysAlignment(BaseModel):
     channel_depths_um: list[float] = []  # µm from tip, one per channel
     anchors: list[tuple[float, float]] = []  # (feature_depth_um, track_depth_um)
     channel_ccf_um: list[tuple[float, float, float]] = []  # (AP, ML, DV) per channel
+
+    # The IBL landmark model, stored as two parallel arrays rather than pairs:
+    # feature_um[i] (depth along the electrode array) corresponds to track_um[i]
+    # (depth along the histology track). Equivalent in content to ``anchors`` but
+    # in the form the fit/undo machinery and the IBL interchange files use.
+    # ``anchors`` stays for projects written before this field.
+    feature_um: list[float] = []
+    track_um: list[float] = []
+    # Kept so the result is reviewable without recomputing: which channels these
+    # were, and what region each landed in.
+    channel_ids: list[str] = []
+    channel_regions: list[str] = []
+    created_at: str | None = None
 
 
 class Shank(BaseModel):
@@ -69,6 +133,21 @@ class ProbeSpec(BaseModel):
     label: str
     type: ProbeType
     shanks: list[Shank]
+
+    # Recordings contributing ephys features to this penetration (see
+    # EphysRecordingRef - a bank covers only ~720 µm, so several are needed).
+    recordings: list[EphysRecordingRef] = []
+
+    # Ephys-derived refinement of the histology trajectory. Kept separate from the
+    # histology-derived tip/entry so the original placement is never overwritten and
+    # any departure from it stays visible and reportable.
+    #
+    # ``array_roll_deg`` is the rotation of the shank row about the track axis. For
+    # LO_03 and LO_06 this is currently *assumed* (~45°) rather than observed - the
+    # largest unverified assumption in the probe placement - and per-shank depth
+    # alignments disagreeing linearly with shank index are what constrain it.
+    track_offset_ccf_um: tuple[float, float, float] | None = None
+    array_roll_deg: float | None = None
 
 
 class PlaneParams(BaseModel):

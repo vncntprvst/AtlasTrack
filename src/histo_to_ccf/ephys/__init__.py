@@ -12,12 +12,49 @@ from histo_to_ccf.ephys.alignment import (
     channel_ccf_um,
     invert_anchors,
 )
-from histo_to_ccf.ephys.features import lfp_psd, power_image
+from histo_to_ccf.ephys.epochs import (
+    activity_score,
+    artifact_score,
+    candidate_windows,
+    common_median_reference,
+    rank_epochs,
+    screen_window,
+)
+from histo_to_ccf.ephys.features import (
+    depth_profiles,
+    lfp_band_power,
+    lfp_psd,
+    power_image,
+    raster_points,
+)
+from histo_to_ccf.ephys.recordings import (
+    bank_offset_um,
+    coverage_gaps_um,
+    depth_below_surface_um,
+    depth_from_tip_um,
+    recording_span,
+    resolve_bank_offset,
+)
 
 __all__ = [
+    "activity_score",
     "apply_depth_alignment",
+    "artifact_score",
+    "bank_offset_um",
+    "candidate_windows",
     "channel_ccf_um",
+    "common_median_reference",
+    "coverage_gaps_um",
+    "depth_below_surface_um",
+    "depth_from_tip_um",
+    "depth_profiles",
     "invert_anchors",
+    "lfp_band_power",
     "lfp_psd",
     "power_image",
+    "rank_epochs",
+    "raster_points",
+    "recording_span",
+    "resolve_bank_offset",
+    "screen_window",
 ]
