@@ -43,12 +43,12 @@ always available). The menu bar has two menus: **Project** (Save / Load / Close 
 
 ## 2 - Histology tab: load the slide and detect sections
 
-1. Click **Open slide…** → select your image. You can select **several images at
+1. Click **Open slide** → select your image. You can select **several images at
    once**; they are merged into one combined canvas, stacked top-to-bottom, so all
    sections share one coordinate space.  
    The slide appears as a gray layer in the viewer.  
    **Swapping the image:** once a slide is loaded (e.g. after reloading a project),
-   **Open slide…** again *replaces* the current image instead of merging. If the new
+   **Open slide** again *replaces* the current image instead of merging. If the new
    image is the **same size**, the section boxes + registration are kept - handy for
    reusing a registration on the same section imaged in a different channel/dye. A
    different-size image is treated as a new slide (sections cleared, re-detect).
@@ -183,7 +183,7 @@ regions, probe tracks, and (after an ephys alignment) the per-channel positions.
 Both 3D views are **bregma-referenced** and not mirrored.
 
 **Plotly HTML**  
-Click **Export Plotly HTML…** → save to e.g. `Desktop\probe_3d.html`.  
+Click **Export Plotly HTML** → save to e.g. `Desktop\probe_3d.html`.  
 Opens automatically in your browser; rotate the atlas + probe interactively. The
 axes are **referenced to bregma**: ML = 0 at the midline, AP = 0 at bregma
 (anterior positive), so coordinates read like stereotaxic values.
@@ -202,13 +202,13 @@ p = load_project(r"path\to\project.json")
 ```
 
 **HERBS pkl** (legacy compatibility)  
-Click **Export HERBS pkl…** - writes a `.pkl` readable by the old pipeline.
+Click **Export HERBS pkl** - writes a `.pkl` readable by the old pipeline.
 
 **Per-channel CSV**  
-Click **Export per-channel CSV…** - writes `probe, shank, channel, ap_um, ml_um, dv_um` for all 384 channels.
+Click **Export per-channel CSV** - writes `probe, shank, channel, ap_um, ml_um, dv_um` for all 384 channels.
 
 **Per-channel Paxinos CSV**  
-Pick a **Paxinos align** transform, then click **Export per-channel Paxinos CSV…** -
+Pick a **Paxinos align** transform, then click **Export per-channel Paxinos CSV** -
 the same channels in **Paxinos stereotaxic mm** (bregma origin): `ap_mm`
 anterior-positive, `ml_mm` 0 at the midline, `dv_mm` depth below bregma. CCFv3 is
 pitched ~5° nose-down vs a flat-skull frame, so the transform **un-pitches 5°** and
@@ -225,12 +225,12 @@ have CCF tip/entry from registration. This refines the depth→CCF mapping the w
 the IBL ephys-alignment GUI does.
 
 1. Pick the **Probe** and **Shank** to align.
-2. Under **Recording (Open Ephys)**, **Browse…** to the Open Ephys record-node
+2. Under **Recording (Open Ephys)**, **Browse** to the Open Ephys record-node
    folder. Click **List streams** and leave **Stream** on *Auto* (uses the LFP
    stream; for Neuropixels 2.0, which has no LFP stream, LFP is derived from the
    AP stream).
 3. Set **Seconds to analyse** (default 60) and click **Load & compute LFP power**.
-4. Click **Open alignment…**. The dialog shows the depth×frequency **LFP power
+4. Click **Open alignment**. The dialog shows the depth×frequency **LFP power
    map** (left) beside the atlas **region colour strip** (right, now labelled with
    region **acronyms + names**), sharing a depth axis (tip at the bottom, surface at
    the top). The header states how many channels this **shank** has and how many
@@ -242,7 +242,7 @@ the IBL ephys-alignment GUI does.
 5. Two **anchors are pre-set** at the recorded-block edges. Drag the red **anchor
    lines** so LFP power transitions line up with region boundaries (use **Add
    anchor (mid)** to create one, **Remove selected** / **Clear anchors** to manage
-   them). **Save LFP power…** exports the per-channel power (.npz/.csv).
+   them). **Save LFP power** exports the per-channel power (.npz/.csv).
 6. Click **Apply** - each channel is placed on the tip→entry line and the
    per-channel CCF coordinates (plus the anchors) are stored on the shank and saved
    with the project.

@@ -1,5 +1,10 @@
 [importlinter]
 root_package = histo_to_ccf
+# Required whenever the forbidden modules are third-party (napari, qtpy, ...):
+# without it import-linter 2.x refuses to build the graph and exits with a config
+# error, which looks enough like a failed contract to be mistaken for one. The
+# contract below was silently not being checked until this was added.
+include_external_packages = True
 
 # The single most important architectural rule: the core (registration, atlas,
 # probes, landmarks, sectioning, io, viz.plotly3d) must NOT depend on Qt/napari.

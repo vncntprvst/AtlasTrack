@@ -641,7 +641,7 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
         )
         shortcuts = {a.text(): a.shortcut().toString() for a in proj_menu.actions()}
         assert shortcuts.get("Save Project") == "Ctrl+S"
-        assert shortcuts.get("Load Project…") == "Ctrl+O"
+        assert shortcuts.get("Load Project") == "Ctrl+O"
         # 3D/export buttons live on the permanent viz panel, not the Register tab.
         assert hasattr(viz_panel, "_view_napari3d") and hasattr(viz_panel, "_export_plotly")
     finally:
@@ -1373,6 +1373,91 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_landmark_dialog_reads_the_atlas_along_the_track(qtbot) -> None:
+    """The region column works with no recording at all - only a registered shank."""
+    pytest.importorskip("pyqtgraph")
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
+
+    state = _registered_probe_state()  # entry DV 1000 -> tip DV 5000, boundary at 3000
+    dlg = EphysLandmarkDialog(state, 0, 0)
+    qtbot.addWidget(dlg)
+
+    bands = dlg.panel.view().bands()
+    assert [b.acronym for b in bands] == ["A", "B"]
+    assert bands[0].bottom_um == pytest.approx(2000.0, abs=25.0)  # 2000 µm along track
+    assert dlg.panel.landmarks().track_extent_um == pytest.approx((0.0, 4000.0))
+
+
+@pytest.mark.qt
+def test_landmark_dialog_apply_stores_landmarks_without_touching_the_old_fields(qtbot) -> None:
+    pytest.importorskip("pyqtgraph")
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
+
+    state = _registered_probe_state()
+    dlg = EphysLandmarkDialog(state, 0, 0)
+    qtbot.addWidget(dlg)
+    dlg.panel.add_landmark_at(2000.0)
+    dlg.panel.move_landmark(0, 1700.0)
+
+    dlg.apply()
+
+    eph = state.project.probes[0].shanks[0].ephys
+    assert eph is not None
+    assert eph.feature_um[1:-1] == pytest.approx([1700.0])
+    assert eph.track_um[1:-1] == pytest.approx([2000.0])
+    assert eph.created_at
+    # The tip-referenced fields use the opposite depth convention and must be left
+    # alone; writing depth-below-surface into them would silently flip the track.
+    assert eph.anchors == []
+    assert eph.channel_ccf_um == []
+
+
+@pytest.mark.qt
+def test_landmark_dialog_restores_a_stored_alignment(qtbot) -> None:
+    pytest.importorskip("pyqtgraph")
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
+
+    state = _registered_probe_state()
+    first = EphysLandmarkDialog(state, 0, 0)
+    qtbot.addWidget(first)
+    first.panel.add_landmark_at(2000.0)
+    first.panel.move_landmark(0, 1700.0)
+    first.apply()
+
+    second = EphysLandmarkDialog(state, 0, 0)
+    qtbot.addWidget(second)
+
+    assert second.panel.landmarks().user_pairs() == pytest.approx([(1700.0, 2000.0)])
+
+
+@pytest.mark.qt
+def test_ephys_panel_landmark_button_needs_a_registered_shank(qtbot, monkeypatch) -> None:
+    import napari
+
+    from histo_to_ccf.gui.widgets import ephys_panel as ephys_panel_module
+    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        ephys_panel_module.QMessageBox, "warning",
+        lambda *args, **kwargs: warnings.append(args[2] if len(args) > 2 else ""),
+    )
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _registered_probe_state()
+        state.project.probes[0].shanks[0].tip_ccf_um = None
+        widget = EphysPanelWidget(state, viewer)
+        qtbot.addWidget(widget)
+        widget.refresh_probes()
+
+        widget._open_landmark_alignment()
+
+        assert warnings and "no tip/entry in CCF" in warnings[0]
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_ephys_shank_selection_full_shank_not_one_column(qtbot) -> None:
     """A NP2.0 shank (2 columns) selects all 96 of its channels, not one 48-col."""
     from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
@@ -1617,7 +1702,7 @@ def test_auto_load_atlas_skips_when_already_loaded(qtbot) -> None:
         widget.auto_load_atlas()
         assert widget._atlas_status.text() == "untouched"
 
-        # Atlas already loaded with the same name -> skip (no "Loading…").
+        # Atlas already loaded with the same name -> skip (no "Loading").
         state.project.atlas = AtlasRef(name="kim_mouse_25um")
         state.atlas = _EphysFakeAtlas()
         state.atlas.atlas_name = "kim_mouse_25um"

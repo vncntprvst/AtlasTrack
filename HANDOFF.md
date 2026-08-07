@@ -1,6 +1,68 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-07 · version **0.2.62** · branch **dev**_
+_Last updated: 2026-08-07 · version **0.2.63** · branch **dev**_
+
+## The import contract was never actually running (v0.2.63)
+
+`lint-imports` was exiting 1 with **"The top level configuration must have
+`include_external_packages=True` when there are external forbidden modules"** - a
+*config* error, not a contract failure, and close enough to one to have been reported
+as "contract OK" more than once. So the single most important architectural rule -
+no Qt/napari inside the core packages - was unenforced for as long as import-linter
+2.x has been installed.
+
+Fixed by adding `include_external_packages = True` to `.importlinter`. It now
+analyses 127 files / 512 dependencies and reports **KEPT**. The rule held on
+inspection, but that was luck rather than the check working.
+
+Worth remembering as a shape, not just an incident: a checker that errors out looks
+identical to a checker that passes if only the exit code is read. Watch a check fail
+on purpose at least once before trusting it.
+
+## Ephys alignment - Phase 2: landmark alignment + atlas region column (v0.2.63)
+
+**`ephys/landmarks.py`** (headless) is the IBL alignment model, written against the
+reference source (`AllenNeuralDynamics/ibl-ephys-alignment-gui`,
+`src/ephys_alignment_gui/ephys_alignment.py`) rather than from memory, so results
+interoperate. `feature2track` / `track2feature` are IBL's
+`interp1d(fill_value="extrapolate")`; the arrays carry two extra end points as IBL's
+do; `adjust_extremes_uniform` reproduces their `diff = np.diff(feature - track)`
+formula exactly (verified: it forces both outer segments to slope 1, so a *single*
+landmark is a pure offset and never a stretch).
+
+Two deliberate deviations, both improvements:
+
+* **Crossed landmarks are refused, not silently re-paired.** IBL sorts the feature
+  and track arrays independently, so dragging one landmark past its neighbour
+  re-pairs them without complaint and the fit quietly means something else.
+  `check_monotonic` names the offending pair; the GUI snaps the handle back.
+* **`linear` extremes fall back to `uniform` below 3 landmarks** instead of IBL's
+  `lin_fit = 0`, which sends both tail points to zero.
+
+**Atlas region column** (`ephys/regions.py` + `ephys_features_view.py`) is a fourth
+linked panel. Regions are looked up every 20 µm along the tip-entry line, merged into
+bands with boundaries at sample midpoints, and drawn as vector bands (crisp at any
+zoom). Labels are recomputed on every zoom, so thin nuclei appear as you zoom in
+rather than being dropped for good.
+
+**`gui/widgets/ephys_alignment_panel.py`** puts draggable landmarks on that column
+plus Previous/Next/Reset, an extremes-mode selector and a track-vs-feature fit plot
+(diagonal = no correction). The anatomy is warped against fixed ephys panels, never
+the reverse: warping the measured data would make it the thing that visibly bends.
+
+Reachable now via **Ephys tab → "Open landmark alignment"**. It needs only the atlas
+and a registered shank - no recording - so the anatomy along a track can be read
+straight away; the recording manager that feeds it real features is still to come
+(Phase 1 remainder). Apply stores `feature_um`/`track_um`/`created_at` on the shank
+and **deliberately does not touch `anchors` or `channel_ccf_um`**, which belong to the
+older tip-referenced alignment: the new axis is depth *below surface*, and writing one
+convention into the other's field would silently flip the track.
+
+**Still open**: the region column has not yet been read against real LO_06 features,
+so whether the depth-banded structure in that raster corresponds to anatomy or to
+recording bank edges remains unanswered - that was the point of building it.
+
+**Suite: 539 passed in ~45 s.**
 
 ## The test_gui_smoke "flaky hang" is solved - it was a modal dialog (v0.2.62)
 
@@ -124,7 +186,7 @@ entirely, so an alignment currently changes nothing downstream.
   delete unwanted ones with Edit boxes.
 - Renames: group "Edit sections" → **"Edit section boxes"**; "Edit boxes (resize /
   move / **add** / delete)" → drops the `add` (it was redundant with the draw
-  button, which is now the one way to add); "Draw new section…" → **"Draw new
+  button, which is now the one way to add); "Draw new section" → **"Draw new
   bounding box"**. New "Section bounding boxes" header over detection + editing.
 - Scope moved back **above** Flip/Levels, under the Adjustments header.
 - Atlas tab: bigger gap above "AP assignment"; new "Section order and spacing"
@@ -959,7 +1021,7 @@ post-remove highlight guard short-circuits. Regression test
 `test_gui_smoke.py::test_edit_boxes_delete_hovered_does_not_crash` hovers a shape
 then fires the bound Delete and asserts no crash.
 
-Also **removed the "Click to discard a box…" button** (and its now-dead
+Also **removed the "Click to discard a box" button** (and its now-dead
 `app.install_discard_handler` one-shot pick handler): with the editor's Delete
 fixed it was redundant - "Edit boxes → select → Delete" covers box removal.
 
@@ -1228,7 +1290,7 @@ thinking the registration was wrong. Three fixes in `_refresh_residuals`:
 - **AP from bregma** (`BREGMA_AP_FROM_ORIGIN_UM - ap_idx·res`), matching the Atlas
   tab, instead of raw CCF-origin µm (e.g. shows `-5300`, not `10700`).
 - **Sorted by `ap_order`** (the AP sequence), so rows read 0,1,2,3 like the
-  ordering list, not the project's storage/detection order (0,3,6,9…).
+  ordering list, not the project's storage/detection order (0,3,6,9).
 - Uses the **actual registered AP** = centre of `section.registration.anchoring`
   (incl. DeepSlice guidance), not `section.plane.ap_um` (the request) which can
   differ. Header now reads "AP from bregma µm".
@@ -1295,7 +1357,7 @@ Windows.
 
 Layout: the **Registration** panel (5 tabs) docks on the **left**; a permanent
 **3D & Export** panel (`VizExportPanelWidget`) docks on the **right**. The menu bar
-shows only two menus (v0.2.14): **Project** (Save / Save As… / Load) and
+shows only two menus (v0.2.14): **Project** (Save / Save As / Load) and
 **Registration** (Parameters); napari's default File/View/Plugins/Window/Help menus
 are **hidden** (`_keep_only_menus`, best-effort - they're set invisible, not removed).
 Tab order left→right: **Histology → Atlas → Probes → Register → Ephys**.
@@ -1311,7 +1373,7 @@ Tab order left→right: **Histology → Atlas → Probes → Register → Ephys*
    syncs AP + spacing with this tab on open/close). Assign AP per section, or
    reorder/space them in the ordering panel (spacing persists on the project;
    "Interpolate AP" fills gaps between hand-assigned sections).
-3. **Probes** - pick a probe (Neuropixels 1.0, NP 2.0 4-shank, NeuroNexus …).
+3. **Probes** - pick a probe (Neuropixels 1.0, NP 2.0 4-shank, NeuroNexus ).
    "Add probe" auto-arms Tip-marker mode. **Probe + shank are selected by label**
    (combos, consistent with the Ephys tab). Click to drop tip; switch to Entry
    (Marker, or draw a Trajectory line whose tissue-surface crossing = entry).
@@ -1344,7 +1406,7 @@ Tab order left→right: **Histology → Atlas → Probes → Register → Ephys*
 **Export Plotly HTML**, **Export HERBS pkl**, **Export per-channel CSV** - always
 available, not gated behind the Register tab.
 
-Save/Load: **Histo→CCF menu** → Save / Save As… / Load Project (`.histo2ccf.json`).
+Save/Load: **Histo→CCF menu** → Save / Save As / Load Project (`.histo2ccf.json`).
 Load restores the merged slide + sections + registration (CCF coords come back;
 exports work without re-running), re-applies stored flips, and **auto-loads the
 project's atlas in the background** (overlay / 3D ready without a manual click).
@@ -1369,7 +1431,7 @@ rest of the pipeline is unchanged - there is effectively one slide. The napari
 built-in **layer list / layer controls panels are hidden** (the workflow panel
 drives everything), so slides are never managed as separate layers.
 
-**Swap-image-on-reopen (v0.2.28).** Multi-select still merges, but **Open slide…**
+**Swap-image-on-reopen (v0.2.28).** Multi-select still merges, but **Open slide**
 when a slide is *already loaded* now SWAPS rather than appends
 (`slide_loader._replace_images`, routed from `_open_file`). Same-size new image =>
 keep section boxes + registration (reuse a registration on the same section in a

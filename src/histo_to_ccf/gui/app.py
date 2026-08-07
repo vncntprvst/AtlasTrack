@@ -277,7 +277,7 @@ def _install_project_menu(
     viewer: "napari.Viewer", state: "WorkflowState", settings=None,
     on_loaded=None, on_cleared=None,
 ) -> None:
-    """Add a "Project" menu (first in the menu bar) with Save / Save As… / Load.
+    """Add a "Project" menu (first in the menu bar) with Save / Save As / Load.
 
     These are file operations (not workflow steps), so they belong in the menu
     bar rather than a docked tab. Save/Load reuse :class:`SavePanelWidget`'s
@@ -355,10 +355,10 @@ def _install_project_menu(
 
     save_action = menu.addAction("Save Project")
     save_action.triggered.connect(_save)
-    save_as_action = menu.addAction("Save Project As…")
+    save_as_action = menu.addAction("Save Project As")
     save_as_action.triggered.connect(_save_as)
     menu.addSeparator()
-    load_action = menu.addAction("Load Project…")
+    load_action = menu.addAction("Load Project")
     load_action.triggered.connect(helper._load)
 
     # "Load recent ▸" - rebuilt each time it opens from settings.recent_projects.

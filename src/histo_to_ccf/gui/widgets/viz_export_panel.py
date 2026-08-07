@@ -266,7 +266,7 @@ class VizExportPanelWidget(QWidget):
             atlas_dir = None
             if self._settings is not None:
                 atlas_dir = getattr(self._settings, "atlas_dir", "") or None
-            self._status.setText(f"Loading region atlas {chosen}…")
+            self._status.setText(f"Loading region atlas {chosen}")
             from histo_to_ccf.gui.workers import load_atlas_worker
 
             worker = load_atlas_worker(chosen, brainglobe_dir=atlas_dir)

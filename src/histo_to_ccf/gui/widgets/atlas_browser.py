@@ -27,7 +27,7 @@ _QUICK_PICKS = [
     ("Allen CCFv3 100 µm", "allen_mouse_100um"),
     ("CCFv3-BBP Augmented 25 µm", "ccfv3augmented_mouse_25um"),
     ("Chon/Kim Unified 25 µm", "kim_mouse_25um"),
-    ("Custom ID…", ""),
+    ("Custom ID", ""),
 ]
 
 class AtlasBrowserWidget(QWidget):
@@ -63,7 +63,7 @@ class AtlasBrowserWidget(QWidget):
         self._atlas_combo.currentIndexChanged.connect(self._on_combo_changed)
         layout.addWidget(self._atlas_combo)
 
-        # Custom ID field (visible when "Custom ID…" selected)
+        # Custom ID field (visible when "Custom ID" selected)
         self._custom_id = QLineEdit()
         self._custom_id.setPlaceholderText("brainglobe atlas id (e.g. allen_mouse_10um)")
         self._custom_id.setVisible(False)
@@ -78,7 +78,7 @@ class AtlasBrowserWidget(QWidget):
             "Where BrainGlobe atlases are downloaded to and loaded from.\n"
             "An atlas already present here is reused (no re-download)."
         )
-        browse_btn = QPushButton("Browse…")
+        browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self._browse_atlas_dir)
         dir_row.addWidget(self._atlas_dir)
         dir_row.addWidget(browse_btn)
@@ -189,7 +189,7 @@ class AtlasBrowserWidget(QWidget):
             self._atlas_status.setText("Enter an atlas id first.")
             return
         atlas_dir = self._atlas_dir.text().strip() or None
-        self._atlas_status.setText(f"Loading {atlas_id}…")
+        self._atlas_status.setText(f"Loading {atlas_id}")
         from histo_to_ccf.gui.workers import load_atlas_worker
 
         self._atlas_loading = True
@@ -282,7 +282,7 @@ class AtlasBrowserWidget(QWidget):
                 self._atlas_combo.setCurrentIndex(i)
                 self._custom_id.setVisible(False)
                 return
-        self._atlas_combo.setCurrentIndex(len(_QUICK_PICKS) - 1)  # Custom ID…
+        self._atlas_combo.setCurrentIndex(len(_QUICK_PICKS) - 1)  # Custom ID
         self._custom_id.setText(atlas_id)
         self._custom_id.setVisible(True)
 

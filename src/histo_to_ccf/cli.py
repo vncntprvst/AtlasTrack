@@ -4,7 +4,7 @@ Typical workflow
 ----------------
 1. ``histo2ccf gui``           - launch the interactive napari GUI.
 2. ``histo2ccf split image.tif`` - detect sections in a composite slide.
-3. ``histo2ccf register-one …`` - headless single-section registration.
+3. ``histo2ccf register-one `` - headless single-section registration.
 4. ``histo2ccf register project.json`` - run the full M3 pipeline on a project.
 5. ``histo2ccf export project.json`` - write per-channel CCF / Paxinos CSVs.
 

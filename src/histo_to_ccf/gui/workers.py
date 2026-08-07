@@ -258,7 +258,7 @@ def register_worker_progressive(
 
     failed: list[int] = []
     for i, (slide_idx, slide, section) in enumerate(tasks):
-        yield {"current": i, "total": n_total, "msg": f"Registering section {i + 1} of {n_total}…"}
+        yield {"current": i, "total": n_total, "msg": f"Registering section {i + 1} of {n_total}"}
         logger.info("Registering section {} ({}/{})", section.index, i + 1, n_total)
 
         img = section_images[section.index]

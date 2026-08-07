@@ -24,7 +24,9 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
+    from histo_to_ccf.ephys.landmarks import Landmarks
     from histo_to_ccf.ephys.penetration import PenetrationProfile
+    from histo_to_ccf.ephys.regions import RegionBand
 
 # Grey wash over depths no recording covers, so a blind stretch never looks as
 # well constrained as a measured one.
@@ -34,6 +36,15 @@ _RECORDING_COLOURS = [
     (77, 166, 255), (95, 211, 95), (224, 176, 64), (224, 108, 108),
     (180, 140, 255), (110, 210, 205),
 ]
+
+# How finely the track is sampled when looking regions up. The atlas is 25 µm, so
+# 20 µm resolves every boundary it can actually represent; a 5 mm track is then
+# ~250 lookups, fast enough to redo whenever the alignment changes.
+_REGION_STEP_UM = 20.0
+# A band thinner than this fraction of the visible depth span gets no label - it
+# would only overprint its neighbours. Re-evaluated on every zoom, so zooming in
+# reveals the slivers rather than hiding them for good.
+_LABEL_MIN_FRACTION = 0.035
 
 
 def pyqtgraph_available() -> bool:
@@ -59,6 +70,15 @@ class EphysFeaturesView(QWidget):
         self._plots: list = []
         self._raster = None
         self._rate_plot = None
+        # Atlas regions, held in *track* space (depth below surface along the
+        # histology track) and drawn through the current warp, so the ephys panels
+        # stay put and the anatomy stretches against them - which is the direction
+        # that makes a misalignment visible.
+        self._bands: list[RegionBand] = []
+        self._landmarks: Landmarks | None = None
+        self._extremes_mode = "uniform"
+        self._region_items: list = []
+        self._overlay_items: list = []
         self._ok = pyqtgraph_available()
         self._build_ui()
 
@@ -96,7 +116,14 @@ class EphysFeaturesView(QWidget):
         self._coverage.setLabel("bottom", "")
         self._coverage.getAxis("bottom").setStyle(showValues=False)
 
-        self._plots = [self._raster, self._rate_plot, self._coverage]
+        self._regions = self._layout_widget.addPlot(row=0, col=3, title="Atlas regions")
+        self._regions.setLabel("bottom", "")
+        self._regions.getAxis("bottom").setStyle(showValues=False)
+        self._regions.setMouseEnabled(x=False)
+        self._regions.setXRange(0.0, 1.0, padding=0.0)
+        self._regions.setMaximumWidth(220)
+
+        self._plots = [self._raster, self._rate_plot, self._coverage, self._regions]
         for plot in self._plots:
             # Depth increases downwards, as the probe sits.
             plot.invertY(True)
@@ -105,6 +132,10 @@ class EphysFeaturesView(QWidget):
         for plot in self._plots[1:]:
             plot.setYLink(self._raster)
             plot.getAxis("left").setStyle(showValues=False)
+        # Which region bands are wide enough to label depends on the zoom, so the
+        # labels are recomputed whenever the shared axis moves. Zooming in therefore
+        # names the thin nuclei instead of hiding them permanently.
+        self._raster.sigYRangeChanged.connect(lambda *_: self._relabel_regions())
 
         self._status = QLabel("No recordings loaded.")
         self._status.setWordWrap(True)
@@ -189,6 +220,17 @@ class EphysFeaturesView(QWidget):
     def _mark_gaps(self, profile: PenetrationProfile) -> None:
         import pyqtgraph as pg
 
+        # Tracked and removed by hand rather than via plot.clear(): the region column
+        # is redrawn on a different schedule from the features, and clearing a plot
+        # would take the other's items with it.
+        for plot, item in self._overlay_items:
+            plot.removeItem(item)
+        self._overlay_items = []
+
+        def _add(plot, item) -> None:
+            plot.addItem(item)
+            self._overlay_items.append((plot, item))
+
         for lo, hi in profile.gaps_um():
             for plot in self._plots:
                 region = pg.LinearRegionItem(
@@ -196,7 +238,7 @@ class EphysFeaturesView(QWidget):
                     brush=pg.mkBrush(*_GAP_BRUSH), movable=False,
                 )
                 region.setZValue(-10)
-                plot.addItem(region)
+                _add(plot, region)
         for lo, hi, _a, _b in profile.overlaps_um():
             for plot in self._plots:
                 for y in (lo, hi):
@@ -208,7 +250,135 @@ class EphysFeaturesView(QWidget):
                         pen=pg.mkPen(_OVERLAP_PEN, width=1, style=Qt.PenStyle.DotLine),
                     )
                     line.setZValue(-5)
-                    plot.addItem(line)
+                    _add(plot, line)
+
+    # -- atlas regions ---------------------------------------------------
+
+    @property
+    def region_plot(self):
+        """The atlas-region panel, so landmark handles can be attached to it.
+
+        The alignment controls live outside this widget (see
+        :class:`~histo_to_ccf.gui.widgets.ephys_alignment_panel.EphysAlignmentPanel`),
+        which keeps this view usable, and testable, with no alignment state at all.
+        """
+        return getattr(self, "_regions", None)
+
+    def set_track(self, atlas, tip_ccf_um, entry_ccf_um, *,
+                  step_um: float = _REGION_STEP_UM, extra_um: float = 0.0) -> None:
+        """Look the atlas up along the shank and draw the region column.
+
+        Sampling runs from the brain surface to the tip, extended by ``extra_um``
+        past both when the recordings reach further than the histology track says
+        they should - that disagreement is exactly what the alignment is for, so it
+        must be visible rather than clipped away.
+        """
+        from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+
+        self._bands = []
+        if atlas is None or tip_ccf_um is None or entry_ccf_um is None:
+            self._draw_regions()
+            return
+
+        length = float(np.linalg.norm(np.asarray(tip_ccf_um) - np.asarray(entry_ccf_um)))
+        top, bottom = -abs(extra_um), length + abs(extra_um)
+        if self._profile is not None and self._profile.profiles:
+            p_top, p_bottom = self._profile.depth_range_um()
+            top, bottom = min(top, p_top), max(bottom, p_bottom)
+        if not bottom > top:
+            self._draw_regions()
+            return
+
+        depths = np.arange(top, bottom + step_um, max(step_um, 1.0))
+        hits = regions_along_track(atlas, tip_ccf_um, entry_ccf_um, depths)
+        self._bands = region_bands(hits, depths)
+        self._draw_regions()
+
+    def set_landmarks(self, landmarks: Landmarks | None, *, mode: str = "uniform") -> None:
+        """Redraw the region column through a landmark warp (``None`` = unwarped)."""
+        self._landmarks = landmarks
+        self._extremes_mode = mode
+        self._draw_regions()
+
+    def bands(self) -> list[RegionBand]:
+        """The region bands in track space, exposed for assertions and reporting."""
+        return list(self._bands)
+
+    def drawn_bands(self) -> list[tuple[str, float, float]]:
+        """Where the bands are actually drawn: ``(acronym, top, bottom)`` after warping.
+
+        Reading the rendered positions rather than recomputing them is what makes a
+        test able to catch a warp that is applied to the maths but not to the picture.
+        """
+        out: list[tuple[str, float, float]] = []
+        if not self._ok or not self._bands:
+            return out
+        import pyqtgraph as pg
+
+        labelled = [b for b in self._bands if b.acronym]
+        items = [it for it in self._region_items if isinstance(it, pg.LinearRegionItem)]
+        for band, item in zip(labelled, items, strict=False):
+            lo, hi = item.getRegion()
+            out.append((band.acronym, float(lo), float(hi)))
+        return out
+
+    def _warp(self, track_um):
+        """Track depth -> the depth it is drawn at, through the current landmarks."""
+        if self._landmarks is None or self._landmarks.n_user == 0:
+            return np.asarray(track_um, dtype=float)
+        return self._landmarks.to_feature(track_um, self._extremes_mode)
+
+    def _draw_regions(self) -> None:
+        if not self._ok:
+            return
+        import pyqtgraph as pg
+
+        for item in self._region_items:
+            self._regions.removeItem(item)
+        self._region_items = []
+        if not self._bands:
+            return
+
+        edges = self._warp([b.top_um for b in self._bands] + [self._bands[-1].bottom_um])
+        for band, top, bottom in zip(self._bands, edges[:-1], edges[1:], strict=True):
+            if band.acronym == "":
+                continue  # outside the atlas: leave it as background, not a colour
+            item = pg.LinearRegionItem(
+                values=(float(top), float(bottom)), orientation="horizontal",
+                brush=pg.mkBrush(*band.rgb, 210), pen=pg.mkPen(None), movable=False,
+            )
+            item.setZValue(-20)
+            self._regions.addItem(item)
+            self._region_items.append(item)
+        self._relabel_regions()
+
+    def _relabel_regions(self) -> None:
+        """Write acronyms on the bands wide enough to carry one at this zoom."""
+        if not self._ok or not self._bands:
+            return
+        import pyqtgraph as pg
+
+        labels = [it for it in self._region_items if isinstance(it, pg.TextItem)]
+        for item in labels:
+            self._regions.removeItem(item)
+            self._region_items.remove(item)
+
+        lo, hi = self._regions.getViewBox().viewRange()[1]
+        span = abs(hi - lo)
+        if span <= 0:
+            return
+        edges = self._warp([b.top_um for b in self._bands] + [self._bands[-1].bottom_um])
+        for band, top, bottom in zip(self._bands, edges[:-1], edges[1:], strict=True):
+            if not band.acronym or abs(bottom - top) < _LABEL_MIN_FRACTION * span:
+                continue
+            mid = 0.5 * (top + bottom)
+            if not lo <= mid <= hi:
+                continue
+            text = pg.TextItem(band.acronym, color=(245, 245, 245), anchor=(0, 0.5))
+            text.setPos(0.04, mid)
+            text.setZValue(5)
+            self._regions.addItem(text)
+            self._region_items.append(text)
 
     # -- reporting -------------------------------------------------------
 

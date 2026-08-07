@@ -87,9 +87,9 @@ class OrderingPanelWidget(QWidget):
         order_grp.addButton(self._col_first)
         order_grp.addButton(self._row_first)
         self._col_first.setToolTip(
-            "Number sections down column 0, then column 1, … (the lab default)."
+            "Number sections down column 0, then column 1,  (the lab default)."
         )
-        self._row_first.setToolTip("Number sections across row 0, then row 1, … (reading order).")
+        self._row_first.setToolTip("Number sections across row 0, then row 1,  (reading order).")
         order_row.addWidget(self._col_first)
         order_row.addWidget(self._row_first)
         layout.addLayout(order_row)

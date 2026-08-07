@@ -89,7 +89,7 @@ class SlideLoaderWidget(QWidget):
         # --- Load -------------------------------------------------------
         load_box = QGroupBox("Slide image")
         load_layout = QVBoxLayout(load_box)
-        load_btn = QPushButton("Open slide…")
+        load_btn = QPushButton("Open slide")
         load_btn.setToolTip("Open a TIFF, PNG, or JPEG composite slide image.")
         load_btn.clicked.connect(self._open_file)
         self._path_label = QLabel("No file loaded")
@@ -415,7 +415,7 @@ class SlideLoaderWidget(QWidget):
     def _after_image_changed(self, img, slide_idx: int) -> None:
         """Shared post-load work: estimate min area and refresh the viewer."""
         self._status.setText(
-            f"Loaded {img.shape[1]}×{img.shape[0]} px - estimating min area…"
+            f"Loaded {img.shape[1]}×{img.shape[0]} px - estimating min area ..."
         )
         # Auto-estimate in a worker so the UI stays responsive for large images.
         worker = self._estimate_worker(img)
@@ -448,7 +448,7 @@ class SlideLoaderWidget(QWidget):
             self._status.setText("Load a slide first.")
             return
         img = self._state.slide_images[slide_idx]
-        self._status.setText("Detecting…")
+        self._status.setText("Detecting ...")
 
         from histo_to_ccf.gui.workers import detect_sections_worker
 

@@ -78,8 +78,8 @@ The app opens a napari viewer with a **left dock** of five workflow tabs -
 
 **Menu bar**
 
-- **Project** - Save Project (Ctrl+S), Save Project As… (Ctrl+Shift+S),
-  Load Project… (Ctrl+O), Close Project (clears to a fresh project).
+- **Project** - Save Project (Ctrl+S), Save Project As (Ctrl+Shift+S),
+  Load Project (Ctrl+O), Close Project (clears to a fresh project).
 - **Registration** - Parameters (the registration settings; see Recipe 5.5).
 
 **Left-dock tabs**
@@ -100,7 +100,7 @@ The app opens a napari viewer with a **left dock** of five workflow tabs -
 
 ### 5.1 Load and prepare slides
 
-1. **Histology** tab → **Open slide…** → pick one or more images
+1. **Histology** tab → **Open slide** → pick one or more images
    (TIFF/PNG/JPEG). Selecting several **merges** them top-to-bottom into one
    canvas so all sections share a coordinate space.
 2. Reopening a slide while one is loaded **swaps** the pixels (same-size keeps your
@@ -118,7 +118,7 @@ The app opens a napari viewer with a **left dock** of five workflow tabs -
 3. **Edit boxes (resize / move / add / delete):** drag a handle to resize, drag
    inside to move, press **Delete** to remove the selected box, or use the
    rectangle tool to add one. (Deleting a hovered box is safe as of v0.2.33.)
-4. **Draw new section…** then **Add drawn section** to add a missed section by hand.
+4. **Draw new section** then **Add drawn section** to add a missed section by hand.
 
 ### 5.3 Assign atlas AP planes (manual / matcher)
 
@@ -215,8 +215,8 @@ keeps the AP plane (good for torn/missing tissue - redo the fit by hand);
 ### 5.8 Refine depth from LFP (Ephys, optional)
 
 1. **Ephys** tab → select **Probe**/**Shank**, set the Open Ephys **Path** (or
-   **Browse…**), optionally **List streams** and adjust **Seconds to analyse**.
-2. **Load and compute LFP power** → then **Open alignment…**.
+   **Browse**), optionally **List streams** and adjust **Seconds to analyse**.
+2. **Load and compute LFP power** → then **Open alignment**.
 3. In the dialog, the LFP power map (depth × frequency) sits beside the atlas
    region strip. **Double-click** the map to drop a red **anchor**, drag it to line
    an LFP transition up with a region boundary. **Normalize per frequency** makes

@@ -73,7 +73,7 @@ class EphysPanelWidget(QWidget):
         path_row = QHBoxLayout()
         self._path_edit = QLineEdit()
         self._path_edit.setPlaceholderText("Record Node folder with Open Ephys binary data")
-        browse_btn = QPushButton("Browse…")
+        browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self._browse)
         path_row.addWidget(self._path_edit, 1)
         path_row.addWidget(browse_btn)
@@ -105,10 +105,20 @@ class EphysPanelWidget(QWidget):
         self._compute_btn.clicked.connect(self._compute)
         layout.addWidget(self._compute_btn)
 
-        self._align_btn = QPushButton("Open alignment…")
+        self._align_btn = QPushButton("Open LFP alignment")
         self._align_btn.setEnabled(False)
         self._align_btn.clicked.connect(self._open_alignment)
         layout.addWidget(self._align_btn)
+
+        self._landmark_btn = QPushButton("Open landmark alignment")
+        self._landmark_btn.setToolTip(
+            "Depth-resolved feature panels beside the atlas region column, on one "
+            "shared depth axis, with draggable landmarks.\n"
+            "Needs only the atlas and a registered shank - no recording - so the "
+            "anatomy along the track can be read straight away."
+        )
+        self._landmark_btn.clicked.connect(self._open_landmark_alignment)
+        layout.addWidget(self._landmark_btn)
 
         self._status = QLabel("Add and register probes first, then load a recording.")
         self._status.setWordWrap(True)
@@ -186,7 +196,7 @@ class EphysPanelWidget(QWidget):
             return
         self._compute_btn.setEnabled(False)
         self._status.setText(
-            "Reading + filtering the recording and computing the power map… "
+            "Reading + filtering the recording and computing the power map "
             "(nothing is cached - this re-reads the recording each time; deriving "
             "LFP from an AP stream is slower)."
         )
@@ -209,7 +219,7 @@ class EphysPanelWidget(QWidget):
         derived = " (derived from AP)" if result.get("derived_from_ap") else ""
         self._status.setText(
             f"LFP power ready: {n_ch} channels, stream '{result.get('stream_name')}'{derived}. "
-            "Click 'Open alignment…'."
+            "Click 'Open alignment'."
         )
 
     def _on_error(self, exc: Exception) -> None:
@@ -222,18 +232,10 @@ class EphysPanelWidget(QWidget):
     def _open_alignment(self) -> None:
         if self._lfp_result is None:
             return
-        probe_idx = self._probe_combo.currentIndex()
-        shank_idx = self._shank_combo.currentIndex()
-        probes = self._state.project.probes
-        if not (0 <= probe_idx < len(probes)) or not (0 <= shank_idx < len(probes[probe_idx].shanks)):
-            QMessageBox.warning(self, "No shank", "Select a probe and shank first.")
+        selection = self._selected_shank()
+        if selection is None:
             return
-        if self._state.atlas is None:
-            QMessageBox.warning(
-                self, "Atlas not loaded",
-                "Load the atlas (Atlas tab) so region boundaries can be shown.",
-            )
-            return
+        probe_idx, shank_idx = selection
         # Persist which recording this shank's alignment came from.
         rec_path = self._path_edit.text().strip() or None
 
@@ -248,6 +250,54 @@ class EphysPanelWidget(QWidget):
             parent=self,
         )
         dlg.exec_()
+
+    def _selected_shank(self) -> tuple[int, int] | None:
+        """The chosen (probe, shank), or ``None`` after warning why there isn't one."""
+        probe_idx = self._probe_combo.currentIndex()
+        shank_idx = self._shank_combo.currentIndex()
+        probes = self._state.project.probes
+        if not (0 <= probe_idx < len(probes)) or not (
+            0 <= shank_idx < len(probes[probe_idx].shanks)
+        ):
+            QMessageBox.warning(self, "No shank", "Select a probe and shank first.")
+            return None
+        if self._state.atlas is None:
+            QMessageBox.warning(
+                self, "Atlas not loaded",
+                "Load the atlas (Atlas tab) so region boundaries can be shown.",
+            )
+            return None
+        return probe_idx, shank_idx
+
+    def _open_landmark_alignment(self) -> None:
+        selection = self._selected_shank()
+        if selection is None:
+            return
+        probe_idx, shank_idx = selection
+        shank = self._state.project.probes[probe_idx].shanks[shank_idx]
+        if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
+            QMessageBox.warning(
+                self, "Shank not registered",
+                "This shank has no tip/entry in CCF yet, so there is no track to "
+                "align to. Register the sections and place the probe first.",
+            )
+            return
+
+        from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
+
+        dlg = EphysLandmarkDialog(
+            self._state, probe_idx, shank_idx,
+            on_applied=lambda: self._on_landmarks_applied(probe_idx, shank_idx),
+            parent=self,
+        )
+        dlg.exec_()
+
+    def _on_landmarks_applied(self, probe_idx: int, shank_idx: int) -> None:
+        shank = self._state.project.probes[probe_idx].shanks[shank_idx]
+        n = max(len(shank.ephys.feature_um) - 2, 0) if shank.ephys else 0
+        self._status.setText(
+            f"{n} landmark(s) stored on shank {shank_idx}. Save the project to keep them."
+        )
 
     def _on_applied(self, probe_idx: int, shank_idx: int, rec_path: str | None) -> None:
         shank = self._state.project.probes[probe_idx].shanks[shank_idx]

@@ -133,6 +133,124 @@ def test_a_recording_with_no_spikes_does_not_break_the_raster(qtbot) -> None:
     assert "1 recording(s)" in view.summary_text()
 
 
+# -- atlas region column ---------------------------------------------------
+
+ENTRY = (5000.0, 1000.0, 0.0)
+TIP = (5000.0, 1000.0, INSERTION)
+
+
+class _DepthAtlas:
+    """Fake atlas: two regions, boundary at DV 2000 µm, nothing past 6000."""
+
+    def __init__(self) -> None:
+        self.structures = {
+            "A": {"rgb_triplet": [10, 20, 30]},
+            "B": {"rgb_triplet": [40, 50, 60]},
+        }
+
+    def structure_from_coords(self, coords, *, microns=True, as_acronym=True):
+        _ap, dv, _ml = coords
+        if dv < 0 or dv > 6000:
+            return "Outside atlas"
+        return "A" if dv < 2000 else "B"
+
+
+def test_region_column_shares_the_depth_axis(qtbot) -> None:
+    view = _view(qtbot)
+
+    view.set_profile(PenetrationProfile([_rec("001", DEEP, (1, 96), spikes=200)]))
+    view.set_track(_DepthAtlas(), TIP, ENTRY)
+
+    assert view.region_plot is not None
+    assert view.region_plot.getViewBox().linkedView(1) is view._raster.getViewBox()
+    assert view.region_plot.getViewBox().yInverted()
+
+
+def test_regions_are_found_along_the_track(qtbot) -> None:
+    view = _view(qtbot)
+
+    view.set_track(_DepthAtlas(), TIP, ENTRY)
+
+    bands = view.bands()
+    assert [b.acronym for b in bands] == ["A", "B"]
+    assert bands[0].bottom_um == pytest.approx(2000.0, abs=20.0)
+
+
+def test_no_atlas_leaves_the_column_empty_without_raising(qtbot) -> None:
+    view = _view(qtbot)
+
+    view.set_track(None, TIP, ENTRY)
+
+    assert view.bands() == []
+    assert view.drawn_bands() == []
+
+
+def test_an_unregistered_shank_leaves_the_column_empty(qtbot) -> None:
+    view = _view(qtbot)
+
+    view.set_track(_DepthAtlas(), None, None)
+
+    assert view.bands() == []
+
+
+def test_landmarks_stretch_the_drawn_regions_not_the_ephys(qtbot) -> None:
+    """The whole point of the column: anatomy moves, the measured features do not."""
+    from histo_to_ccf.ephys.landmarks import Landmarks
+
+    view = _view(qtbot)
+    view.set_profile(PenetrationProfile([_rec("001", DEEP, (1, 96), spikes=200)]))
+    view.set_track(_DepthAtlas(), TIP, ENTRY)
+    before = view.drawn_bands()
+    raster_before = len(view._raster.items)
+
+    # Pin the A/B boundary 400 µm shallower than the histology puts it.
+    lm = Landmarks.identity(0.0, INSERTION).added(1600.0, 2000.0)
+    view.set_landmarks(lm)
+
+    after = view.drawn_bands()
+    assert [b[0] for b in after] == [b[0] for b in before]
+    assert after[0][2] == pytest.approx(before[0][2] - 400.0, abs=25.0)
+    assert len(view._raster.items) == raster_before  # the ephys panels never moved
+
+
+def test_clearing_the_landmarks_puts_the_regions_back(qtbot) -> None:
+    from histo_to_ccf.ephys.landmarks import Landmarks
+
+    view = _view(qtbot)
+    view.set_track(_DepthAtlas(), TIP, ENTRY)
+    before = view.drawn_bands()
+
+    view.set_landmarks(Landmarks.identity(0.0, INSERTION).added(1600.0, 2000.0))
+    view.set_landmarks(None)
+
+    assert view.drawn_bands() == before
+
+
+def test_region_redraw_replaces_rather_than_accumulates(qtbot) -> None:
+    view = _view(qtbot)
+    view.set_track(_DepthAtlas(), TIP, ENTRY)
+    n_first = len(view.region_plot.items)
+
+    view.set_track(_DepthAtlas(), TIP, ENTRY)
+
+    assert len(view.region_plot.items) == n_first
+
+
+def test_gap_shading_reaches_the_region_column_too(qtbot) -> None:
+    view = _view(qtbot)
+    high = 2880.0 + np.arange(48) * NP2_ROW_PITCH_UM
+    profile = PenetrationProfile([
+        _rec("001", DEEP, (1, 96), spikes=100),
+        _rec("004", high, (385, 480), spikes=100, seed=2),
+    ])
+
+    view.set_track(_DepthAtlas(), TIP, ENTRY)
+    view.set_profile(profile, track_length_um=INSERTION)
+
+    assert view.drawn_bands()  # the region bands survived the gap overlay
+    assert len(view.region_plot.items) > len(view.drawn_bands())
+
+
 def test_redrawing_replaces_rather_than_accumulates(qtbot) -> None:
     """set_profile twice must not leave the first profile's items behind."""
     view = _view(qtbot)

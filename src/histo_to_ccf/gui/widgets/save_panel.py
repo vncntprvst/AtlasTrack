@@ -66,7 +66,7 @@ class SavePanelWidget(QWidget):
         self._path_edit = QLineEdit()
         self._path_edit.setPlaceholderText("project.histo2ccf.json")
         path_row.addWidget(self._path_edit)
-        browse_btn = QPushButton("…")
+        browse_btn = QPushButton("")
         browse_btn.setFixedWidth(28)
         browse_btn.clicked.connect(self._browse)
         path_row.addWidget(browse_btn)
@@ -75,7 +75,7 @@ class SavePanelWidget(QWidget):
         btn_row = QHBoxLayout()
         save_btn = QPushButton("Save project")
         save_btn.clicked.connect(self._save)
-        load_btn = QPushButton("Load project…")
+        load_btn = QPushButton("Load project")
         load_btn.setToolTip(
             "Load a saved .histo2ccf.json - restores slides, sections, AP planes "
             "and the registration result (no need to re-run registration)."

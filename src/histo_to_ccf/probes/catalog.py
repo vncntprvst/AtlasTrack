@@ -21,7 +21,7 @@ class ProbeLayout:
     """Physical recording-site layout for one probe model.
 
     Most Neuropixels models are a regular interleaved grid, fully described by
-    the parametric fields (``tip_to_first_site_um`` … ``col_pitch_um``).
+    the parametric fields (``tip_to_first_site_um``  ``col_pitch_um``).
     Irregular layouts (e.g. the NeuroNexus Poly3, whose centre column is longer
     than its flanking columns) instead supply ``explicit_depths_um`` and
     ``explicit_offsets_um`` - per-site arrays in channel order (tip → base) that
@@ -44,7 +44,7 @@ class ProbeLayout:
         """Depth of each recording site from the probe tip (µm).
 
         Sites are assigned in column-interleaved order (col 0 row 0,
-        col 1 row 0, col 0 row 1, …) matching how channels are typically
+        col 1 row 0, col 0 row 1, ) matching how channels are typically
         numbered from tip to base.
         """
         if self.explicit_depths_um is not None:

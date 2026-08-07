@@ -984,7 +984,7 @@ class AtlasMatcherDialog(QDialog):
 
         self._prematch_btn.setEnabled(False)
         self._status.setText(
-            f"Running DeepSlice on {len(section_images)} section(s) (first run is slow)…"
+            f"Running DeepSlice on {len(section_images)} section(s) (first run is slow)"
         )
         crashlog.note(f"DeepSlice pre-match starting on {len(section_images)} sections")
         worker = deepslice_worker(section_images, atlas, ds_dir, order=order)

@@ -464,11 +464,11 @@ class RegisterPanelWidget(QWidget):
             cached = self._reuse_prematch(section_images)
             if cached is not None:
                 self._status.setText(
-                    f"Reusing DeepSlice pre-match ({len(cached)} section(s))…"
+                    f"Reusing DeepSlice pre-match ({len(cached)} section(s))"
                 )
                 self._start_register(section_images, transforms_dir, cached)
                 return
-            self._status.setText("Running DeepSlice plane prediction (first run is slow)…")
+            self._status.setText("Running DeepSlice plane prediction (first run is slow)")
             from histo_to_ccf.gui.workers import deepslice_worker
 
             ds_dir = transforms_dir.parent / "deepslice"
@@ -532,7 +532,7 @@ class RegisterPanelWidget(QWidget):
                 anchorings, self._state.project, atlas
             )
         n = len(anchorings) if anchorings else len(section_images)
-        self._status.setText(f"Starting registration of {n} section(s)…")
+        self._status.setText(f"Starting registration of {n} section(s)")
 
         from histo_to_ccf.gui.workers import register_worker_progressive
 
@@ -825,7 +825,7 @@ class RegisterPanelWidget(QWidget):
         current = self._adjust_combo.currentData()
         self._adjust_combo.blockSignals(True)
         self._adjust_combo.clear()
-        # Ordered by section index so the picker reads in sequence (0, 1, 2, …)
+        # Ordered by section index so the picker reads in sequence (0, 1, 2, )
         # rather than the slide's detection order.
         indices = sorted(
             sec.index
@@ -1304,7 +1304,7 @@ class RegisterPanelWidget(QWidget):
         atlas_dir = None
         if self._settings is not None:
             atlas_dir = getattr(self._settings, "atlas_dir", "") or None
-        self._status.setText(f"Loading atlas {atlas_id} for 3D view…")
+        self._status.setText(f"Loading atlas {atlas_id} for 3D view")
         from histo_to_ccf.gui.workers import load_atlas_worker
 
         worker = load_atlas_worker(atlas_id, brainglobe_dir=atlas_dir)
