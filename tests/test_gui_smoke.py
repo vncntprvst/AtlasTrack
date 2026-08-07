@@ -813,6 +813,41 @@ def test_open_slides_replaces_image_keeping_registration(qtbot, tmp_path) -> Non
     widget._replace_images([str(diff)])
     assert len(slide.sections) == 0
     assert state.slide_images[0].shape[:2] == (150, 150)
+    # The user is told the sections were cleared, but not made to click OK for it.
+    assert "cleared" in widget._status.text()
+
+
+@pytest.mark.qt
+def test_replacing_with_a_different_size_does_not_block_on_a_dialog(
+    qtbot, tmp_path
+) -> None:
+    """The merge notice must be non-modal.
+
+    ``QMessageBox.information()`` spins its own event loop until someone clicks
+    OK, so with no user it never returns. That is what made this file hang
+    indefinitely on 2026-08-05..07 - intermittently, because a stray event
+    sometimes dismissed the dialog, which disguised a block as slowness.
+    """
+    import imageio.v3 as iio
+
+    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+
+    state = WorkflowState()
+    state.add_slide("orig.png", np.zeros((200, 300, 3), dtype=np.uint8))
+    state.active_slide_idx = 0
+    state.slide_bands[0] = [(0, 200)]
+    widget = SlideLoaderWidget(state, viewer=None)
+    qtbot.addWidget(widget)
+    widget._after_image_changed = lambda *a, **k: None
+
+    other = tmp_path / "different.png"
+    iio.imwrite(other, np.full((150, 150, 3), 80, dtype=np.uint8))
+
+    widget._replace_images([str(other)])  # must return, not block
+
+    dialog = getattr(widget, "_merge_dialog", None)
+    assert dialog is not None, "the user should still be told"
+    assert dialog.isModal() is False
 
 
 @pytest.mark.qt

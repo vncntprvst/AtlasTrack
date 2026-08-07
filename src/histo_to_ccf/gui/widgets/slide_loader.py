@@ -383,12 +383,32 @@ class SlideLoaderWidget(QWidget):
             self._after_image_changed(combined, slide_idx)
 
     def _info_merge(self, message: str) -> None:
-        """Tell the user that images were merged (best-effort dialog + status)."""
+        """Tell the user that images were merged - **without blocking**.
+
+        This used to call ``QMessageBox.information()``, which spins its own event
+        loop until someone clicks OK. With no one to click - a test, a scripted
+        session, anything headless - it waits forever. That is the "flaky hang" in
+        ``test_gui_smoke`` chased across 2026-08-05..07: the run finished in 20 s
+        when a stray event dismissed the dialog and never finished when none did,
+        which is why it looked like slowness rather than a block.
+
+        Non-modal is also the better behaviour here: this is *information*, and the
+        same text is already in the status line, so there is nothing to gain from
+        stopping the user to acknowledge it.
+        """
         self._status.setText(message)
         try:
+            from qtpy.QtCore import Qt
             from qtpy.QtWidgets import QMessageBox
 
-            QMessageBox.information(self, "Slides merged", message)
+            box = QMessageBox(
+                QMessageBox.Icon.Information, "Slides merged", message, parent=self
+            )
+            box.setModal(False)
+            box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            box.show()
+            # Parented to self, so Qt owns it; the reference is for testability.
+            self._merge_dialog = box
         except Exception:
             pass
 

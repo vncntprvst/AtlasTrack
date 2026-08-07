@@ -1,6 +1,68 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-07 · version **0.2.60** · branch **dev**_
+_Last updated: 2026-08-07 · version **0.2.62** · branch **dev**_
+
+## The test_gui_smoke "flaky hang" is solved - it was a modal dialog (v0.2.62)
+
+`SlideLoaderWidget._info_merge` called **`QMessageBox.information()`**, which spins
+its own event loop until someone clicks OK. Headless, nobody ever does, so
+`test_open_slides_replaces_image_keeping_registration` blocked there - confirmed by a
+`faulthandler` stack pointing at `slide_loader.py` `_info_merge`, and by the run
+using **1.2 s of CPU over 6m40 of wall time**: blocked, not computing.
+
+It looked *flaky* (20 s, 42 s, or never) because a stray event sometimes dismissed
+the dialog. That is what disguised a hard block as slowness across 2026-08-05..07.
+
+**The 2026-08-07 entry claiming "not hanging - it is slow, give it 900 s" was wrong**
+and rested on one lucky run. Two contradictory numbers - whole file 20 s, single test
+42 s - should have been the tell, since a single test cannot outlast the file that
+contains it.
+
+Fixed by making the notice non-modal (`setModal(False)` + `show()`); the same text is
+already in the status line, so nothing is lost by not stopping the user.
+`test_replacing_with_a_different_size_does_not_block_on_a_dialog` pins it.
+`_info_merge` and `_replace_images` were untouched by the ephys work - verified
+against `git diff` - so this was pre-existing, not a regression from it.
+
+**Full suite now runs to completion: 475 passed in ~42 s.** Worth grepping the GUI
+for other blocking calls (`QMessageBox.information/warning/critical`,
+`QDialog.exec()`) on paths a user hits often.
+
+## Ephys alignment rebuild - Phase 1 viewer (v0.2.61)
+
+pyqtgraph is in (behind the `ephys` extra) and the read-only feature view renders
+real data. Two new pieces plus one correctness fix the real data forced.
+
+**`ephys/penetration.py`** merges a penetration's recordings onto the shared axis.
+It deliberately does **not** average overlapping recordings, and does not
+interpolate across gaps: where two recordings overlap their features *should* agree,
+and that comparison is the only independent check on the insertion depths and bank
+labels that placed them - averaging would destroy it. Gaps stay empty so the viewer
+can grey them out.
+
+**`gui/widgets/ephys_features_view.py`** - stacked pyqtgraph panels (spike raster,
+firing-rate profiles, per-recording coverage bars) with **linked, zoomable y-axes**,
+depth increasing downwards. Replaces the old fixed 600 px `QGraphicsScene`, which
+could not be zoomed - a problem when the structure of interest is tens of µm across a
+5 mm track. Gaps are shaded, overlaps marked, and the status line names the coverage
+fraction, the gaps, the overlaps and any recording without sorting.
+
+**The fix: off-site spikes are now dropped when reading an analyzer.** Spike
+localisation fails on some spikes and returns a *degenerate* position rather than an
+error. Measured on LO_06 2026-02-07/002: **6.1 % of spikes (66,191) come back at
+exactly y = 0** while every site on that shank is at y = 720-1410 µm. Left in, they
+pile 720 µm below the deepest site - which on the shared axis is exactly where the
+neighbouring recording's real activity is, so they drew a dense band and a
+firing-rate profile running the whole way down the track that had nothing behind it.
+`load_spike_features(max_offsite_um=50)` filters them and reports the count in
+`n_dropped_offsite`, so a lossy read is never silent. Real localisation overshoot on
+that same recording is ~32 µm, so the margin separates the two cleanly.
+
+**Encouraging for the open risk.** The rendered LO_06 raster shows clear
+depth-banded populations and a distinct quiet zone at ~3.9-4.35 mm below surface, so
+brainstem/cerebellum does appear to carry alignable structure - the worry was that it
+would not, since IBL's canonical landmark (dentate gyrus LFP) has no counterpart here.
+Not yet checked against the atlas regions; that is the next step.
 
 ## Ephys alignment rebuild - Phase 1 core (v0.2.60)
 

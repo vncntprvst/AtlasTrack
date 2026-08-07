@@ -51,6 +51,9 @@ class SpikeFeatures:
     duration_s: float
     n_units: int
     source: str = ""
+    # Spikes discarded because they localised implausibly far from any site (see
+    # load_spike_features). Kept as a count so a lossy read is never silent.
+    n_dropped_offsite: int = 0
 
     def __post_init__(self) -> None:
         n = len(self.times_s)
@@ -103,12 +106,26 @@ def find_shank_analyzers(root: str | Path) -> list[Path]:
     return sorted(dict.fromkeys(candidates), key=group_key)
 
 
-def load_spike_features(path: str | Path) -> SpikeFeatures:
+def load_spike_features(path: str | Path, *, max_offsite_um: float = 50.0
+                        ) -> SpikeFeatures:
     """Read one shank's spike times, depths and amplitudes from an analyzer.
 
     Requires the ``spike_locations`` extension, which is what gives each spike a
     depth. Without it a raster cannot be drawn and the caller should say so rather
     than fall back to per-unit positions, which would silently coarsen the plot.
+
+    **Off-site spikes are dropped**, and this matters more than it sounds. Spike
+    localisation fails on some spikes and returns a degenerate position rather than
+    an error: measured on LO_06 2026-02-07/002, **6.1 % of spikes come back at
+    exactly y = 0** while every recording site is at y = 720-1410 µm. Left in, those
+    ~66,000 spikes pile up 720 µm below the deepest site - which on the shared depth
+    axis is exactly where the *neighbouring* recording's real activity sits, so they
+    would read as a dense band that is not there.
+
+    A spike localised further than ``max_offsite_um`` beyond the site span carries no
+    depth information anyway. Genuine localisation overshoots are small (that same
+    recording's real spikes reach only ~32 µm past the end sites) so the margin
+    separates the two cleanly.
     """
     si = _require_si()
     analyzer = si.load_sorting_analyzer(str(path))
@@ -139,17 +156,26 @@ def load_spike_features(path: str | Path) -> SpikeFeatures:
     unit_ids = np.asarray(sorting.unit_ids)[unit_index]
 
     channel_locations = np.asarray(analyzer.get_channel_locations(), dtype=float)
+    site_depth = channel_locations[:, 1]
+
+    keep = np.ones(depth.shape, dtype=bool)
+    if site_depth.size and max_offsite_um is not None:
+        keep = (depth >= site_depth.min() - max_offsite_um) & (
+            depth <= site_depth.max() + max_offsite_um
+        )
+    n_dropped = int((~keep).sum())
 
     return SpikeFeatures(
-        times_s=times_s,
-        depth_um=depth,
-        amplitude=amplitude,
-        unit_ids=unit_ids,
-        channel_depth_um=channel_locations[:, 1],
+        times_s=times_s[keep],
+        depth_um=depth[keep],
+        amplitude=amplitude[keep],
+        unit_ids=unit_ids[keep],
+        channel_depth_um=site_depth,
         channel_x_um=channel_locations[:, 0],
         duration_s=float(times_s.max()) if times_s.size else 0.0,
         n_units=len(sorting.unit_ids),
         source=str(path),
+        n_dropped_offsite=n_dropped,
     )
 
 
