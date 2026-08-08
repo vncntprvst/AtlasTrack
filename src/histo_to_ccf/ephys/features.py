@@ -114,6 +114,33 @@ def lfp_band_power(
     return out
 
 
+def normalise_band_power(band_power: np.ndarray) -> np.ndarray:
+    """Strip one recording's overall power level, keeping its depth structure.
+
+    **Band power is not comparable across recordings, and stitching it raw draws a
+    boundary that is not there.** Measured on LO_06 2026-02-09, four shanks: the
+    median 10-30 Hz power differs by **0.69-0.93 log10 (5.0-8.5x)** between the three
+    recordings on the *same* penetration - a gain / reference / noise-floor
+    difference between acquisitions, not anatomy. Left alone it puts a large step at
+    every bank junction, exactly where a user would read a region boundary and place
+    a landmark.
+
+    Returns log10 power **relative to that recording's own median channel**, one
+    median per band. That deliberately discards any genuine overall difference in
+    power between the depths each recording covers - which is unmeasurable anyway
+    while the instrumental offset is 5-8x larger - and keeps the local, depth-to-depth
+    transitions, which are what an alignment is read from.
+
+    Apply per recording *and* per shank, before putting anything on a shared axis.
+    """
+    a = np.log10(np.maximum(np.asarray(band_power, dtype=float), 1e-12))
+    if a.ndim != 2:
+        raise ValueError("band_power must be (n_channels, n_bands)")
+    if a.shape[0] == 0:
+        return a
+    return a - np.nanmedian(a, axis=0, keepdims=True)
+
+
 def depth_profiles(
     depths_um: np.ndarray,
     amplitudes: np.ndarray,

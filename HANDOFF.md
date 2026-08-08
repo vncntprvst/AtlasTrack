@@ -1,6 +1,65 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-07 · version **0.2.63** · branch **dev**_
+_Last updated: 2026-08-07 · version **0.2.64** · branch **dev**_
+
+## Settled: no ephys feature reads CCF boundaries in this target (v0.2.64)
+
+`load_lfp_excerpts` is in (`ephys/loader.py`) - screened excerpts rather than one
+central slab, six 10 s windows read lazily so only ~1 % of a 61 GB recording is
+touched. It answered the question the whole alignment plan rested on, and the answer
+is no.
+
+**Tested on LO_06 2026-02-09, four shanks, three banks, both feature families.**
+
+*Spike features* (rate, log rate, mean amplitude): ratio of mean |Δfeature| at a CCF
+region boundary to elsewhere is 0.66-1.80, scattering either side of 1 with no
+consistency across shanks. *LFP band power*, all five IBL bands, tested **within each
+recording** over 12 independent shank x recording samples: means 0.86-1.14, medians
+0.78-1.08. Nothing.
+
+**Then the control that matters.** A null could mean "no signal" *or* "the histology
+track is in the wrong place". So the along-track offset was scanned over ±500 µm: if
+the features carried boundary information and the registration were merely offset,
+every band would peak at the **same** offset. They peak at **+150, -450, +100, -375,
+-425, -200 µm** - no agreement - on curves with mean ≈1.03 and sd ≈0.14, where every
+peak (1.32-1.45) is ~2 sd, exactly what 41 draws of noise produce. **The null is real,
+not a registration offset hiding a signal.**
+
+### Two traps found on the way, both now fixed in code
+
+1. **The first LFP result was an artefact of stitching.** Shank 1 appeared to score
+   2.3-3.6x across all five bands while shanks 0/2/3 scored 0.16-0.60. Three of four
+   landing far *below* 1 is a broken metric, not odd biology - and dumping the profile
+   showed why: at 3475 µm, a bank junction, log power steps 0.11 → 0.71 and stays.
+   **Band power is not comparable across recordings**: the median 10-30 Hz level
+   differs by **0.69-0.93 log10 (5.0-8.5x)** between recordings on the same
+   penetration, on all four shanks. Stitched raw it draws a large false transition at
+   every bank junction - exactly where a user would place a landmark.
+   `features.normalise_band_power` now removes it; apply per recording *and* per shank
+   before anything reaches a shared axis.
+2. **Screening ran before referencing.** A window was rejected for cross-channel
+   artifact at 2.4 % - but common median referencing exists to remove precisely that,
+   and in a licking task nearly every window has some. Reordered to reference *then*
+   screen: what disqualifies a window is what survives the standard denoising. All 18
+   real windows now pass, against 1 of 2 before.
+
+### What this means for the plan
+
+The automatic feature→boundary correspondence IBL relies on **does not exist here**,
+and that was the premise of Phases 3-4.
+
+* **Phase 3 (roll from per-shank alignments) is not supportable.** It needs per-shank
+  alignments that disagree systematically; there is no reliable per-shank alignment to
+  disagree.
+* **The landmark GUI is still the right tool** - IBL's is human-driven too. But it
+  must be driven by specific signatures a person can identify, not by an automatic
+  fit. The one real correspondence found is shank 0's near-silent 2839-3014 µm inside
+  **NOD**, a cerebellar granule layer, and it shows on 1 of 4 shanks.
+* **Phase 4 (making a placed alignment reach the exports) is still worth doing.**
+
+**Suite: 559 passed. Scripts: `lo06_regions_vs_features.py`, `lo06_boundary_stats.py`,
+`lo06_lfp_vs_regions.py`, `lo06_lfp_profile_dump.py`, `lo06_lfp_within_recording.py`,
+`lo06_offset_scan.py` (scratchpad).**
 
 ## The import contract was never actually running (v0.2.63)
 
@@ -58,11 +117,53 @@ and **deliberately does not touch `anchors` or `channel_ccf_um`**, which belong 
 older tip-referenced alignment: the new axis is depth *below surface*, and writing one
 convention into the other's field would silently flip the track.
 
-**Still open**: the region column has not yet been read against real LO_06 features,
-so whether the depth-banded structure in that raster corresponds to anatomy or to
-recording bank edges remains unanswered - that was the point of building it.
+**Suite: 543 passed in ~45 s.**
 
-**Suite: 539 passed in ~45 s.**
+## Measured: spike features do NOT read region boundaries in this target (2026-08-07)
+
+The open risk from Phase 1, now answered on real data - LO_06 **2026-02-09**, all four
+shanks, the three sorted banks (1-96, 97-192, 193-288) stitched contiguously to
+**2755-4900 µm below surface, 42 % of the track, no gaps**. Bank edges land 15 µm
+apart (one row pitch), as the arithmetic predicts.
+
+**The good news: the depth bands are not bank-edge artefacts.** Shank 0's near-silent
+stretch (2839-3014 µm, 0.03-0.85 Hz) sits ~450 µm *inside* one bank, nowhere near an
+edge, and the atlas calls it **NOD** - a quiet cerebellar granule layer is exactly the
+right signature there. That hypothesis is dead.
+
+**The bad news: no spike-derived feature steps at CCF boundaries.** Ratio of mean
+|Δfeature| at a region boundary to elsewhere, per shank (>1 would mean a detector):
+
+| feature | shank 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| firing rate | 0.95 | 0.86 | 1.24 | 0.66 |
+| log firing rate | 0.94 | 1.08 | 1.40 | 0.86 |
+| mean amplitude | **1.80** | 0.76 | 0.79 | **1.54** |
+
+Mostly *below* 1 - steps at boundaries are if anything smaller than typical steps. The
+largest steps sit 66-224 µm from the nearest boundary against a 115-135 µm median, so
+no better than chance. Amplitude looks promising on two shanks and inverted on the
+other two: noise, not a detector. And the NOD quiet zone appears on **1 of 4 shanks**.
+
+This is the risk the plan flagged - IBL's canonical landmark is the dentate gyrus LFP
+band, and brainstem/cerebellum has no such structure. It is now measured, not assumed.
+
+**What it does not cover: LFP band power is untested**, and that is IBL's actual
+alignment feature. Testing it needs `load_lfp_excerpts` (Phase 1b, still to come);
+NP2.0 has no separate LFP stream so it means reading AP excerpts and filtering, from
+61 GB on the spinning disk - excerpts only, a few hundred MB.
+
+**So the next step is the LFP reader, not Phase 3.** Building trajectory refinement on
+features that demonstrably do not discriminate would be building on sand.
+
+**Also found, and useful**: every shank's histology track is *longer* than the probe
+was driven - 5088 / 5228 / 5159 / 5123 µm against a 4900 µm insertion depth, so
+**+188 to +328 µm, same sign on all four**. Systematic, not noise (DiI below the tip,
+an entry point placed above the true surface, or no shrinkage correction). This is
+precisely the along-track offset the landmark alignment exists to absorb, and the
+per-shank spread is what Phase 3 would read a roll from.
+
+Scripts: `lo06_regions_vs_features.py`, `lo06_boundary_stats.py` (scratchpad).
 
 ## The test_gui_smoke "flaky hang" is solved - it was a modal dialog (v0.2.62)
 
