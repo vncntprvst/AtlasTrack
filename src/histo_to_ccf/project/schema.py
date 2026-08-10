@@ -103,6 +103,18 @@ class EphysAlignment(BaseModel):
     # ``anchors`` stays for projects written before this field.
     feature_um: list[float] = []
     track_um: list[float] = []
+    # How depths outside the outermost landmark are treated: "uniform" (translate
+    # only) or "linear" (continue the global trend). Stored because the two give
+    # different channel positions in the tails, so a reloaded alignment that guessed
+    # would silently move channels.
+    extremes_mode: str = "uniform"
+    # Depth below the surface of the electrode array's origin on the *feature* axis -
+    # in practice the manipulator insertion depth. It is usually NOT the histology
+    # track length (measured +140 to +328 µm apart on LO_06/LO_07), and the two must
+    # not be conflated: this one says where the electrodes were, the track length says
+    # where the histology thinks the shank is. ``None`` means "assume they agree",
+    # which is right when no recording has been registered.
+    insertion_depth_um: float | None = None
     # Kept so the result is reviewable without recomputing: which channels these
     # were, and what region each landed in.
     channel_ids: list[str] = []

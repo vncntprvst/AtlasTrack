@@ -323,7 +323,9 @@ def test_export_channel_csv(tmp_path: Path) -> None:
     assert out.exists()
     rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
     assert len(rows) == 384
-    assert set(rows[0].keys()) == {"probe", "shank", "channel", "ap_um", "ml_um", "dv_um"}
+    assert set(rows[0].keys()) == {
+        "probe", "shank", "channel", "ap_um", "ml_um", "dv_um", "depth_source"
+    }
     assert rows[0]["probe"] == "p1"
     assert rows[0]["channel"] == "0"
 

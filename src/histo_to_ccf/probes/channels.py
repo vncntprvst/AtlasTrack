@@ -85,41 +85,127 @@ def channel_ccf_coords(
 # High-level shank / project helpers
 # ---------------------------------------------------------------------------
 
+def aligned_site_depths_from_tip(
+    shank: Shank,
+    site_depths_from_tip_um: np.ndarray,
+    track_length_um: float,
+) -> tuple[np.ndarray, bool]:
+    """Warp geometric site depths through the shank's ephys landmark alignment.
+
+    Returns ``(depths_from_tip, used_alignment)``. Without a usable alignment the
+    depths come back untouched, so callers get the geometric placement and can say so.
+
+    The landmark arrays live on the **depth-below-surface** axis (see
+    :mod:`histo_to_ccf.ephys.landmarks`) while probe geometry is µm **from the tip**,
+    so the conversion happens here and only here:
+
+    * feature depth below surface = ``insertion_depth - depth_from_tip``, where the
+      insertion depth is the manipulator's, falling back to the histology track
+      length when no recording pinned it;
+    * the landmarks map that onto a track depth below surface;
+    * back to µm from the tip against the **histology** track, which is the line the
+      channels are actually placed on.
+
+    Getting either subtraction backwards flips the shank end for end, which is why it
+    is written out rather than folded into the caller.
+    """
+    depths = np.asarray(site_depths_from_tip_um, dtype=float)
+    eph = getattr(shank, "ephys", None)
+    if eph is None:
+        return depths, False
+    feature = list(eph.feature_um or [])
+    track = list(eph.track_um or [])
+    if len(feature) < 2 or len(feature) != len(track) or len(feature) == 2:
+        # Two entries are the bare track end points: an alignment with no user
+        # landmarks, which is the identity. Nothing to apply.
+        return depths, False
+
+    from histo_to_ccf.ephys.landmarks import Landmarks
+
+    reference = eph.insertion_depth_um
+    if reference is None or reference <= 0:
+        reference = track_length_um
+    landmarks = Landmarks(np.asarray(feature, dtype=float), np.asarray(track, dtype=float))
+    feature_below = reference - depths
+    track_below = np.asarray(
+        landmarks.to_track(feature_below, getattr(eph, "extremes_mode", "uniform") or "uniform")
+    )
+    return track_length_um - track_below, True
+
+
 def shank_channel_coords(
-    shank: "Shank",
+    shank: Shank,
     layout: ProbeLayout,
+    *,
+    use_ephys: bool = True,
 ) -> np.ndarray | None:
     """Return per-channel CCF coords for ``shank`` using ``layout``.
 
-    Returns ``None`` if the shank has no registered tip/entry coordinates.
+    Applies the shank's ephys landmark alignment when it has one, so an alignment the
+    user placed actually reaches the exports. Pass ``use_ephys=False`` for the raw
+    geometric placement. Returns ``None`` if the shank has no registered tip/entry.
     """
+    coords, _used = shank_channel_coords_with_source(shank, layout, use_ephys=use_ephys)
+    return coords
+
+
+def shank_channel_coords_with_source(
+    shank: Shank,
+    layout: ProbeLayout,
+    *,
+    use_ephys: bool = True,
+) -> tuple[np.ndarray | None, bool]:
+    """As :func:`shank_channel_coords`, but also say whether the alignment was used."""
     if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
-        return None
+        return None, False
     depths = layout.site_depths_from_tip_um()
     laterals = layout.site_lateral_offsets_um()
-    return channel_ccf_coords(
-        shank.entry_ccf_um,
-        shank.tip_ccf_um,
-        depths,
-        site_lateral_offsets_um=laterals,
+    used = False
+    if use_ephys:
+        track_length_um = float(
+            np.linalg.norm(np.asarray(shank.tip_ccf_um) - np.asarray(shank.entry_ccf_um))
+        )
+        depths, used = aligned_site_depths_from_tip(shank, depths, track_length_um)
+    return (
+        channel_ccf_coords(
+            shank.entry_ccf_um,
+            shank.tip_ccf_um,
+            depths,
+            site_lateral_offsets_um=laterals,
+        ),
+        used,
     )
 
 
 def project_channel_coords(
-    project: "Project",
+    project: Project,
 ) -> dict[tuple[str, int], np.ndarray]:
     """Compute per-channel CCF coords for every registered shank in ``project``.
 
     Returns a dict mapping ``(probe_label, shank_index)`` →
     ``np.ndarray`` of shape ``(n_channels, 3)``.
     """
-    out: dict[tuple[str, int], np.ndarray] = {}
+    return {k: v for k, (v, _used) in project_channel_coords_with_source(project).items()}
+
+
+def project_channel_coords_with_source(
+    project: Project,
+    *,
+    use_ephys: bool = True,
+) -> dict[tuple[str, int], tuple[np.ndarray, bool]]:
+    """As :func:`project_channel_coords`, plus whether each shank used its alignment.
+
+    The flag is carried through to the CSV rather than dropped: a reader must be able
+    to tell an ephys-corrected depth from a purely geometric one, because they are not
+    the same claim.
+    """
+    out: dict[tuple[str, int], tuple[np.ndarray, bool]] = {}
     for probe in project.probes:
         layout = get_layout(probe.type.name)
         for shank in probe.shanks:
-            coords = shank_channel_coords(shank, layout)
+            coords, used = shank_channel_coords_with_source(shank, layout, use_ephys=use_ephys)
             if coords is not None:
-                out[(probe.label, shank.index)] = coords
+                out[(probe.label, shank.index)] = (coords, used)
     return out
 
 
@@ -128,14 +214,20 @@ def project_channel_coords(
 # ---------------------------------------------------------------------------
 
 def export_channel_csv(
-    project: "Project",
+    project: Project,
     output_path: str | Path,
     *,
     probe_label: str | None = None,
+    atlas=None,
 ) -> int:
     """Export per-channel CCF coordinates to a CSV file.
 
-    Columns: ``probe, shank, channel, ap_um, ml_um, dv_um``.
+    Columns: ``probe, shank, channel, ap_um, ml_um, dv_um, depth_source`` - plus
+    ``region`` when an ``atlas`` is given.
+
+    ``depth_source`` says whether each shank's depths came from the ephys landmark
+    alignment or from probe geometry alone. Two shanks of one probe can legitimately
+    differ, and a reader who cannot tell them apart will over-trust the geometric ones.
 
     Parameters
     ----------
@@ -145,32 +237,149 @@ def export_channel_csv(
         Destination CSV path.
     probe_label
         If given, only export this probe; otherwise export all probes.
+    atlas
+        Optional BrainGlobe atlas; when given, each channel gets its region acronym.
 
     Returns
     -------
     n_rows
         Number of data rows written.
     """
-    coords_map = project_channel_coords(project)
+    coords_map = project_channel_coords_with_source(project)
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    header = ["probe", "shank", "channel", "ap_um", "ml_um", "dv_um", "depth_source"]
+    if atlas is not None:
+        header.append("region")
 
     n_rows = 0
     with out_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["probe", "shank", "channel", "ap_um", "ml_um", "dv_um"])
-        for (label, shank_idx), coords in sorted(coords_map.items()):
+        writer.writerow(header)
+        for (label, shank_idx), (coords, used) in sorted(coords_map.items()):
             if probe_label is not None and label != probe_label:
                 continue
+            source = "ephys_alignment" if used else "geometry"
+            regions = _region_acronyms(atlas, coords) if atlas is not None else None
             for ch_idx, (ap, ml, dv) in enumerate(coords):
-                writer.writerow([label, shank_idx, ch_idx, f"{ap:.2f}", f"{ml:.2f}", f"{dv:.2f}"])
+                row = [label, shank_idx, ch_idx, f"{ap:.2f}", f"{ml:.2f}", f"{dv:.2f}", source]
+                if regions is not None:
+                    row.append(regions[ch_idx])
+                writer.writerow(row)
                 n_rows += 1
 
     return n_rows
 
 
+def _region_acronyms(atlas, coords: np.ndarray) -> list[str]:
+    """Atlas acronym at each ``(AP, ML, DV)`` µm point, ``""`` outside the atlas."""
+    from histo_to_ccf.ephys.regions import regions_at_ccf
+
+    return [acr for acr, _rgb in regions_at_ccf(atlas, coords)]
+
+
+def export_ibl_channel_locations(
+    project: Project,
+    output_dir: str | Path,
+    *,
+    probe_label: str | None = None,
+    atlas=None,
+) -> list[Path]:
+    """Write IBL-dialect ``channel_locations.json`` + ``prev_alignments.json``.
+
+    One folder per shank (``<probe>_shank<N>/``), matching the layout the IBL / AIND
+    alignment GUI reads. Field names follow their ``create_channel_dict``: ``x``,
+    ``y``, ``z``, ``axial``, ``lateral``, ``brain_region_id``, ``brain_region``, keyed
+    ``channel_0``, ``channel_1``, ...; ``prev_alignments.json`` is
+    ``{iso_timestamp: [feature, track]}``.
+
+    **The coordinates are Allen CCF µm, not IBL's bregma-referenced frame.** Only the
+    *axis naming* is theirs (x=ML, y=AP, z=DV); the origin is the CCF corner. An
+    ``origin`` entry records that in the file, because silently shipping CCF numbers
+    in a field another tool will read as bregma-referenced would be a wrong answer
+    that looks right. Convert deliberately downstream if the consumer needs bregma.
+
+    Returns the paths written.
+    """
+    import json
+    from datetime import datetime
+
+    out_root = Path(output_dir)
+    written: list[Path] = []
+    for probe in project.probes:
+        if probe_label is not None and probe.label != probe_label:
+            continue
+        layout = get_layout(probe.type.name)
+        axial = np.asarray(layout.site_depths_from_tip_um(), dtype=float)
+        lateral_raw = layout.site_lateral_offsets_um()
+        lateral = (
+            np.zeros_like(axial) if lateral_raw is None
+            else np.asarray(lateral_raw, dtype=float)
+        )
+        for shank in probe.shanks:
+            coords, used = shank_channel_coords_with_source(shank, layout)
+            if coords is None:
+                continue
+            regions = _region_acronyms(atlas, coords) if atlas is not None else None
+            folder = out_root / f"{probe.label}_shank{shank.index}"
+            folder.mkdir(parents=True, exist_ok=True)
+
+            payload: dict = {
+                "origin": {
+                    "frame": "allen_ccf_um",
+                    "axes": "x=ML, y=AP, z=DV (Allen CCF corner origin, NOT bregma)",
+                    "depth_source": "ephys_alignment" if used else "geometry",
+                }
+            }
+            for i, (ap, ml, dv) in enumerate(coords):
+                entry = {
+                    "x": float(ml),
+                    "y": float(ap),
+                    "z": float(dv),
+                    "axial": float(axial[i]) if i < axial.size else 0.0,
+                    "lateral": float(lateral[i]) if i < lateral.size else 0.0,
+                }
+                if regions is not None:
+                    acr = regions[i]
+                    entry["brain_region"] = acr
+                    entry["brain_region_id"] = _structure_id(atlas, acr)
+                payload[f"channel_{i}"] = entry
+
+            path = folder / "channel_locations.json"
+            path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+            written.append(path)
+
+            eph = shank.ephys
+            if eph is not None and len(eph.feature_um or []) >= 2:
+                stamp = eph.created_at or datetime.now().isoformat(timespec="seconds")
+                prev = folder / "prev_alignments.json"
+                # Merge rather than overwrite: prev_alignments is a history, and
+                # dropping earlier attempts would discard the record of what changed.
+                existing = {}
+                if prev.exists():
+                    try:
+                        existing = json.loads(prev.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        existing = {}
+                existing[stamp] = [list(eph.feature_um), list(eph.track_um)]
+                prev.write_text(json.dumps(existing, indent=1), encoding="utf-8")
+                written.append(prev)
+    return written
+
+
+def _structure_id(atlas, acronym: str) -> int:
+    """Allen structure id for an acronym, 0 when unknown (IBL's "void")."""
+    if not acronym:
+        return 0
+    try:
+        return int(atlas.structures[acronym]["id"])
+    except Exception:
+        return 0
+
+
 def export_paxinos_csv(
-    project: "Project",
+    project: Project,
     output_path: str | Path,
     *,
     probe_label: str | None = None,

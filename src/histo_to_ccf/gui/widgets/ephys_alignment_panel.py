@@ -454,6 +454,15 @@ class EphysLandmarkDialog(QDialog):
             from histo_to_ccf.ephys.penetration import PenetrationProfile
 
             profile = PenetrationProfile()
+        # The manipulator depth the feature axis is measured from, when a recording
+        # has pinned it. None means "assume it matches the histology track", which is
+        # the only honest default before any recording is registered.
+        depths = {
+            r.insertion_depth_um
+            for r in getattr(state.project.probes[probe_idx], "recordings", []) or []
+            if r.insertion_depth_um
+        }
+        self._insertion_depth_um = float(next(iter(depths))) if len(depths) == 1 else None
         track_length = 0.0
         if self._shank.tip_ccf_um is not None and self._shank.entry_ccf_um is not None:
             track_length = float(np.linalg.norm(
@@ -489,6 +498,10 @@ class EphysLandmarkDialog(QDialog):
         # numbers into them would silently flip the track.
         self._shank.ephys.feature_um = [float(v) for v in landmarks.feature_um]
         self._shank.ephys.track_um = [float(v) for v in landmarks.track_um]
+        # Both are needed to reproduce the channel positions: the mode decides the
+        # tails, and the insertion depth is what the feature axis was measured from.
+        self._shank.ephys.extremes_mode = self.panel.extremes_mode()
+        self._shank.ephys.insertion_depth_um = self._insertion_depth_um
         self._shank.ephys.created_at = datetime.now().isoformat(timespec="seconds")
         if self._on_applied is not None:
             self._on_applied()

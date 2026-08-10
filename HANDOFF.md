@@ -1,6 +1,109 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-07 · version **0.2.64** · branch **dev**_
+_Last updated: 2026-08-10 · version **0.2.65** · branch **dev**_
+
+## CORRECTION: the "no feature reads boundaries" result was a bad metric (2026-08-10)
+
+**Everything below dated 2026-08-07/08 that says the null is "settled" is wrong.**
+The features do carry region transitions; the statistic could not see them.
+
+The metric compared **|difference between adjacent 15 µm rows|** at a boundary vs
+elsewhere. That is a **high-pass** measure, and it asks the wrong question. A
+cerebellum→brainstem transition is a large change spread over 100-300 µm, so its
+per-row differences are unremarkable even when the overall change is ~100x. The
+evidence was already in my own LO_06 dump and I read past it: NOD at **0.03-0.85 Hz**
+and SPIV a few hundred µm deeper at **34-70 Hz**, scored "no boundary signal".
+
+Redone as a **level contrast** - mean feature above vs below a boundary over 150 µm
+windows, as a Cohen's d, against the null distribution from every non-boundary depth
+(LO_07_005, both probes):
+
+| boundary | feature | d | percentile |
+|---|---|---|---|
+| `chpl\|V4` 3490 µm | LFP 30-80 Hz | **4.85** | 99th |
+| `arb\|CUL4,5` 1730 µm | spike log-rate | **4.45** | 99th |
+| `V4\|MV` 3530 µm | LFP 10-30 Hz | **3.97** | 96th |
+| `chpl\|V4` 3490 µm | LFP 10-30 Hz | **3.82** | 95th |
+| `arb\|CUL4,5` 1870 µm | spike log-rate | **3.82** | 98th |
+| `FN\|NOD` 3070 µm | spike amplitude | **3.22** | 95th |
+
+`chpl`/`V4` → `MV` **is** the cerebellum→brainstem crossing, flagged independently by
+three LFP bands. `arb` → `CUL4,5` is cerebellar white matter → cortex. These are the
+physically distinct interfaces, and they are exactly what a human would align to.
+
+Not every boundary steps - the many `CUL4,5|arb` sub-boundaries at 1590-1910 µm are
+folded cerebellar cortex where the atlas boundary itself is imprecise - and the null
+median d ≈ 1.0-1.15 shows tissue varies continuously everywhere. But the claim "no
+feature discriminates regions here" is refuted.
+
+**Consequences:** the landmark approach is sound. Phase 3 (roll from per-shank
+alignments) is back on the table and should be re-examined rather than dropped. The
+LFP normalisation finding and the reference-before-screening fix stand - those were
+real bugs found along the way, independent of this error.
+
+**The transferable lesson:** match the statistic to the shape of the effect. A
+high-pass measure cannot see a step spread over many samples, and "no signal" from one
+metric is not "no signal". Two independent observers - the user's domain intuition and
+my own printed 100x contrast - both contradicted the number before I acted on it.
+
+## LO_07_005 confirms the null on a clean test bed (v0.2.65)
+
+LO_07 2026-05-08 `LO_07_005` is a **single column spanning the whole shank**: 384
+sites at a continuous 15 µm pitch over **5745 µm**, covering the entire insertion in
+**one recording**. That removes both confounds that broke the LO_06 test - no bank
+junctions, so no cross-recording gain offset, and no gaps. ProbeA x=0/32 → shank 0,
+ProbeB x=750/782 → shank 3, confirming the docs' 1-based "shank 1 / shank 4".
+
+**The null replicates.** At zero offset, ratios are 0.84-1.23 for every feature on
+both probes (spike rate, spike amplitude, all five LFP bands). The ±500 µm offset scan
+peaks at **+350, -500, -100, -200, +400, +425, -450** (ProbeA) and **+100, -500, -225,
+-100, -475, -100, -125** (ProbeB) - no agreement, peaks ~2 sd on curves of sd
+0.13-0.25. Not a registration offset hiding a signal. Settled.
+
+**But the built-in control found a real landmark.** The sites run *past* the brain
+surface (5745 µm of column vs 4976/5400 µm of insertion), so brain-vs-not-brain was in
+frame - and the spiking onset finds it cleanly:
+
+| | histology surface | spiking onset | disagreement |
+|---|---|---|---|
+| ProbeA shank 0 | 0 µm | **-418 µm** | brain starts 418 µm shallower than histology says |
+| ProbeB shank 3 | 0 µm | **+152 µm** | 152 µm deeper |
+
+Silent sites above, spiking below, a sharp transition between. **That is a usable
+landmark on every penetration** - the human-identifiable signature the landmark GUI
+needs, and independent of any region boundary. Note the caveat the user raised: the
+insertion zero is itself uncertain by a couple of hundred µm (dura, swelling,
+breathing), so the *common* part of such an offset is not evidence of anything - only
+the per-shank *spread* could carry roll.
+
+Both histology tracks here are ~145 µm **shorter** than the insertion depth (4824 vs
+4976, 5260 vs 5400) - opposite in sign to LO_06's +188..+328, which is another reason
+to treat the common offset as unidentified rather than a shrinkage estimate.
+
+## Phase 4 done: an alignment now reaches the exports (v0.2.65)
+
+Previously `Shank.ephys` was stored and then ignored by every exporter, so placing an
+alignment changed nothing you could ship. Closed:
+
+* `probes/channels.py` `aligned_site_depths_from_tip` does the one conversion that
+  matters - landmarks live on **depth below surface**, probe geometry is µm **from the
+  tip**, and getting either subtraction backwards flips the shank end for end. It is
+  written out explicitly for that reason, with a test that pins the direction.
+* `export_channel_csv` and `export_paxinos_csv` both follow the alignment now. The CSV
+  gains **`depth_source`** (`ephys_alignment` / `geometry`) - appended, never inserted,
+  so the original six columns keep their positions - plus an optional `region` column
+  when an atlas is passed.
+* `export_ibl_channel_locations` writes IBL-dialect `channel_locations.json` +
+  `prev_alignments.json` per shank, field names taken from their real
+  `create_channel_dict` (`x`, `y`, `z`, `axial`, `lateral`, `brain_region`,
+  `brain_region_id`). **Coordinates are Allen CCF µm, not bregma-referenced**; only the
+  axis *naming* is IBL's (x=ML, y=AP, z=DV), and an `origin` entry says so in the file
+  rather than letting a reader assume. `prev_alignments` merges rather than overwrites.
+* Schema gains `EphysAlignment.extremes_mode` and `insertion_depth_um` - both are
+  needed to reproduce channel positions, and a reload that guessed would move channels
+  silently.
+
+**Suite: 576 passed.**
 
 ## Settled: no ephys feature reads CCF boundaries in this target (v0.2.64)
 

@@ -69,7 +69,11 @@ def test_export_writes_ccf_and_paxinos(tmp_path) -> None:
     assert ccf.exists() and pax.exists()
 
     header, rows = _read(ccf)
-    assert header == ["probe", "shank", "channel", "ap_um", "ml_um", "dv_um"]
+    # depth_source is appended, never inserted: the original six columns keep their
+    # positions so a consumer reading by index is not silently shifted.
+    assert header[:6] == ["probe", "shank", "channel", "ap_um", "ml_um", "dv_um"]
+    assert header[6] == "depth_source"
+    assert {r[6] for r in rows} == {"geometry"}  # no ephys alignment in this project
     assert len(rows) == 4 * 384  # 4 shanks x 384 channels
     assert {r[0] for r in rows} == {"ProbeA"}
 
