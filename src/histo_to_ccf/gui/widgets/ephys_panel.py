@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -35,7 +34,7 @@ class EphysPanelWidget(QWidget):
     def __init__(
         self,
         state: WorkflowState,
-        viewer: "napari.Viewer",
+        viewer: napari.Viewer,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -59,10 +58,20 @@ class EphysPanelWidget(QWidget):
         probe_row.addWidget(self._probe_combo, 1)
         sel_layout.addLayout(probe_row)
         shank_row = QHBoxLayout()
-        shank_row.addWidget(QLabel("Shank:"))
+        shank_row.addWidget(QLabel("Start on shank:"))
         self._shank_combo = QComboBox()
+        # Optional. The recording carries every shank and the alignment dialog gives
+        # each one a tab, so this only decides which tab opens first. It read as a
+        # required choice when it was labelled just "Shank".
+        self._shank_combo.setToolTip(
+            "Optional. Every shank is aligned in the same dialog, one tab each - this "
+            "only picks which tab opens first."
+        )
         shank_row.addWidget(self._shank_combo, 1)
         sel_layout.addLayout(shank_row)
+        hint = QLabel("(optional - all shanks are available in the alignment dialog)")
+        hint.setStyleSheet("color: gray; font-size: 10px;")
+        sel_layout.addWidget(hint)
         refresh_btn = QPushButton("Refresh probe list")
         refresh_btn.clicked.connect(self.refresh_probes)
         sel_layout.addWidget(refresh_btn)
@@ -89,15 +98,10 @@ class EphysPanelWidget(QWidget):
         stream_row.addWidget(list_btn)
         rec_layout.addLayout(stream_row)
 
-        secs_row = QHBoxLayout()
-        secs_row.addWidget(QLabel("Seconds to analyse:"))
-        self._secs_spin = QDoubleSpinBox()
-        self._secs_spin.setRange(5.0, 600.0)
-        self._secs_spin.setValue(60.0)
-        self._secs_spin.setSingleStep(10.0)
-        secs_row.addWidget(self._secs_spin)
-        secs_row.addStretch()
-        rec_layout.addLayout(secs_row)
+        # "Seconds to analyse" used to live here. It is gone: the excerpt reader picks
+        # windows spread across the recording and rejects the ones dominated by
+        # cross-channel artifact, so a single duration was both meaningless and
+        # something no user could set well.
         layout.addWidget(rec_box)
 
         self._compute_btn = QPushButton("Load and compute LFP power")
@@ -105,20 +109,22 @@ class EphysPanelWidget(QWidget):
         self._compute_btn.clicked.connect(self._compute)
         layout.addWidget(self._compute_btn)
 
-        self._align_btn = QPushButton("Open LFP alignment")
-        self._align_btn.setEnabled(False)
+        # One button, one dialog. There used to be two ("LFP alignment" and "landmark
+        # alignment") showing the same track through different halves of the evidence,
+        # which left the user to reconcile them by eye.
+        self._align_btn = QPushButton("Open alignment…")
+        self._align_btn.setFixedHeight(32)
+        self._align_btn.setToolTip(
+            "Align this probe's shanks to the atlas.\n\n"
+            "One tab per shank, each with the LFP power map, spike raster, firing "
+            "rate and the atlas region column on a single shared depth axis. Drag "
+            "landmarks on the region column to pin a boundary to the feature "
+            "transition where it really appears, or shift the whole track.\n\n"
+            "Works with only the atlas and a registered probe - a recording adds the "
+            "LFP and spike panels but is not required to read the anatomy."
+        )
         self._align_btn.clicked.connect(self._open_alignment)
         layout.addWidget(self._align_btn)
-
-        self._landmark_btn = QPushButton("Open landmark alignment")
-        self._landmark_btn.setToolTip(
-            "Depth-resolved feature panels beside the atlas region column, on one "
-            "shared depth axis, with draggable landmarks.\n"
-            "Needs only the atlas and a registered shank - no recording - so the "
-            "anatomy along the track can be read straight away."
-        )
-        self._landmark_btn.clicked.connect(self._open_landmark_alignment)
-        layout.addWidget(self._landmark_btn)
 
         self._status = QLabel("Add and register probes first, then load a recording.")
         self._status.setWordWrap(True)
@@ -127,7 +133,7 @@ class EphysPanelWidget(QWidget):
 
     # -- probe/shank population -----------------------------------------
 
-    def showEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh_probes()
 
@@ -177,7 +183,7 @@ class EphysPanelWidget(QWidget):
             from histo_to_ccf.ephys.loader import list_streams
 
             streams = list_streams(path)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._status.setText(f"Could not list streams: {exc}")
             return
         self._stream_combo.clear()
@@ -202,11 +208,10 @@ class EphysPanelWidget(QWidget):
         )
         from histo_to_ccf.gui.workers import lfp_power_worker
 
-        worker = lfp_power_worker(
-            Path(path),
-            self._selected_stream(),
-            max_seconds=self._secs_spin.value(),
-        )
+        # No user-set duration: the excerpt reader spreads windows across the
+        # recording and rejects the artifact-dominated ones, which is strictly better
+        # than a single number nobody could choose well.
+        worker = lfp_power_worker(Path(path), self._selected_stream())
         worker.returned.connect(self._on_computed)
         worker.errored.connect(self._on_error)
         worker.start()
@@ -218,8 +223,12 @@ class EphysPanelWidget(QWidget):
         n_ch = len(result.get("depths_um", []))
         derived = " (derived from AP)" if result.get("derived_from_ap") else ""
         self._status.setText(
-            f"LFP power ready: {n_ch} channels, stream '{result.get('stream_name')}'{derived}. "
-            "Click 'Open alignment'."
+            f"LFP power ready: {n_ch} channels, stream '{result.get('stream_name')}'"
+            f"{derived}  ·  {result.get('epochs_kept', 0)}/{result.get('epochs_total', 0)}"
+            f" windows kept ({result.get('seconds_used', 0.0):.0f} s)."
+            + (f"  Rejected: {len(result.get('rejected') or [])} as artifact-dominated."
+               if result.get("rejected") else "")
+            + "  Click 'Open alignment…'."
         )
 
     def _on_error(self, exc: Exception) -> None:
@@ -230,23 +239,38 @@ class EphysPanelWidget(QWidget):
     # -- alignment -------------------------------------------------------
 
     def _open_alignment(self) -> None:
-        if self._lfp_result is None:
-            return
+        """Open the alignment for the whole probe - every shank, one dialog.
+
+        Deliberately **not** gated on a computed recording: the atlas region column
+        needs only a registered probe, and the LFP/spike panels fill in when one has
+        been loaded. Requiring the recording first was what made the two old dialogs
+        disagree about whether anything was loaded.
+        """
         selection = self._selected_shank()
         if selection is None:
             return
         probe_idx, shank_idx = selection
-        # Persist which recording this shank's alignment came from.
+        probe = self._state.project.probes[probe_idx]
+        if not any(s.tip_ccf_um is not None and s.entry_ccf_um is not None
+                   for s in probe.shanks):
+            QMessageBox.warning(
+                self, "Probe not registered",
+                f"No shank of '{probe.label}' has a tip/entry in CCF yet, so there is "
+                "no track to align to. Register the sections and place the probe first.",
+            )
+            return
         rec_path = self._path_edit.text().strip() or None
 
-        from histo_to_ccf.gui.widgets.ephys_align_dialog import EphysAlignmentDialog
+        from histo_to_ccf.gui.widgets.ephys_alignment_panel import (
+            EphysProbeAlignmentDialog,
+        )
 
-        dlg = EphysAlignmentDialog(
+        dlg = EphysProbeAlignmentDialog(
             self._state,
             probe_idx,
-            shank_idx,
-            self._lfp_result,
-            on_applied=lambda: self._on_applied(probe_idx, shank_idx, rec_path),
+            lfp_result=self._lfp_result,
+            initial_shank=shank_idx,
+            on_applied=lambda: self._on_alignment_applied(probe_idx, rec_path),
             parent=self,
         )
         dlg.exec_()
@@ -269,44 +293,22 @@ class EphysPanelWidget(QWidget):
             return None
         return probe_idx, shank_idx
 
-    def _open_landmark_alignment(self) -> None:
-        selection = self._selected_shank()
-        if selection is None:
-            return
-        probe_idx, shank_idx = selection
-        shank = self._state.project.probes[probe_idx].shanks[shank_idx]
-        if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
-            QMessageBox.warning(
-                self, "Shank not registered",
-                "This shank has no tip/entry in CCF yet, so there is no track to "
-                "align to. Register the sections and place the probe first.",
-            )
-            return
-
-        from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
-
-        dlg = EphysLandmarkDialog(
-            self._state, probe_idx, shank_idx,
-            on_applied=lambda: self._on_landmarks_applied(probe_idx, shank_idx),
-            parent=self,
+    def _on_alignment_applied(self, probe_idx: int, rec_path: str | None) -> None:
+        probe = self._state.project.probes[probe_idx]
+        aligned = 0
+        for shank in probe.shanks:
+            if shank.ephys is None:
+                continue
+            if rec_path:
+                shank.ephys.recording_path = rec_path
+            if len(shank.ephys.feature_um) > 2:
+                aligned += 1
+        msg = (
+            f"Alignment stored for '{probe.label}': {aligned} of {len(probe.shanks)} "
+            "shanks carry landmarks."
         )
-        dlg.exec_()
-
-    def _on_landmarks_applied(self, probe_idx: int, shank_idx: int) -> None:
-        shank = self._state.project.probes[probe_idx].shanks[shank_idx]
-        n = max(len(shank.ephys.feature_um) - 2, 0) if shank.ephys else 0
-        self._status.setText(
-            f"{n} landmark(s) stored on shank {shank_idx}. Save the project to keep them."
-        )
-
-    def _on_applied(self, probe_idx: int, shank_idx: int, rec_path: str | None) -> None:
-        shank = self._state.project.probes[probe_idx].shanks[shank_idx]
-        if shank.ephys is not None and rec_path:
-            shank.ephys.recording_path = rec_path
-        n = len(shank.ephys.channel_ccf_um) if shank.ephys else 0
-        msg = f"Alignment applied: {n} channels mapped to CCF on shank {shank_idx}."
-        # Auto-save so the per-channel CCF + anchors persist (mirrors the Register
-        # tab). If there's no project path yet, tell the user to Save manually.
+        # Auto-save so the alignment persists (mirrors the Register tab). If there's
+        # no project path yet, tell the user to Save manually.
         path = self._state.project_path
         if path is not None:
             try:
@@ -314,9 +316,8 @@ class EphysPanelWidget(QWidget):
 
                 save_project(self._state.project, path)
                 msg += f"  ·  saved → {path.name}"
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 msg += f"  ·  auto-save failed: {exc}"
         else:
             msg += "  ·  use Project ▸ Save Project to persist."
-        msg += "  View in napari 3D to see the channels."
         self._status.setText(msg)

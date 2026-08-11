@@ -13,6 +13,7 @@ from histo_to_ccf.sectioning.split import detect_sections
 
 if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
+
     from histo_to_ccf.project.schema import Project
 
 
@@ -42,7 +43,7 @@ def detect_sections_worker(
 @thread_worker
 def load_atlas_worker(
     atlas_id: str, *, brainglobe_dir: str | None = None, max_retries: int = 3
-) -> "BrainGlobeAtlas":
+) -> BrainGlobeAtlas:
     """Load a BrainGlobe atlas, retrying up to ``max_retries`` times on failure.
 
     ``brainglobe_dir`` overrides where atlases are downloaded to / loaded from;
@@ -72,8 +73,8 @@ def load_atlas_worker(
 
 @thread_worker
 def register_worker(
-    project: "Project",
-    atlas: "BrainGlobeAtlas",
+    project: Project,
+    atlas: BrainGlobeAtlas,
     section_images: dict[int, np.ndarray],
     transforms_dir: Path,
     *,
@@ -84,7 +85,7 @@ def register_worker(
     use_masks: bool = True,
     prealign: bool = True,
     boundary_snap: bool = True,
-) -> "Project":
+) -> Project:
     """Run the full registration pipeline in a background thread (no progress)."""
     from histo_to_ccf.registration.pipeline import register_project_with_atlas
 
@@ -106,7 +107,7 @@ def register_worker(
 @thread_worker
 def deepslice_worker(
     section_images: dict[int, np.ndarray],
-    atlas: "BrainGlobeAtlas",
+    atlas: BrainGlobeAtlas,
     workdir: Path,
     *,
     species: str = "mouse",
@@ -130,7 +131,8 @@ def lfp_power_worker(
     recording_dir: Path,
     stream_name: str | None = None,
     *,
-    max_seconds: float = 60.0,
+    window_s: float = 10.0,
+    n_windows: int = 6,
     fmin: float = 0.0,
     fmax: float = 300.0,
 ) -> dict:
@@ -141,11 +143,22 @@ def lfp_power_worker(
     ``x_um`` (shank column per channel), ``channel_ids``, ``stream_name`` and
     ``derived_from_ap``. Runs the SpikeInterface load in the background thread.
     """
-    from histo_to_ccf.ephys.features import lfp_psd, power_image
-    from histo_to_ccf.ephys.loader import load_lfp
+    from histo_to_ccf.ephys.features import power_image
+    from histo_to_ccf.ephys.loader import excerpt_psd, load_lfp_excerpts
 
-    data = load_lfp(recording_dir, stream_name, max_seconds=max_seconds)
-    freqs, psd = lfp_psd(data.traces, data.fs, fmin=fmin, fmax=fmax)
+    # Screened excerpts spread across the recording, not one central slab: windows
+    # dominated by cross-channel artifact (licking) are rejected and reported instead
+    # of being averaged in. This is why there is no "seconds to analyse" control.
+    data = load_lfp_excerpts(
+        recording_dir, stream_name, window_s=window_s, n_windows=n_windows
+    )
+    freqs, psd = excerpt_psd(data, fmin=fmin, fmax=fmax)
+    if psd.size == 0:
+        raise RuntimeError(
+            "Every candidate window was rejected as artifact-dominated, so there is "
+            "no clean LFP to show. The recording may be unusable, or the artifact "
+            "threshold too strict for it."
+        )
 
     # Sort ascending by the probe y-location (distance along the shank from the
     # tip) so the display can put the tip at the bottom. Keep the ABSOLUTE y - do
@@ -153,7 +166,7 @@ def lfp_power_worker(
     # well above the physical tip (e.g. the NP2.0 chisel tip + bank offset), and
     # forcing it to depth 0 would wrongly pin it to the histology tip.
     order = np.argsort(data.channel_depths_um)
-    depths = data.channel_depths_um[order]
+    depths = np.asarray(data.channel_depths_um)[order]
     psd_sorted = psd[order]
     sids = data.channel_shank_ids
     shank_ids = np.asarray(sids)[order] if sids is not None else None
@@ -168,13 +181,21 @@ def lfp_power_worker(
         "channel_ids": [data.channel_ids[i] for i in order],
         "stream_name": data.stream_name,
         "derived_from_ap": data.derived_from_ap,
+        # What the screening actually did, so a lossy read is never silent.
+        "epochs_kept": len(data.windows),
+        "epochs_total": len(data.verdicts),
+        "seconds_used": data.total_seconds,
+        "rejected": [
+            (v.t_start_s, v.t_end_s, v.reject_reason)
+            for v in data.verdicts if not v.kept
+        ],
     }
 
 
 @thread_worker
 def register_worker_progressive(
-    project: "Project",
-    atlas: "BrainGlobeAtlas",
+    project: Project,
+    atlas: BrainGlobeAtlas,
     section_images: dict[int, np.ndarray],
     transforms_dir: Path,
     *,
@@ -304,7 +325,7 @@ def register_worker_progressive(
                 prealign=prealign,
                 boundary_snap=boundary_snap,
             )
-        except Exception as exc:  # noqa: BLE001 - reported to the user, batch continues
+        except Exception as exc:
             failed.append(section.index)
             logger.warning("Section {} failed: {}", section.index, exc)
             yield {

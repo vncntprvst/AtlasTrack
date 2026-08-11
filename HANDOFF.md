@@ -1,6 +1,170 @@
 # Histo_to_CCF - Handoff
 
-_Last updated: 2026-08-10 · version **0.2.65** · branch **dev**_
+_Last updated: 2026-08-10 · version **0.2.69** · branch **dev**_
+
+## Picking track points in the UI (v0.2.69)
+
+The Probes tab gains a third **Marker type: Track point**, plus an **Unassigned**
+checkbox. Pixel picks live on `Shank.track_picks` / `ProbeSpec.unassigned_track_picks`
+(`TrackPick` = point + section index, the same pair `tip_px` + `tip_section_idx` uses)
+and the registration pipeline maps them to `track_points_ccf_um` in both the manual and
+registered paths, so re-registering updates them exactly as it updates tip and entry.
+
+Three decisions worth keeping:
+
+* **Track points do not reuse `_sync_layer`.** That path enforces one marker per shank,
+  newest wins - correct for tips and entries, and exactly wrong here: a track carries
+  as many points as the dye reveals, and de-duplicating would silently discard all but
+  the last. `_sync_track_layer` is separate for that reason.
+* **"Unassigned" is a checkbox, not a row in the Shank combo.** Several places read the
+  combo's *index* as the shank index, so an extra row would shift every shank by one
+  and silently mis-assign tips and entries. Pinned by
+  `test_the_shank_combo_still_indexes_shanks_directly`.
+* **The section is resolved per point, not per layer** - a track that crosses sections
+  is precisely what makes it three-dimensional.
+
+A pick on a section that failed to register contributes no CCF point rather than a
+wrong one, and an empty `track_picks` leaves `track_points_ccf_um` untouched so older
+projects are never silently emptied.
+
+**Still to do:** unassigned picks are stored and displayed but not yet converted to CCF
+(they are not used for placement, so nothing is wrong - but they cannot be shown in 3D
+or reassigned from the 3D view yet). Editing existing track points goes through the
+shared "Select / move" mode; deleting via "Clear all points" does not yet clear them.
+
+## Polyline shank tracks, built around partial evidence (v0.2.68)
+
+Shanks are flexible, and a straight tip→entry line cannot express that. New
+`probes/track_path.py` represents a shank's track as a polyline and
+`channels.curved_channel_ccf_coords` places sites along it by **arc length from the
+tip**.
+
+**The design is driven by what the dye actually shows, not by the geometry.** Often
+only the tip is clear; intermediate points may not be attributable to a given shank;
+the entry is frequently guesswork. So:
+
+* **Waypoints are optional and additive** - `Shank.track_points_ccf_um`, default
+  empty. With none the path is exactly `[tip, entry]` and every coordinate is
+  bit-identical to the previous straight-line placement. Two tests pin that, because a
+  curvature feature that quietly perturbs existing straight tracks would be worse than
+  no feature. "Tip + entry" and "tip + a straight trajectory" stay first-class.
+* **Arc length runs from the tip**, the one point normally clear, so uncertainty about
+  the far end stays at the far end. `Shank.entry_estimated` records when that end is
+  inference rather than observation.
+* **Order is derived, not demanded** - points are sorted along the tip→entry axis and
+  de-duplicated, so they can be picked in any order from any section.
+* **Unattributable points are not forced onto a shank.**
+  `ProbeSpec.unassigned_track_points_ccf_um` keeps them at probe level; a wrong
+  attribution silently bends that shank's track, which is worse than not using the
+  point.
+
+The path is pinned at **both** ends, so a bow displaces the **middle** - which is
+precisely the error straight-line placement makes. On a 250 µm bow the worst site moves
+>150 µm mid-track while both ends move <40 µm.
+
+**Bug caught by the round-trip test:** the path tangent runs tip→entry while
+`channel_ccf_coords` builds its width vector from the entry→tip axis, so lateral
+offsets came out **mirrored** - a 32 µm error that would have read as noise.
+
+**Still to do:** the picking UI cannot add waypoints yet, so this is reachable only
+through the schema. And with only tip+entry per shank, real curvature still cannot be
+told from pick noise - that needs 3+ picked depths per shank.
+
+## Probe pitch/roll: the lab's convention, implemented and validated (v0.2.67)
+
+**The convention (from the user, 2026-08-10) - this is authoritative:**
+
+* **pitch** = angle of the probe away from **vertical** in the manipulator. "Vertical
+  pitch" = straight down, roughly orthogonal to the brain surface. 10° is a small
+  tilt, 20° larger. Easy to read off the histology.
+* **roll** = rotation about the probe's holder axis, **0° = all shanks in line with
+  the AP axis**. Positive roll swings the *anterior* shank **laterally** and the
+  posterior shank medially. So "vertical pitch + 45° roll" is an
+  anterolateral-to-posteromedial row.
+* **The same numbers are used on both hemispheres**, so "lateral" means *away from the
+  midline*, not a fixed CCF direction. `trajectory_refine.lateral_sign` reads the
+  hemisphere from the array's own ML - hard-coding one side would silently mirror the
+  other. (CCF AP *increases posteriorly*, so anterior is -AP; midline ML = 5700 µm.)
+
+An earlier implementation used 0° = row along **ML** - 90° off. Fixed.
+
+**Validation: the registered histology reproduces the notebook, unprompted.**
+
+| | notebook | measured pitch | measured roll | most anterior shank |
+|---|---|---|---|---|
+| LO_07 ProbeA | 20° pitch, ~10° roll, shank 4 ant. | **21.0°** | +17.8° | shank 3 = "4" ✓ |
+| LO_07 ProbeB | vertical, ~30° roll, shank 1 ant. | **0.7°** | +36.7° | shank 0 = "1" ✓ |
+| LO_06 red | vertical, ~45° roll, shank 4 ant. | **5.0°** | +28.5° | shank 3 = "4" ✓ |
+
+Pitch matches to ~1°. Roll is the right sign and range on all four probes (roll is
+eyeballed in the notebook, so exact agreement was never expected). The anterior-shank
+identity matches all three documented probes, 1-based. **ProbeB sits on the +ML side
+and ProbeA on -ML, and both read positive roll** - the side-independent handling works.
+
+**Roll is a real measurement, not pick noise.** Snapping to the rigid array
+(`fit_rigid_array`, spacing locked to 250 µm) leaves every roll unchanged to 0.1°,
+even where it moved a pick by 455 µm. Leave-one-shank-out sd: **2.1° / 7.7° / 4.0° /
+3.2°** (far_red worst, consistent with its 502 µm spacing outlier).
+
+The roll numbers are stable **for these projects**. See the correction below before
+concluding anything general from that.
+
+## Correction: do not treat the histology model as ground truth (2026-08-10)
+
+Two user corrections to the paragraph that used to sit here, both of which I had
+wrong.
+
+**1. "Ephys roll refinement would have to beat ~3°" assumed the atlas fit is good.**
+It often is not - the AP section assignment can be off by some distance, the tissue
+can be in poor condition, the imaging poor. Starting from a noisy registration is a
+normal case. **So ephys can fix a registration, not merely refine one**, and its value
+is not limited to the along-track offset and the surface landmark; 3D positioning
+anchored to real physiological landmarks is a genuine tool for a bad fit. Ephys-based
+trajectory work stays on the table. Frame the two as **independent measurements with
+different failure modes** and report their disagreement - never let one silently
+define the answer.
+
+**2. "Re-pick far_red, its 502 µm spacing looks bad" was wrong.** Shanks are
+**flexible**: they follow their own trajectories and occasionally curve and diverge.
+The 250 µm pitch is the probe **default, not the truth**, so snapping to it can destroy
+real signal. `fit_rigid_array(tolerance=...)` exists for exactly this and
+`rigid_array_enforce` defaults to False - leave it that way.
+
+Measured entry-to-tip splay on the real picks (~5000 µm tracks):
+
+| probe | outer span change | divergence | inner-shank deviation from an even row |
+|---|---|---|---|
+| LO_06 red | -35 µm | -0.39° | entry [0,-41,-41,0] · tip [0,-31,+27,0] |
+| LO_06 far_red | -135 µm | -1.49° | entry [0,-155,-156,0] · tip [0,-100,+104,0] |
+| LO_07 ProbeA | +31 µm | +0.37° | entry [0,-16,-67,0] · tip [0,-1,-77,0] |
+| LO_07 ProbeB | -146 µm | -1.54° | entry [0,+76,+34,0] · tip [0,+16,-56,0] |
+
+Outer splay is small (≤1.5°), but the **inner shanks wander 100-155 µm**, and
+differently at the two ends.
+
+**The limitation this exposes, and it is a real one.** A `Shank` stores only a tip and
+an entry, so **a single shank's curvature is invisible** - two points make a line - and
+`channels.channel_ccf_coords` places every site on the straight tip→entry line. A shank
+bowing ~100 µm mid-track therefore has its mid-depth channels misplaced by about that
+much, silently. Separating real curvature from pick noise needs each shank annotated at
+**3+ depths**; the schema and the picking UI would both have to carry a polyline.
+Not started - flagged for a decision.
+
+## Phase 3 started: the plan's roll mechanism was geometrically wrong (v0.2.66)
+
+NP2.0's four shanks are a rigid comb with **coplanar tips**, so roll - rotation about
+the insertion axis - sweeps the row through the plane *perpendicular* to the track and
+**moves no shank along it**. The plan's "fit roll from the linear trend of per-shank
+depth offsets" therefore cannot work; those offsets are surface and tissue geometry.
+Pinned by `test_roll_does_not_move_any_shank_along_the_track`.
+
+New `probes/trajectory_refine.py`: `array_axes`, `pitch_deg`, `roll_deg`,
+`row_direction`, `lateral_sign`, `rolled_array`, `shift_along_track`,
+`shank_row_positions`. Roll folds to ±90° (a row is an undirected line) while keeping
++45 vs -45 distinct, since those are anterior-lateral vs anterior-medial.
+
+`ephys/features.boundary_contrast` + `contrast_null` promote the measure that actually
+works out of the scratchpad, with the high-pass failure mode documented on it.
 
 ## CORRECTION: the "no feature reads boundaries" result was a bad metric (2026-08-10)
 

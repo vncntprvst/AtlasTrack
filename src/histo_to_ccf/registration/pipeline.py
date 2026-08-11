@@ -86,6 +86,12 @@ def _apply_to_shank_manual(
         if tx is not None:
             shank.entry_ccf_um = tx.apply(shank.entry_px.x_px, shank.entry_px.y_px)
 
+    def _manual_to_ccf(point, section_idx: int):
+        tx = _lookup_manual(project, section_idx, transforms)
+        return None if tx is None else tx.apply(point.x_px, point.y_px)
+
+    _apply_track_picks(shank, _manual_to_ccf)
+
 
 def _lookup_manual(
     project: Project,
@@ -102,7 +108,7 @@ def _lookup_manual(
 # ── Registered (M3) pipeline ──────────────────────────────────────────────────
 
 
-def anchoring_for_section(section: Section, anchorings: dict, atlas: "BrainGlobeAtlas"):
+def anchoring_for_section(section: Section, anchorings: dict, atlas: BrainGlobeAtlas):
     """Pick a section's atlas plane: a (guided) DeepSlice anchoring, else the plane.
 
     When DeepSlice ran, ``anchorings`` holds its per-section prediction - already
@@ -115,14 +121,14 @@ def anchoring_for_section(section: Section, anchorings: dict, atlas: "BrainGlobe
     return anchoring_from_plane_params(atlas, section.plane)
 
 
-def _ap_center(anchoring9: "list[float] | tuple[float, ...]") -> float:
+def _ap_center(anchoring9: list[float] | tuple[float, ...]) -> float:
     """AP voxel coordinate of a plane's centre (su = sv = 0.5): ox + ½ux + ½vx."""
     return float(anchoring9[0]) + 0.5 * float(anchoring9[3]) + 0.5 * float(anchoring9[6])
 
 
 def prematch_ap_order_issues(
-    aps: "list[tuple[int, float]]", *, close_frac: float = 0.3
-) -> "tuple[list[tuple[int, int]], list[tuple[int, int]]]":
+    aps: list[tuple[int, float]], *, close_frac: float = 0.3
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
     """Flag a DeepSlice pre-match's AP series as out-of-order or too-close.
 
     ``aps`` is ``[(section_index, ap_um), ...]`` already in the user's section
@@ -154,7 +160,7 @@ def prematch_ap_order_issues(
 
 
 def anchoring_center_ap_um(
-    anchoring9: "list[float] | tuple[float, ...]", ap_res_um: float
+    anchoring9: list[float] | tuple[float, ...], ap_res_um: float
 ) -> float:
     """Absolute AP (µm) of a plane's centre, given the atlas AP voxel size.
 
@@ -166,7 +172,7 @@ def anchoring_center_ap_um(
 
 
 def guide_anchorings_with_planes(
-    anchorings: dict, project: Project, atlas: "BrainGlobeAtlas"
+    anchorings: dict, project: Project, atlas: BrainGlobeAtlas
 ) -> dict:
     """Anchor DeepSlice's predicted AP to the user's hand-assigned AP values.
 
@@ -286,7 +292,7 @@ def _is_sample_coverage_failure(exc: BaseException) -> bool:
 
 def register_section_image(
     section_image: np.ndarray,
-    atlas: "BrainGlobeAtlas",
+    atlas: BrainGlobeAtlas,
     *,
     anchoring: Anchoring,
     bspline_grid: tuple[int, int] = (8, 8),
@@ -297,7 +303,7 @@ def register_section_image(
     use_masks: bool = True,
     prealign: bool = True,
     boundary_snap: bool = True,
-) -> tuple[RegistrationResult, "object"]:
+) -> tuple[RegistrationResult, object]:
     """Run the M3 registration on one section.
 
     Returns the persistable :class:`RegistrationResult` plus the in-memory
@@ -408,11 +414,11 @@ def register_section_image(
 
 
 def _apply_boundary_snap(
-    transform: "object",
+    transform: object,
     reference: np.ndarray,
     section_image: np.ndarray,
     out_shape: tuple[int, int],
-) -> "object":
+) -> object:
     """Compose the outer-contour snap onto ``transform`` (no-op if it can't help).
 
     Snaps the warped atlas silhouette onto the section tissue silhouette - the
@@ -441,14 +447,14 @@ def _apply_boundary_snap(
         if snap is None:
             return transform
         return compose_snap(transform, snap)
-    except Exception as exc:  # noqa: BLE001 - snap is best-effort; keep registration
+    except Exception as exc:
         logger.warning("boundary snap skipped: {}", exc)
         return transform
 
 
 def register_project_with_atlas(
     project: Project,
-    atlas: "BrainGlobeAtlas",
+    atlas: BrainGlobeAtlas,
     *,
     section_images: dict[int, np.ndarray],
     transforms_dir: Path,
@@ -562,11 +568,31 @@ def _apply_to_shank_registered(
         ccf = to_ccf(shank.entry_px, shank.entry_section_idx)
         if ccf is not None:
             shank.entry_ccf_um = ccf
+    _apply_track_picks(shank, to_ccf)
+
+
+def _apply_track_picks(shank: Shank, to_ccf) -> None:
+    """Map a shank's ``track_picks`` to CCF. Shared by the manual and registered paths.
+
+    A pick on a section that failed to register contributes no CCF point rather than a
+    wrong one: the track is then simply less constrained, which is the honest outcome.
+    An empty ``track_picks`` leaves ``track_points_ccf_um`` untouched, so a project
+    written before this existed is not silently emptied.
+    """
+    picks = list(shank.track_picks or [])
+    if not picks:
+        return
+    out = []
+    for pick in picks:
+        ccf = to_ccf(pick.point, pick.section_idx)
+        if ccf is not None:
+            out.append(tuple(float(v) for v in ccf))
+    shank.track_points_ccf_um = out
 
 
 def reload_registered_transforms(
     project: Project,
-    atlas: "BrainGlobeAtlas",
+    atlas: BrainGlobeAtlas,
     *,
     project_dir: Path | None = None,
 ) -> dict[tuple[int, int], RegisteredSectionTransform]:

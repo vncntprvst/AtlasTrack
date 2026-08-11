@@ -47,7 +47,22 @@ def test_empty_view_says_so(qtbot) -> None:
 
     view.set_profile(PenetrationProfile())
 
-    assert "No recordings" in view.summary_text()
+    # Not "No recordings loaded": that read as a broken recording when an LFP map was
+    # on screen, because spikes and LFP arrive by different routes.
+    assert "Nothing loaded yet" in view.summary_text()
+
+
+def test_with_lfp_but_no_spikes_the_status_says_which(qtbot) -> None:
+    view = _view(qtbot)
+    depths = np.linspace(0.0, 3000.0, 32)
+
+    view.set_lfp(depths, np.random.default_rng(0).random((32, 20)), np.linspace(0, 300, 20))
+    view.set_profile(PenetrationProfile())
+
+    text = view.summary_text()
+    assert "LFP loaded" in text
+    assert "No sorted spikes" in text
+    assert view.available_modes() == ["lfp"]
 
 
 def test_panels_share_one_depth_axis(qtbot) -> None:
@@ -56,10 +71,13 @@ def test_panels_share_one_depth_axis(qtbot) -> None:
 
     view.set_profile(PenetrationProfile([_rec("001", DEEP, (1, 96), spikes=500)]))
 
-    assert len(view._plots) >= 2
-    for plot in view._plots[1:]:
+    # Two panels only: one toggleable ephys panel, plus the atlas region column.
+    assert len(view._plots) == 2
+    others = [p for p in view._plots if p is not view._ephys_plot]
+    assert len(others) == 1
+    for plot in others:
         linked = plot.getViewBox().linkedView(1)  # 1 = Y axis
-        assert linked is view._raster.getViewBox()
+        assert linked is view._ephys_plot.getViewBox()
 
 
 def test_depth_increases_downwards(qtbot) -> None:

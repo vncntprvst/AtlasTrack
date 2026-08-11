@@ -122,6 +122,18 @@ class EphysAlignment(BaseModel):
     created_at: str | None = None
 
 
+class TrackPick(BaseModel):
+    """One clicked point on a shank's track, in slide pixels plus its section.
+
+    Same pair of fields as ``tip_px`` + ``tip_section_idx``, but as a list entry
+    because a track can carry any number of these - including none, which is the
+    common case when the dye only shows the tip.
+    """
+
+    point: Point2D
+    section_idx: int
+
+
 class Shank(BaseModel):
     """One shank annotation + its registered CCF coordinates."""
 
@@ -134,6 +146,21 @@ class Shank(BaseModel):
     # Filled by the registration pipeline.
     tip_ccf_um: tuple[float, float, float] | None = None  # (AP, ML, DV)
     entry_ccf_um: tuple[float, float, float] | None = None
+
+    # Optional intermediate points along this shank's track, in CCF µm, in any order
+    # (they are sorted along the tip->entry axis when used). Shanks are flexible and
+    # can curve; with none of these the track is the straight tip->entry line and
+    # everything behaves exactly as before, so "tip + entry" stays first-class.
+    #
+    # Deliberately additive rather than a required polyline: how much of a track the
+    # dye reveals varies a lot, and often only the tip is clear.
+    track_points_ccf_um: list[tuple[float, float, float]] = []
+    # The clicks those CCF points are derived from, kept so re-registering the
+    # sections updates them the same way it updates the tip and entry.
+    track_picks: list[TrackPick] = []
+    # The entry is frequently an estimate rather than an observation. Recorded so a
+    # reader knows which end of the track is evidence and which is inference.
+    entry_estimated: bool = False
 
     # Filled by the ephys alignment tab (optional).
     ephys: EphysAlignment | None = None
@@ -149,6 +176,14 @@ class ProbeSpec(BaseModel):
     # Recordings contributing ephys features to this penetration (see
     # EphysRecordingRef - a bank covers only ~720 µm, so several are needed).
     recordings: list[EphysRecordingRef] = []
+
+    # Dye points seen in the tissue that could not be attributed to a particular
+    # shank. Kept at probe level rather than forced onto a shank they may not belong
+    # to - a wrong attribution silently bends that shank's track, which is worse than
+    # not using the point at all. Not used for placement; recorded so the evidence
+    # survives and can be assigned later.
+    unassigned_track_points_ccf_um: list[tuple[float, float, float]] = []
+    unassigned_track_picks: list[TrackPick] = []
 
     # Ephys-derived refinement of the histology trajectory. Kept separate from the
     # histology-derived tip/entry so the original placement is never overwritten and

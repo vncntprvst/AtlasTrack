@@ -160,12 +160,28 @@ def shank_channel_coords_with_source(
         return None, False
     depths = layout.site_depths_from_tip_um()
     laterals = layout.site_lateral_offsets_um()
+    waypoints = list(getattr(shank, "track_points_ccf_um", None) or [])
     used = False
     if use_ephys:
-        track_length_um = float(
-            np.linalg.norm(np.asarray(shank.tip_ccf_um) - np.asarray(shank.entry_ccf_um))
-        )
+        # Alignment depths are referenced to the *track*, which is the path length
+        # when the shank curves - a curved shank is longer than tip-to-entry.
+        if waypoints:
+            from histo_to_ccf.probes.track_path import path_length_um, track_polyline
+
+            track_length_um = path_length_um(
+                track_polyline(shank.tip_ccf_um, shank.entry_ccf_um, waypoints)
+            )
+        else:
+            track_length_um = float(
+                np.linalg.norm(np.asarray(shank.tip_ccf_um) - np.asarray(shank.entry_ccf_um))
+            )
         depths, used = aligned_site_depths_from_tip(shank, depths, track_length_um)
+
+    if waypoints:
+        return curved_channel_ccf_coords(
+            shank.tip_ccf_um, shank.entry_ccf_um, waypoints, depths,
+            site_lateral_offsets_um=laterals,
+        ), used
     return (
         channel_ccf_coords(
             shank.entry_ccf_um,
@@ -175,6 +191,56 @@ def shank_channel_coords_with_source(
         ),
         used,
     )
+
+
+def curved_channel_ccf_coords(
+    tip_ccf,
+    entry_ccf,
+    waypoints,
+    site_depths_from_tip_um: np.ndarray,
+    *,
+    site_lateral_offsets_um: np.ndarray | None = None,
+) -> np.ndarray:
+    """Place sites along a **curved** shank track, by arc length from the tip.
+
+    ``site_depths_from_tip_um`` is distance along the shank, so it is arc length along
+    the path - not distance along the straight tip→entry chord, which a curved shank
+    exceeds. Lateral offsets use the **local** tangent, so the electrode columns stay
+    perpendicular to the shank as it bends.
+
+    With no waypoints this reduces exactly to :func:`channel_ccf_coords`; a test pins
+    that, because a curvature feature that quietly perturbs every existing straight
+    track would be worse than no feature.
+    """
+    from histo_to_ccf.probes.track_path import (
+        points_at_distance,
+        tangents_at_distance,
+        track_polyline,
+    )
+
+    path = track_polyline(tip_ccf, entry_ccf, waypoints)
+    depths = np.asarray(site_depths_from_tip_um, dtype=float)
+    coords = points_at_distance(path, depths)
+    if site_lateral_offsets_um is None:
+        return coords
+
+    lat = np.asarray(site_lateral_offsets_um, dtype=float)
+    # The path tangent runs tip->entry; channel_ccf_coords builds its width vector
+    # from the entry->tip axis. Negating here is what makes the two agree instead of
+    # mirroring every electrode column, which is a 32 µm error that looks like noise.
+    tangents = -tangents_at_distance(path, depths)
+    offsets = lat - ELECTRODE_COLUMN_CENTER_UM
+    for i, axis_hat in enumerate(tangents):
+        # Same reference choice as the straight-line path, so the two agree exactly
+        # when the track happens to be straight.
+        ref = np.array([0.0, 1.0, 0.0])
+        if abs(float(axis_hat @ ref)) > 0.9:
+            ref = np.array([1.0, 0.0, 0.0])
+        width_hat = np.cross(axis_hat, ref)
+        norm = np.linalg.norm(width_hat)
+        if norm > 1e-9:
+            coords[i] += offsets[i] * (width_hat / norm)
+    return coords
 
 
 def project_channel_coords(

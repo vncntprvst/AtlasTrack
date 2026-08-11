@@ -1376,28 +1376,32 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
 def test_landmark_dialog_reads_the_atlas_along_the_track(qtbot) -> None:
     """The region column works with no recording at all - only a registered shank."""
     pytest.importorskip("pyqtgraph")
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     state = _registered_probe_state()  # entry DV 1000 -> tip DV 5000, boundary at 3000
-    dlg = EphysLandmarkDialog(state, 0, 0)
+    dlg = EphysProbeAlignmentDialog(state, 0)
     qtbot.addWidget(dlg)
 
-    bands = dlg.panel.view().bands()
+    panel = dlg.panels[0]
+    bands = panel.view().bands()
     assert [b.acronym for b in bands] == ["A", "B"]
     assert bands[0].bottom_um == pytest.approx(2000.0, abs=25.0)  # 2000 µm along track
-    assert dlg.panel.landmarks().track_extent_um == pytest.approx((0.0, 4000.0))
+    assert panel.landmarks().track_extent_um == pytest.approx((0.0, 4000.0))
+    # One tab per shank - the recording carries them all, so all of them are offered.
+    assert dlg._tabs.count() == len(state.project.probes[0].shanks)
 
 
 @pytest.mark.qt
 def test_landmark_dialog_apply_stores_landmarks_without_touching_the_old_fields(qtbot) -> None:
     pytest.importorskip("pyqtgraph")
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     state = _registered_probe_state()
-    dlg = EphysLandmarkDialog(state, 0, 0)
+    dlg = EphysProbeAlignmentDialog(state, 0)
     qtbot.addWidget(dlg)
-    dlg.panel.add_landmark_at(2000.0)
-    dlg.panel.move_landmark(0, 1700.0)
+    dlg.panels[0].add_landmark_at(2000.0)
+    dlg.panels[0].move_landmark(0, 1700.0, slot=0)
+    dlg.panels[0].align()
 
     dlg.apply()
 
@@ -1415,23 +1419,24 @@ def test_landmark_dialog_apply_stores_landmarks_without_touching_the_old_fields(
 @pytest.mark.qt
 def test_landmark_dialog_restores_a_stored_alignment(qtbot) -> None:
     pytest.importorskip("pyqtgraph")
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysLandmarkDialog
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     state = _registered_probe_state()
-    first = EphysLandmarkDialog(state, 0, 0)
+    first = EphysProbeAlignmentDialog(state, 0)
     qtbot.addWidget(first)
-    first.panel.add_landmark_at(2000.0)
-    first.panel.move_landmark(0, 1700.0)
+    first.panels[0].add_landmark_at(2000.0)
+    first.panels[0].move_landmark(0, 1700.0, slot=0)
+    first.panels[0].align()
     first.apply()
 
-    second = EphysLandmarkDialog(state, 0, 0)
+    second = EphysProbeAlignmentDialog(state, 0)
     qtbot.addWidget(second)
 
-    assert second.panel.landmarks().user_pairs() == pytest.approx([(1700.0, 2000.0)])
+    assert second.panels[0].landmarks().user_pairs() == pytest.approx([(1700.0, 2000.0)])
 
 
 @pytest.mark.qt
-def test_ephys_panel_landmark_button_needs_a_registered_shank(qtbot, monkeypatch) -> None:
+def test_ephys_panel_alignment_button_needs_a_registered_probe(qtbot, monkeypatch) -> None:
     import napari
 
     from histo_to_ccf.gui.widgets import ephys_panel as ephys_panel_module
@@ -1450,9 +1455,9 @@ def test_ephys_panel_landmark_button_needs_a_registered_shank(qtbot, monkeypatch
         qtbot.addWidget(widget)
         widget.refresh_probes()
 
-        widget._open_landmark_alignment()
+        widget._open_alignment()
 
-        assert warnings and "no tip/entry in CCF" in warnings[0]
+        assert warnings and "tip/entry in CCF" in warnings[0]
     finally:
         viewer.close()
 

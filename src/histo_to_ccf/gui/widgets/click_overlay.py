@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from qtpy.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
@@ -49,7 +50,12 @@ if TYPE_CHECKING:
 
 _LAYER_TIP = "Tips"
 _LAYER_ENTRY = "Entries"
+_LAYER_TRACK = "Track points"
 _LAYER_TRAJECTORY = "Trajectory"
+
+# Marks a track point that could not be attributed to a shank. Kept on the probe
+# rather than guessed onto a shank - see ProbeSpec.unassigned_track_picks.
+_UNASSIGNED = -1
 
 # Distinct, colour-blind-friendlier cycle; a shank's global ordinal indexes it so
 # the same shank gets the same colour in both the Tips and Entries layers.
@@ -66,20 +72,22 @@ class ClickOverlayWidget(QWidget):
     def __init__(
         self,
         state: WorkflowState,
-        viewer: "napari.Viewer",
+        viewer: napari.Viewer,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._state = state
         self._viewer = viewer
-        self._tip_layer: "napari.layers.Points | None" = None
-        self._entry_layer: "napari.layers.Points | None" = None
-        self._traj_layer: "napari.layers.Shapes | None" = None
+        self._tip_layer: napari.layers.Points | None = None
+        self._entry_layer: napari.layers.Points | None = None
+        self._track_layer: napari.layers.Points | None = None
+        self._traj_layer: napari.layers.Shapes | None = None
         # Suppress the data-changed handlers while we set marker data in bulk.
         self._suppress_store = False
         # Track point counts so a data event can tell an *add* from a move/delete.
         self._tip_count = 0
         self._entry_count = 0
+        self._track_count = 0
         # Per-slide tissue-mask cache for trajectory→surface intersection.
         self._mask_cache: tuple[int, np.ndarray] | None = None
         self._build_ui()
@@ -107,17 +115,28 @@ class ClickOverlayWidget(QWidget):
         self._mode_tip = QRadioButton("Tip")
         self._mode_tip.setChecked(True)
         self._mode_entry = QRadioButton("Entry")
+        self._mode_track = QRadioButton("Track point")
+        self._mode_track.setToolTip(
+            "Extra points along a shank's track, for when the dye shows more than the "
+            "tip.\nUnlike Tip and Entry there can be any number per shank, and none is "
+            "perfectly fine - with no track points the shank is the straight tip-entry "
+            "line exactly as before.\nSet Shank to 'Unassigned' for a dye point you "
+            "cannot attribute to a particular shank: it is kept, but never bends a "
+            "track it may not belong to."
+        )
         mode_grp = QButtonGroup(self)
         mode_grp.addButton(self._mode_tip)
         mode_grp.addButton(self._mode_entry)
+        mode_grp.addButton(self._mode_track)
         mode_row.addWidget(self._mode_tip)
         mode_row.addWidget(self._mode_entry)
+        mode_row.addWidget(self._mode_track)
         layout.addLayout(mode_row)
 
         # Selecting a mode immediately arms the matching viewer tool - no extra
         # button press needed. ``clicked`` fires even when the radio is already
         # checked, so re-arming after a discard/draw action still works.
-        for btn in (self._mode_tip, self._mode_entry):
+        for btn in (self._mode_tip, self._mode_entry, self._mode_track):
             btn.toggled.connect(self._activate_pick_mode)
             btn.clicked.connect(self._activate_pick_mode)
 
@@ -161,7 +180,20 @@ class ClickOverlayWidget(QWidget):
         # shank combo (that would recurse).
         self._shank_combo.currentIndexChanged.connect(self._apply_current_identity)
         shank_row.addWidget(self._shank_combo, 1)
+        # A separate control rather than an "Unassigned" row in the shank combo:
+        # several places read the combo's *index* as the shank index, so adding a
+        # row would shift every shank by one and silently mis-assign tips/entries.
+        self._unassigned_check = QCheckBox("Unassigned")
+        self._unassigned_check.setToolTip(
+            "For a dye point you cannot attribute to a particular shank. It is stored "
+            "on the probe and kept for later, but never used to bend a shank's track - "
+            "a wrong attribution is worse than an unused point.\n"
+            "Applies to Track point mode only."
+        )
+        self._unassigned_check.setEnabled(False)
+        shank_row.addWidget(self._unassigned_check)
         layout.addLayout(shank_row)
+        self._mode_track.toggled.connect(self._unassigned_check.setEnabled)
         self._refresh_probe_combo()
 
         # Edit / delete controls.
@@ -227,7 +259,7 @@ class ClickOverlayWidget(QWidget):
             vals = np.asarray(features[name], dtype=float)
             m = min(len(vals), n)
             arr[:m] = vals[:m]
-        except Exception:  # noqa: BLE001 - missing column / empty layer
+        except Exception:
             pass
         return arr
 
@@ -247,7 +279,7 @@ class ClickOverlayWidget(QWidget):
                 continue
             try:
                 layer.feature_defaults = {"p": p_idx, "s": s_idx}
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     def _on_probe_changed(self, *_args) -> None:
@@ -274,6 +306,8 @@ class ClickOverlayWidget(QWidget):
             self._tip_layer = None
         if self._entry_layer is not None and self._entry_layer not in layers:
             self._entry_layer = None
+        if self._track_layer is not None and self._track_layer not in layers:
+            self._track_layer = None
         if self._traj_layer is not None and self._traj_layer not in layers:
             self._traj_layer = None
 
@@ -297,9 +331,20 @@ class ClickOverlayWidget(QWidget):
                     symbol="triangle_up",
                 )
             self._entry_layer.events.data.connect(self._on_entry_data_changed)
+        if self._track_layer is None:
+            if _LAYER_TRACK in self._viewer.layers:
+                self._track_layer = self._viewer.layers[_LAYER_TRACK]  # type: ignore[assignment]
+            else:
+                # A third symbol, so track points are distinguishable from tips
+                # (disc) and entries (triangle) at a glance, and smaller, because
+                # there can be many of them along one shank.
+                self._track_layer = self._viewer.add_points(
+                    name=_LAYER_TRACK, face_color="white", size=9, ndim=2, symbol="x",
+                )
+            self._track_layer.events.data.connect(self._on_track_data_changed)
         self._apply_current_identity()
 
-    def _ensure_traj_layer(self) -> "napari.layers.Shapes":
+    def _ensure_traj_layer(self) -> napari.layers.Shapes:
         """Create (or fetch) the trajectory Shapes layer used for line drawing."""
         self._drop_stale_layer_refs()
         if _LAYER_TRAJECTORY in self._viewer.layers:
@@ -392,7 +437,7 @@ class ClickOverlayWidget(QWidget):
             if layer is not None:
                 try:
                     layer.mode = mode
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
         if active is not None:
             self._viewer.layers.selection.active = active
@@ -424,6 +469,68 @@ class ClickOverlayWidget(QWidget):
         added = n == self._entry_count + 1
         self._sync_layer(self._entry_layer, "entry", added)
         self._entry_count = len(self._entry_layer.data)
+
+    def _on_track_data_changed(self, event=None) -> None:
+        if self._suppress_store or self._track_layer is None:
+            return
+        added = len(self._track_layer.data) == self._track_count + 1
+        self._sync_track_layer(added)
+        self._track_count = len(self._track_layer.data)
+
+    def _sync_track_layer(self, added: bool) -> None:
+        """Rewrite the track picks from the layer.
+
+        Deliberately **not** routed through :meth:`_sync_layer`: that one enforces one
+        marker per shank (newest wins), which is exactly wrong here - a track carries
+        as many points as the dye reveals, and de-duplicating them would silently
+        discard all but the last. The two also differ in that a track point may be
+        *unassigned*, which no tip or entry can be.
+        """
+        layer = self._track_layer
+        if layer is None:
+            return
+        data = np.asarray(layer.data, dtype=float)
+        feats = layer.features
+        p_idx = list(np.asarray(feats.get("p", np.zeros(len(data))), dtype=int)) \
+            if len(data) else []
+        s_idx = list(np.asarray(feats.get("s", np.zeros(len(data))), dtype=int)) \
+            if len(data) else []
+        if added and len(data):
+            probe_pos, shank_pos = self._current_ps()
+            if self._unassigned_check.isChecked():
+                shank_pos = _UNASSIGNED
+            if len(p_idx) < len(data):
+                p_idx = [*p_idx, probe_pos][: len(data)]
+                s_idx = [*s_idx, shank_pos][: len(data)]
+            else:
+                p_idx[-1], s_idx[-1] = probe_pos, shank_pos
+
+        from histo_to_ccf.project.schema import TrackPick
+
+        probes = self._state.project.probes
+        for probe in probes:
+            probe.unassigned_track_picks = []
+            for shank in probe.shanks:
+                shank.track_picks = []
+        for (y, x), p, s in zip(data, p_idx, s_idx, strict=False):
+            if not 0 <= int(p) < len(probes):
+                continue
+            # Per point, not once for the layer: a track can cross sections, and
+            # picks on different sections are exactly what makes it 3D.
+            section_idx = self._find_section_for_point(float(x), float(y))
+            if section_idx is None:
+                continue
+            pick = TrackPick(point=Point2D(x_px=float(x), y_px=float(y)),
+                             section_idx=int(section_idx))
+            probe = probes[int(p)]
+            if int(s) == _UNASSIGNED or not 0 <= int(s) < len(probe.shanks):
+                probe.unassigned_track_picks.append(pick)
+            else:
+                probe.shanks[int(s)].track_picks.append(pick)
+
+        layer.features = {"p": np.array(p_idx, dtype=float),
+                          "s": np.array(s_idx, dtype=float)}
+        self._refresh_table()
 
     def _sync_layer(self, layer, kind: str, added: bool) -> None:
         """Two-way sync a Points layer with the schema after add/move/delete.
@@ -520,7 +627,7 @@ class ClickOverlayWidget(QWidget):
             layer.border_color = borders
             layer.size = sizes
             layer.border_width = widths
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def _highlight_selected_probe(self) -> None:
@@ -696,7 +803,7 @@ class ClickOverlayWidget(QWidget):
                 continue
             try:
                 layer.remove_selected()  # fires data event -> _sync_layer
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     def _clear_points(self) -> None:
