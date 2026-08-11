@@ -107,6 +107,47 @@ def regions_along_track(atlas, tip_ccf_um, entry_ccf_um, depths_below_surface_um
     )
 
 
+def band_colours(bands: list[RegionBand]) -> list[tuple[int, int, int]]:
+    """Colour each band from the project palette, keeping neighbours distinguishable.
+
+    The Allen ``rgb_triplet`` values are near-useless for a depth column: whole
+    cerebellar cortices come back as the same wash of yellow, so a boundary between
+    two lobules is invisible - which defeats the point of drawing the column.
+
+    Uses the palette the 3D views already use
+    (:data:`histo_to_ccf.viz.plotly3d.REGION_STYLE` plus its qualitative fallbacks),
+    so a region is the same colour wherever it appears in the app. One acronym always
+    gets one colour; when a region needs a fallback, the next one that differs from the
+    band immediately above is chosen, so adjacent bands never collide even past the end
+    of the palette.
+    """
+    from histo_to_ccf.viz.plotly3d import REGION_STYLE, hex_to_rgb, region_style
+
+    assigned: dict[str, tuple[int, int, int]] = {}
+    out: list[tuple[int, int, int]] = []
+    previous: tuple[int, int, int] | None = None
+    fallback = 0
+    for band in bands:
+        acronym = band.acronym
+        if not acronym:
+            out.append((0, 0, 0))
+            previous = None
+            continue
+        if acronym not in assigned:
+            if acronym in REGION_STYLE:
+                assigned[acronym] = hex_to_rgb(region_style(acronym)[0])
+            else:
+                for _attempt in range(16):
+                    rgb = hex_to_rgb(region_style(acronym, fallback)[0])
+                    fallback += 1
+                    if rgb != previous:
+                        break
+                assigned[acronym] = rgb
+        out.append(assigned[acronym])
+        previous = assigned[acronym]
+    return out
+
+
 def region_bands(hits: list[RegionHit], depths_um) -> list[RegionBand]:
     """Merge ordered per-depth hits into contiguous bands.
 

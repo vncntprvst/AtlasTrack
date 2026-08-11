@@ -41,6 +41,9 @@ class EphysPanelWidget(QWidget):
         self._state = state
         self._viewer = viewer
         self._lfp_result: dict | None = None
+        # Features reloaded from a saved .npz, keyed by shank index. Never carries
+        # landmarks - see ephys.export.load_shank_features.
+        self._loaded_features: dict | None = None
         self._build_ui()
 
     # -- UI --------------------------------------------------------------
@@ -49,29 +52,18 @@ class EphysPanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        sel_box = QGroupBox("Probe / shank")
+        # Probe only. There used to be a "Start on shank" selector here, but with
+        # Shank 0 preselected there was no way to tell "chose shank 0" from "did not
+        # care", and both produced the same result - the dialog's first tab. A control
+        # whose two states are indistinguishable and equivalent is just noise; the
+        # tabs in the alignment dialog are the shank selector.
+        sel_box = QGroupBox("Probe")
         sel_layout = QVBoxLayout(sel_box)
         probe_row = QHBoxLayout()
         probe_row.addWidget(QLabel("Probe:"))
         self._probe_combo = QComboBox()
-        self._probe_combo.currentIndexChanged.connect(self._refresh_shanks)
         probe_row.addWidget(self._probe_combo, 1)
         sel_layout.addLayout(probe_row)
-        shank_row = QHBoxLayout()
-        shank_row.addWidget(QLabel("Start on shank:"))
-        self._shank_combo = QComboBox()
-        # Optional. The recording carries every shank and the alignment dialog gives
-        # each one a tab, so this only decides which tab opens first. It read as a
-        # required choice when it was labelled just "Shank".
-        self._shank_combo.setToolTip(
-            "Optional. Every shank is aligned in the same dialog, one tab each - this "
-            "only picks which tab opens first."
-        )
-        shank_row.addWidget(self._shank_combo, 1)
-        sel_layout.addLayout(shank_row)
-        hint = QLabel("(optional - all shanks are available in the alignment dialog)")
-        hint.setStyleSheet("color: gray; font-size: 10px;")
-        sel_layout.addWidget(hint)
         refresh_btn = QPushButton("Refresh probe list")
         refresh_btn.clicked.connect(self.refresh_probes)
         sel_layout.addWidget(refresh_btn)
@@ -104,10 +96,28 @@ class EphysPanelWidget(QWidget):
         # something no user could set well.
         layout.addWidget(rec_box)
 
-        self._compute_btn = QPushButton("Load and compute LFP power")
+        self._compute_btn = QPushButton("Compute features from recording")
         self._compute_btn.setFixedHeight(32)
+        self._compute_btn.setToolTip(
+            "Read screened excerpts from the recording above and compute the "
+            "depth-resolved features. Nothing is cached, so this re-reads the "
+            "recording each time; deriving LFP from an AP stream is slower."
+        )
         self._compute_btn.clicked.connect(self._compute)
         layout.addWidget(self._compute_btn)
+
+        self._load_btn = QPushButton("Load saved features…")
+        self._load_btn.setFixedHeight(32)
+        self._load_btn.setToolTip(
+            "Reload a previously saved depth-features .npz instead of recomputing "
+            "from the recording.\n\n"
+            "Any landmarks in the file are deliberately NOT loaded here: they encode "
+            "an alignment to one particular registration, and reloading them after "
+            "you have changed the histology would silently overwrite your work. Load "
+            "them from inside the alignment dialog, where you can see what changes."
+        )
+        self._load_btn.clicked.connect(self._load_features)
+        layout.addWidget(self._load_btn)
 
         # One button, one dialog. There used to be two ("LFP alignment" and "landmark
         # alignment") showing the same track through different halves of the evidence,
@@ -146,7 +156,6 @@ class EphysPanelWidget(QWidget):
         self._probe_combo.blockSignals(False)
         if 0 <= cur < self._probe_combo.count():
             self._probe_combo.setCurrentIndex(cur)
-        self._refresh_shanks()
 
     def refresh_after_load(self) -> None:
         """Repopulate the probe/shank combos + recording path from the project."""
@@ -157,15 +166,6 @@ class EphysPanelWidget(QWidget):
                 if shank.ephys is not None and shank.ephys.recording_path:
                     self._path_edit.setText(shank.ephys.recording_path)
                     return
-
-    def _refresh_shanks(self) -> None:
-        self._shank_combo.clear()
-        idx = self._probe_combo.currentIndex()
-        probes = self._state.project.probes
-        if not (0 <= idx < len(probes)):
-            return
-        for shank in probes[idx].shanks:
-            self._shank_combo.addItem(f"Shank {shank.index}")
 
     # -- recording -------------------------------------------------------
 
@@ -231,6 +231,42 @@ class EphysPanelWidget(QWidget):
             + "  Click 'Open alignment…'."
         )
 
+    def _load_features(self) -> None:
+        """Reload a saved depth-features file - measurements only, never landmarks."""
+        from histo_to_ccf.ephys.export import default_export_path, load_shank_features
+
+        probe_idx = self._probe_combo.currentIndex()
+        probes = self._state.project.probes
+        label = probes[probe_idx].label if 0 <= probe_idx < len(probes) else "probe"
+        start = default_export_path(
+            getattr(self._state, "project_path", None), label
+        ).parent
+        path, _filter = QFileDialog.getOpenFileName(
+            self, "Load saved depth features", str(start), "NumPy archive (*.npz)"
+        )
+        if not path:
+            return
+        try:
+            # include_landmarks stays False: see load_shank_features. This is the
+            # whole reason the loader has that default.
+            shanks, meta = load_shank_features(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Load failed", str(exc)[:2000])
+            return
+        self._loaded_features = shanks
+        self._lfp_result = None
+        n_landmarks = sum(s.get("n_landmarks", 0) for s in meta.get("shanks", []))
+        msg = (
+            f"Loaded features for {len(shanks)} shank(s) from "
+            f"'{meta.get('probe', '?')}'."
+        )
+        if n_landmarks:
+            msg += (
+                f"  {n_landmarks} landmark(s) in the file were NOT loaded - load them "
+                "from the alignment dialog if you want them."
+            )
+        self._status.setText(msg + "  Click 'Open alignment…'.")
+
     def _on_error(self, exc: Exception) -> None:
         self._compute_btn.setEnabled(True)
         self._status.setText(f"Error: {exc}")
@@ -246,10 +282,9 @@ class EphysPanelWidget(QWidget):
         been loaded. Requiring the recording first was what made the two old dialogs
         disagree about whether anything was loaded.
         """
-        selection = self._selected_shank()
-        if selection is None:
+        probe_idx = self._selected_probe()
+        if probe_idx is None:
             return
-        probe_idx, shank_idx = selection
         probe = self._state.project.probes[probe_idx]
         if not any(s.tip_ccf_um is not None and s.entry_ccf_um is not None
                    for s in probe.shanks):
@@ -269,21 +304,18 @@ class EphysPanelWidget(QWidget):
             self._state,
             probe_idx,
             lfp_result=self._lfp_result,
-            initial_shank=shank_idx,
+            features=self._loaded_features,
             on_applied=lambda: self._on_alignment_applied(probe_idx, rec_path),
             parent=self,
         )
         dlg.exec_()
 
-    def _selected_shank(self) -> tuple[int, int] | None:
-        """The chosen (probe, shank), or ``None`` after warning why there isn't one."""
+    def _selected_probe(self) -> int | None:
+        """The chosen probe, or ``None`` after warning why there isn't one."""
         probe_idx = self._probe_combo.currentIndex()
-        shank_idx = self._shank_combo.currentIndex()
         probes = self._state.project.probes
-        if not (0 <= probe_idx < len(probes)) or not (
-            0 <= shank_idx < len(probes[probe_idx].shanks)
-        ):
-            QMessageBox.warning(self, "No shank", "Select a probe and shank first.")
+        if not (0 <= probe_idx < len(probes)):
+            QMessageBox.warning(self, "No probe", "Add and select a probe first.")
             return None
         if self._state.atlas is None:
             QMessageBox.warning(
@@ -291,7 +323,7 @@ class EphysPanelWidget(QWidget):
                 "Load the atlas (Atlas tab) so region boundaries can be shown.",
             )
             return None
-        return probe_idx, shank_idx
+        return probe_idx
 
     def _on_alignment_applied(self, probe_idx: int, rec_path: str | None) -> None:
         probe = self._state.project.probes[probe_idx]

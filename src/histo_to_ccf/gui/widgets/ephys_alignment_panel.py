@@ -90,6 +90,7 @@ class EphysAlignmentPanel(QWidget):
 
             scene = self._view.region_plot.scene()
             scene.sigMouseClicked.connect(self._on_scene_click)
+            self._view.endMarkerDragged.connect(self._on_end_marker_dragged)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Show:"))
@@ -484,9 +485,13 @@ class EphysAlignmentPanel(QWidget):
                         pos=pair[slot], angle=0, movable=True,
                         pen=pg.mkPen(colour, width=3),
                         hoverPen=pg.mkPen(255, 220, 90, width=5),
-                        label=f"{i} {role}",
-                        labelOpts={"color": colour, "position": 0.03},
+                        # No text label. On the narrow region column it was clipped
+                        # to "...natomy", and on the ephys panel it overprinted the
+                        # brain-surface marker. Colour already says which is which
+                        # (red = feature, blue = anatomy) and the status line counts
+                        # them, so the label only added clutter it could not fit.
                     )
+                    line.landmark_role = role
                     line.landmark_index = i
                     line.landmark_slot = slot
                     line.parent_plot = plot
@@ -497,6 +502,34 @@ class EphysAlignmentPanel(QWidget):
                     self._lines.append(line)
         finally:
             self._suspend_line_signals = False
+
+    def _on_end_marker_dragged(self, track_depth: float, feature_depth: float) -> None:
+        """Dragging an end marker *is* a landmark pinned to that end of the track.
+
+        The markers already state where the histology thinks the brain surface and the
+        shank tip are, so making the user add a second line beside one to disagree with
+        it would be busywork. Both reuse the landmark machinery rather than being
+        special cases: one landmark whose anatomy side is pinned to that end.
+        """
+        if self._history is None:
+            return
+        index = self._landmark_at_track(track_depth)
+        if index is None:
+            self._pending.append([float(feature_depth), float(track_depth)])
+            self._pending.sort(key=lambda p: p[0])
+        else:
+            self._pending[index][0] = float(feature_depth)
+        self._draw_lines()
+        self._update_status()
+        self._update_buttons()
+        self.landmarksChanged.emit()
+
+    def _landmark_at_track(self, track_depth: float) -> int | None:
+        """The landmark whose anatomy side already sits at ``track_depth``, if any."""
+        for i, (_feature, anatomy) in enumerate(self._pending):
+            if abs(anatomy - track_depth) <= 1.0:
+                return i
+        return None
 
     def pending_pairs(self) -> list[tuple[float, float]]:
         """Handle positions as ``(feature_depth, anatomy_depth)``, before aligning."""
@@ -647,7 +680,7 @@ class EphysProbeAlignmentDialog(QDialog):
     """
 
     def __init__(self, state, probe_idx: int, *, lfp_result=None, profile=None,
-                 initial_shank: int = 0, on_applied=None,
+                 features=None, on_applied=None,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._state = state
@@ -662,18 +695,25 @@ class EphysProbeAlignmentDialog(QDialog):
         self._shanks = list(self._probe.shanks)
         for shank in self._shanks:
             panel = EphysAlignmentPanel()
-            self._load_shank(panel, shank, lfp_result, profile)
+            self._load_shank(panel, shank, lfp_result, profile, features)
             self._tabs.addTab(panel, self._tab_label(shank))
             self.panels.append(panel)
             panel.landmarksChanged.connect(self._refresh_tab_labels)
-        # The Ephys tab's Shank selector now only chooses which tab opens first -
-        # every shank is present either way.
-        if 0 <= initial_shank < self._tabs.count():
-            self._tabs.setCurrentIndex(initial_shank)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Close
         )
+        load_lm_btn = QPushButton("Load landmarks from file…")
+        load_lm_btn.setToolTip(
+            "Load the landmarks out of a saved depth-features file and apply them to "
+            "the matching shanks.\n\n"
+            "Only offered here, not on the Ephys tab: landmarks encode an alignment to "
+            "one particular registration, so if the histology has been re-registered "
+            "since, these will not mean what they did. You will see exactly what they "
+            "do to the region column before pressing Apply."
+        )
+        load_lm_btn.clicked.connect(self.load_landmarks_from_file)
+        buttons.addButton(load_lm_btn, QDialogButtonBox.ButtonRole.ActionRole)
         save_btn = QPushButton("Save depth features…")
         save_btn.setToolTip(
             "Save every shank's depth-resolved features as one compressed .npz: the "
@@ -719,7 +759,8 @@ class EphysProbeAlignmentDialog(QDialog):
             n = lm.n_user if lm is not None else 0
             self._tabs.setTabText(i, f"Shank {shank.index}" + (f"  ✓{n}" if n else ""))
 
-    def _load_shank(self, panel: EphysAlignmentPanel, shank, lfp_result, profile) -> None:
+    def _load_shank(self, panel: EphysAlignmentPanel, shank, lfp_result, profile,
+                    features=None) -> None:
         if profile is None:
             from histo_to_ccf.ephys.penetration import PenetrationProfile
 
@@ -732,7 +773,13 @@ class EphysProbeAlignmentDialog(QDialog):
         panel.set_penetration(profile, track_length_um=track_length)
         panel.set_track(self._state.atlas, shank.tip_ccf_um, shank.entry_ccf_um)
         panel.view().mark_track_ends(track_length)
-        if lfp_result is not None and track_length > 0:
+        saved = (features or {}).get(shank.index)
+        if saved is not None and np.asarray(saved.lfp_psd).size:
+            # Reloaded features are already on the depth-below-surface axis.
+            panel.view().set_lfp(
+                saved.channel_depth_below_surface_um, saved.lfp_psd, saved.lfp_freqs_hz
+            )
+        elif lfp_result is not None and track_length > 0:
             self._load_shank_lfp(panel, shank, lfp_result, track_length)
         panel.refresh_display_modes()
         if shank.ephys is not None:
@@ -760,8 +807,55 @@ class EphysProbeAlignmentDialog(QDialog):
                 mask = np.array([str(s) == uniq[shank.index] for s in shank_ids])
         if not mask.any():
             return
-        # LFP depths are µm from the tip; the panels are depth below the surface.
-        panel.view().set_lfp(track_length_um - depths_from_tip[mask], psd[mask], freqs)
+        # The recording's y is measured from the lowest electrode, but the histology
+        # track ends at the **physical tip**, which is a 175 µm chisel below it
+        # (Neuropixels spec: TIP LENGTH 175 µm). Without this every channel sits
+        # 175 µm too deep - small, but the same size as the nuclei being aligned to.
+        from histo_to_ccf.probes.geometry import SHANK_TIP_LENGTH_UM
+
+        depth_from_tip = depths_from_tip[mask] - depths_from_tip[mask].min()
+        depth_from_tip = depth_from_tip + SHANK_TIP_LENGTH_UM
+        panel.view().set_lfp(track_length_um - depth_from_tip, psd[mask], freqs)
+
+    def load_landmarks_from_file(self, path: str | None = None) -> int:
+        """Apply the landmarks from a saved export. Returns how many shanks were set.
+
+        The deliberate counterpart to the Ephys tab's loader, which refuses to touch
+        landmarks: here the user is looking at the region column and can see what the
+        loaded alignment does before applying it.
+        """
+        from qtpy.QtWidgets import QFileDialog, QMessageBox
+
+        from histo_to_ccf.ephys.export import default_export_path, load_shank_features
+
+        if path is None:
+            start = default_export_path(
+                getattr(self._state, "project_path", None), self._probe.label
+            ).parent
+            path, _filter = QFileDialog.getOpenFileName(
+                self, "Load landmarks", str(start), "NumPy archive (*.npz)"
+            )
+            if not path:
+                return 0
+        try:
+            shanks, _meta = load_shank_features(path, include_landmarks=True)
+        except Exception as exc:
+            QMessageBox.critical(self, "Load failed", str(exc)[:2000])
+            return 0
+
+        applied = 0
+        for panel, shank in zip(self.panels, self._shanks, strict=True):
+            saved = shanks.get(shank.index)
+            if saved is None or np.asarray(saved.landmark_feature_um).size < 2:
+                continue
+            panel.set_extremes_mode(saved.extremes_mode or "uniform")
+            panel.restore_landmarks(
+                list(np.asarray(saved.landmark_feature_um).tolist()),
+                list(np.asarray(saved.landmark_track_um).tolist()),
+            )
+            applied += 1
+        self._refresh_tab_labels()
+        return applied
 
     def feature_exports(self) -> list:
         """Assemble every shank's features for export. Headless-testable."""

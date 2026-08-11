@@ -1,6 +1,8 @@
 """Exporting the depth features an alignment was read from."""
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 import pytest
 
@@ -9,6 +11,7 @@ from histo_to_ccf.ephys.export import (
     build_payload,
     default_export_path,
     load_feature_export,
+    load_shank_features,
     save_feature_export,
 )
 
@@ -162,20 +165,85 @@ def test_missing_npz_suffix_is_reported_as_written(tmp_path):
     assert written.exists()
 
 
-@pytest.mark.qt
-def test_the_dialog_assembles_an_export_for_every_shank(qtbot) -> None:
-    pytest.importorskip("pyqtgraph")
-    import napari
+# -- reloading, and the landmark safety rule --------------------------------
 
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+
+def test_reloading_drops_the_landmarks_by_default(tmp_path):
+    """The whole point: measurements are safe to reload, an alignment is not."""
+    written = save_feature_export(tmp_path / "out.npz", "ProbeA", [_shank(0)])
+
+    shanks, _meta = load_shank_features(written)
+
+    assert shanks[0].lfp_psd.shape == (16, 31)          # the ephys came back...
+    assert shanks[0].firing_rate_hz.size == 40
+    assert shanks[0].landmark_feature_um.size == 0      # ...the alignment did not
+    assert shanks[0].landmark_track_um.size == 0
+    assert shanks[0].extremes_mode == "uniform"         # not the stored "linear"
+
+
+def test_landmarks_come_back_only_when_asked_for(tmp_path):
+    written = save_feature_export(tmp_path / "out.npz", "ProbeA", [_shank(0)])
+
+    shanks, _meta = load_shank_features(written, include_landmarks=True)
+
+    assert shanks[0].landmark_feature_um.tolist() == [0.0, 1400.0, 4000.0]
+    assert shanks[0].landmark_track_um.tolist() == [0.0, 1500.0, 4000.0]
+    assert shanks[0].extremes_mode == "linear"
+
+
+def test_reload_keys_shanks_by_their_original_index(tmp_path):
+    written = save_feature_export(tmp_path / "out.npz", "ProbeA", [_shank(0), _shank(3)])
+
+    shanks, meta = load_shank_features(written)
+
+    assert sorted(shanks) == [0, 3]
+    assert shanks[3].shank_index == 3
+    assert shanks[0].track_length_um == pytest.approx(4000.0)
+    assert meta["probe"] == "ProbeA"
+
+
+def test_reloaded_lists_come_back_as_strings(tmp_path):
+    written = save_feature_export(tmp_path / "out.npz", "ProbeA", [_shank(0)])
+
+    shanks, _meta = load_shank_features(written)
+
+    assert shanks[0].region_acronym == ["A", "B"]
+    assert shanks[0].channel_ids[0] == "ch0"
+
+
+def test_reloading_a_bare_export_yields_an_empty_shank(tmp_path):
+    written = save_feature_export(
+        tmp_path / "out.npz", "ProbeA", [ShankFeatureExport(shank_index=2)]
+    )
+
+    shanks, _meta = load_shank_features(written)
+
+    # Nothing was stored, so nothing comes back - but the shank is still known.
+    assert shanks == {} or shanks[2].lfp_psd.size == 0
+
+
+def test_a_round_trip_of_measurements_is_lossless(tmp_path):
+    original = _shank(1)
+    written = save_feature_export(tmp_path / "out.npz", "ProbeA", [original])
+
+    shanks, _meta = load_shank_features(written)
+
+    assert np.allclose(shanks[1].lfp_psd, original.lfp_psd)
+    assert np.allclose(shanks[1].channel_depth_below_surface_um,
+                       original.channel_depth_below_surface_um)
+    assert np.allclose(shanks[1].firing_rate_hz, original.firing_rate_hz)
+
+
+class _Atlas:
+    structures: ClassVar[dict] = {"A": {"rgb_triplet": [1, 2, 3]}}
+
+    def structure_from_coords(self, coords, *, microns=True, as_acronym=True):
+        return "A"
+
+
+def _probe_state():
     from histo_to_ccf.gui.workflow import WorkflowState
     from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
-
-    class _Atlas:
-        structures = {"A": {"rgb_triplet": [1, 2, 3]}}  # noqa: RUF012
-
-        def structure_from_coords(self, coords, *, microns=True, as_acronym=True):
-            return "A"
 
     state = WorkflowState()
     state.atlas = _Atlas()
@@ -189,6 +257,48 @@ def test_the_dialog_assembles_an_export_for_every_shank(qtbot) -> None:
             ],
         )
     )
+    return state
+
+
+@pytest.mark.qt
+def test_the_alignment_dialog_loads_landmarks_deliberately(qtbot, tmp_path) -> None:
+    """The Ephys tab must not, but here it is an informed choice."""
+    pytest.importorskip("pyqtgraph")
+    import napari
+
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+
+    saved = ShankFeatureExport(
+        shank_index=0, track_length_um=4000.0,
+        landmark_feature_um=np.array([0.0, 1600.0, 4000.0]),
+        landmark_track_um=np.array([0.0, 2000.0, 4000.0]),
+    )
+    written = save_feature_export(tmp_path / "out.npz", "ProbeA", [saved])
+
+    viewer = napari.Viewer(show=False)
+    try:
+        dlg = EphysProbeAlignmentDialog(_probe_state(), 0)
+        qtbot.addWidget(dlg)
+        assert dlg.panels[0].landmarks().n_user == 0
+
+        applied = dlg.load_landmarks_from_file(str(written))
+
+        assert applied == 1
+        assert dlg.panels[0].landmarks().user_pairs() == pytest.approx(
+            [(1600.0, 2000.0)]
+        )
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_the_dialog_assembles_an_export_for_every_shank(qtbot) -> None:
+    pytest.importorskip("pyqtgraph")
+    import napari
+
+    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+
+    state = _probe_state()
     viewer = napari.Viewer(show=False)
     try:
         dlg = EphysProbeAlignmentDialog(state, 0)

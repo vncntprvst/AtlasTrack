@@ -135,6 +135,46 @@ def test_align_moves_the_anatomy_onto_the_feature(qtbot) -> None:
     assert panel.pending_pairs() == pytest.approx([(1600.0, 1600.0)])
 
 
+def test_dragging_the_brain_surface_marker_makes_a_landmark(qtbot) -> None:
+    """The marker already claims where the brain starts; let the ephys contradict it."""
+    panel = _panel(qtbot)
+
+    panel.view().endMarkerDragged.emit(0.0, 300.0)
+
+    # One landmark, anatomy side pinned to the surface (track depth 0).
+    assert panel.pending_pairs() == [(300.0, 0.0)]
+
+    panel.align()
+
+    assert panel.landmarks().user_pairs() == [(300.0, 0.0)]
+    # The whole track now sits 300 µm deeper on the feature axis.
+    assert panel.landmarks().to_track(1300.0) == pytest.approx(1000.0)
+
+
+def test_dragging_the_surface_again_moves_the_same_landmark(qtbot) -> None:
+    """Re-dragging must not stack up a new landmark each time."""
+    panel = _panel(qtbot)
+
+    panel.view().endMarkerDragged.emit(0.0, 300.0)
+    panel.view().endMarkerDragged.emit(0.0, -150.0)
+
+    assert panel.pending_pairs() == [(-150.0, 0.0)]
+
+
+def test_the_tip_marker_is_draggable_too(qtbot) -> None:
+    """The dye marks the physical tip; the LFP only reaches the lowest electrode."""
+    panel = _panel(qtbot)
+
+    panel.view().endMarkerDragged.emit(INSERTION, INSERTION - 200.0)
+
+    assert panel.pending_pairs() == [(INSERTION - 200.0, INSERTION)]
+    # Independent of the surface: dragging one end must not move the other.
+    panel.view().endMarkerDragged.emit(0.0, 120.0)
+    assert sorted(panel.pending_pairs()) == [
+        (120.0, 0.0), (INSERTION - 200.0, INSERTION),
+    ]
+
+
 def test_dragging_the_anatomy_bar_also_defines_a_correction(qtbot) -> None:
     """Either bar can be the one you move - the gap is what matters."""
     panel = _panel(qtbot)

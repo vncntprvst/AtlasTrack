@@ -117,6 +117,62 @@ def test_empty_input_gives_no_bands():
     assert region_bands([("A", (1, 1, 1))], np.array([])) == []
 
 
+def test_band_colours_come_from_the_project_palette():
+    """Not the Allen rgb_triplet: whole cerebella come back as one wash of yellow."""
+    from histo_to_ccf.ephys.regions import band_colours
+    from histo_to_ccf.viz.plotly3d import hex_to_rgb, region_style
+
+    bands = [
+        RegionBand(top_um=0.0, bottom_um=100.0, acronym="IRN", rgb=(1, 1, 1)),
+        RegionBand(top_um=100.0, bottom_um=200.0, acronym="VII", rgb=(1, 1, 1)),
+    ]
+
+    colours = band_colours(bands)
+
+    # Curated regions keep the colour the 3D views give them.
+    assert colours[0] == hex_to_rgb(region_style("IRN")[0])
+    assert colours[1] == hex_to_rgb(region_style("VII")[0])
+
+
+def test_neighbouring_bands_never_share_a_colour():
+    """The whole point of the column is that you can see the boundaries."""
+    from histo_to_ccf.ephys.regions import band_colours
+
+    bands = [
+        RegionBand(top_um=float(i * 100), bottom_um=float((i + 1) * 100),
+                   acronym=f"R{i}", rgb=(200, 200, 100))
+        for i in range(30)  # more distinct regions than the palette has colours
+    ]
+
+    colours = band_colours(bands)
+
+    for earlier, later in itertools.pairwise(colours):
+        assert earlier != later
+
+
+def test_one_acronym_always_gets_one_colour():
+    from histo_to_ccf.ephys.regions import band_colours
+
+    bands = [
+        RegionBand(top_um=0.0, bottom_um=100.0, acronym="A", rgb=(1, 1, 1)),
+        RegionBand(top_um=100.0, bottom_um=200.0, acronym="B", rgb=(1, 1, 1)),
+        RegionBand(top_um=200.0, bottom_um=300.0, acronym="A", rgb=(1, 1, 1)),
+    ]
+
+    colours = band_colours(bands)
+
+    assert colours[0] == colours[2]
+    assert colours[0] != colours[1]
+
+
+def test_unlabelled_bands_stay_black():
+    from histo_to_ccf.ephys.regions import band_colours
+
+    bands = [RegionBand(top_um=0.0, bottom_um=100.0, acronym="", rgb=(9, 9, 9))]
+
+    assert band_colours(bands) == [(0, 0, 0)]
+
+
 def test_band_geometry_helpers():
     band = RegionBand(top_um=100.0, bottom_um=400.0, acronym="A", rgb=(1, 2, 3))
     assert band.thickness_um == pytest.approx(300.0)

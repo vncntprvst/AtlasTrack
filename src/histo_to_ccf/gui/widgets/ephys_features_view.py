@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
@@ -45,6 +45,14 @@ _REGION_STEP_UM = 20.0
 # would only overprint its neighbours. Re-evaluated on every zoom, so zooming in
 # reveals the slivers rather than hiding them for good.
 _LABEL_MIN_FRACTION = 0.035
+# Reserved height for both bottom axes, so their plot areas end at the same depth
+# even though only one of them carries an axis label.
+_AXIS_HEIGHT_PX = 46
+# Regions are looked up this far beyond both ends of the track. Aligning shifts the
+# anatomy along the column, so a region just outside the track can be pulled into
+# view - and it must already have been sampled, or it would simply be missing.
+# 1.2 mm covers far more shift than any plausible misregistration.
+_REGION_MARGIN_UM = 1200.0
 
 
 def _readable_on(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
@@ -85,8 +93,13 @@ class EphysFeaturesView(QWidget):
     (and testable) on its own.
     """
 
+    #: An end marker was dragged: ``(track_depth_it_stands_for, new_feature_depth)``.
+    #: The view does not act on it - the panel turns it into a landmark.
+    endMarkerDragged = Signal(float, float)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._track_length_um = 0.0
         self._profile: PenetrationProfile | None = None
         self._plots: list = []
         self._raster = None
@@ -96,6 +109,7 @@ class EphysFeaturesView(QWidget):
         # stay put and the anatomy stretches against them - which is the direction
         # that makes a misalignment visible.
         self._bands: list[RegionBand] = []
+        self._band_colours: list[tuple[int, int, int]] = []
         self._region_names: dict[str, str] = {}
         self._landmarks: Landmarks | None = None
         self._extremes_mode = "uniform"
@@ -162,6 +176,12 @@ class EphysFeaturesView(QWidget):
         grid.setColumnStretchFactor(0, 3)
         grid.setColumnStretchFactor(1, 2)
         self._regions.setMinimumWidth(260)
+        # Force both bottom axes to the same reserved height. Otherwise the ephys
+        # panel's axis label ("frequency (Hz)") makes its axis taller, and the two
+        # plot areas end at different depths - so the same y is a different place in
+        # each panel, which is the one thing a shared depth axis must never allow.
+        for plot in (self._ephys_plot, self._regions):
+            plot.getAxis("bottom").setHeight(_AXIS_HEIGHT_PX)
 
         self._plots = [self._ephys_plot, self._regions]
         for plot in self._plots:
@@ -375,34 +395,89 @@ class EphysFeaturesView(QWidget):
         self._ephys_plot.setXRange(0.0, width, padding=0.0)
 
     def mark_track_ends(self, track_length_um: float) -> None:
-        """Label the brain surface and the tip, so no other line can be mistaken for them.
+        """Mark the brain surface and the shank tip - both **histology claims**.
 
         The old dialog labelled the top of its axis "surface" when that was really the
         topmost electrode - on LO_07 ProbeA, 921 µm above the actual surface, because
         the electrode column is longer than the insertion. Marking both ends explicitly
         is what stops that reading.
+
+        These are track-space depths, so they are drawn through the current warp along
+        with the regions: when the alignment moves the anatomy, the surface moves with
+        it. And the surface line on the ephys panel is **draggable**, because "the
+        brain starts here" is exactly the kind of claim the LFP can contradict.
+        """
+        if self._end_items and float(track_length_um) != self._track_length_um:
+            # The track changed under us: drop the markers so they are rebuilt at the
+            # new length rather than left pointing at the old tip.
+            for plot, line in self._end_items:
+                plot.removeItem(line)
+            self._end_items = []
+        self._track_length_um = float(track_length_um)
+        self._draw_track_ends()
+
+    def _draw_track_ends(self) -> None:
+        """Create the end markers once, then only ever move them.
+
+        Deliberately not recreated on each redraw. A pyqtgraph ``InfiniteLine`` with a
+        ``label`` owns a child text item, and destroying/recreating that on every
+        region redraw left the label's C++ object deleted while Python still held it -
+        a "wrapped C/C++ object has been deleted" crash several test files later.
         """
         if not self._ok:
             return
+        if self._end_items:
+            self._position_track_ends()
+            return
         import pyqtgraph as pg
 
-        for item in self._end_items:
-            item[0].removeItem(item[1])
-        self._end_items = []
-        marks = [(0.0, "brain surface", (120, 220, 255))]
-        if track_length_um > 0:
-            marks.append((float(track_length_um), "shank tip (histology)", (255, 170, 90)))
+        # Labels sit away from the left edge, where they used to collide with the
+        # depth tick, and away from each other.
+        # Both ends are draggable: each is a histology claim the ephys can contradict,
+        # and the tip especially, since the dye marks the *physical tip* while the LFP
+        # only reaches the lowest electrode above it.
+        marks = [(0.0, "brain surface (drag me)", (120, 220, 255), True, 0.55)]
+        if self._track_length_um > 0:
+            marks.append(
+                (self._track_length_um, "shank tip (drag me)", (255, 170, 90),
+                 True, 0.75)
+            )
         for plot in self._plots:
-            for depth, label, colour in marks:
+            for depth, label, colour, draggable, where in marks:
+                on_ephys = plot is self._ephys_plot
+                movable = bool(draggable and on_ephys)
                 line = pg.InfiniteLine(
-                    pos=depth, angle=0,
-                    pen=pg.mkPen(colour, width=1, style=Qt.PenStyle.DashLine),
-                    label=(label if plot is self._ephys_plot else None),
-                    labelOpts={"color": colour, "position": 0.08, "movable": False},
+                    pos=float(np.asarray(self._warp(depth)).ravel()[0]), angle=0,
+                    movable=movable,
+                    pen=pg.mkPen(colour, width=2 if movable else 1,
+                                 style=Qt.PenStyle.DashLine),
+                    hoverPen=pg.mkPen(255, 220, 90, width=4) if movable else None,
+                    label=(label if on_ephys else None),
+                    labelOpts={"color": colour, "position": where, "movable": False},
                 )
                 line.setZValue(8)
+                if movable:
+                    line.setCursor(Qt.CursorShape.SizeVerCursor)
+                    # A bound method, not a lambda: a closure capturing ``self`` is
+                    # owned by the line, which is owned by the plot, which is owned by
+                    # this view - a reference cycle whose later collection tears down
+                    # C++ objects in an order that crashes the interpreter.
+                    line.sigPositionChangeFinished.connect(self._on_surface_line_moved)
+                line.track_depth_um = float(depth)
                 plot.addItem(line)
                 self._end_items.append((plot, line))
+
+    def _position_track_ends(self) -> None:
+        """Put the markers where the current warp says their track depths land."""
+        for _plot, line in self._end_items:
+            depth = float(getattr(line, "track_depth_um", 0.0))
+            line.setValue(float(np.asarray(self._warp(depth)).ravel()[0]))
+
+    def _on_surface_line_moved(self, line) -> None:
+        """Either end marker moved: report it with the track depth it stands for."""
+        self.endMarkerDragged.emit(
+            float(getattr(line, "track_depth_um", 0.0)), float(line.value())
+        )
 
     # -- atlas regions ---------------------------------------------------
 
@@ -422,7 +497,8 @@ class EphysFeaturesView(QWidget):
         return getattr(self, "_regions", None)
 
     def set_track(self, atlas, tip_ccf_um, entry_ccf_um, *,
-                  step_um: float = _REGION_STEP_UM, extra_um: float = 0.0) -> None:
+                  step_um: float = _REGION_STEP_UM,
+                  extra_um: float = _REGION_MARGIN_UM) -> None:
         """Look the atlas up along the shank and draw the region column.
 
         Sampling runs from the brain surface to the tip, extended by ``extra_um``
@@ -430,7 +506,11 @@ class EphysFeaturesView(QWidget):
         they should - that disagreement is exactly what the alignment is for, so it
         must be visible rather than clipped away.
         """
-        from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+        from histo_to_ccf.ephys.regions import (
+            band_colours,
+            region_bands,
+            regions_along_track,
+        )
 
         self._bands = []
         if atlas is None or tip_ccf_um is None or entry_ccf_um is None:
@@ -449,12 +529,15 @@ class EphysFeaturesView(QWidget):
         depths = np.arange(top, bottom + step_um, max(step_um, 1.0))
         hits = regions_along_track(atlas, tip_ccf_um, entry_ccf_um, depths)
         self._bands = region_bands(hits, depths)
+        self._band_colours = band_colours(self._bands)
         self._region_names = self._lookup_names(atlas, self._bands)
         # Set the depth range explicitly. Without this the panels kept whatever
         # autorange they had (nothing, with no spike data), so the region column
         # rendered off-screen and only appeared once some later redraw moved the
         # view - which read as "regions don't show until you add a landmark".
-        self._ephys_plot.setYRange(top, bottom, padding=0.02)
+        # Enough padding that the end markers - which sit exactly at 0 and at the
+        # track length - are inside the view with their labels, not clipped at the edge.
+        self._ephys_plot.setYRange(top, bottom, padding=0.06)
         self._draw_regions()
 
     @staticmethod
@@ -520,16 +603,20 @@ class EphysFeaturesView(QWidget):
             return
 
         edges = self._warp([b.top_um for b in self._bands] + [self._bands[-1].bottom_um])
-        for band, top, bottom in zip(self._bands, edges[:-1], edges[1:], strict=True):
+        for band, colour, top, bottom in zip(
+            self._bands, self._band_colours, edges[:-1], edges[1:], strict=False
+        ):
             if band.acronym == "":
                 continue  # outside the atlas: leave it as background, not a colour
             item = pg.LinearRegionItem(
                 values=(float(top), float(bottom)), orientation="horizontal",
-                brush=pg.mkBrush(*band.rgb, 210), pen=pg.mkPen(None), movable=False,
+                brush=pg.mkBrush(*colour, 210), pen=pg.mkPen(None), movable=False,
             )
             item.setZValue(-20)
             self._regions.addItem(item)
             self._region_items.append(item)
+        # The end markers are track-space claims too, so they follow the same warp.
+        self._draw_track_ends()
         self._relabel_regions()
 
     def _relabel_regions(self) -> None:
@@ -548,7 +635,9 @@ class EphysFeaturesView(QWidget):
         if span <= 0:
             return
         edges = self._warp([b.top_um for b in self._bands] + [self._bands[-1].bottom_um])
-        for band, top, bottom in zip(self._bands, edges[:-1], edges[1:], strict=True):
+        for band, colour, top, bottom in zip(
+            self._bands, self._band_colours, edges[:-1], edges[1:], strict=False
+        ):
             if not band.acronym or abs(bottom - top) < _LABEL_MIN_FRACTION * span:
                 continue
             mid = 0.5 * (top + bottom)
@@ -556,7 +645,7 @@ class EphysFeaturesView(QWidget):
                 continue
             name = self._region_names.get(band.acronym, "")
             caption = f"{name} ({band.acronym})" if name else band.acronym
-            text = pg.TextItem(caption, color=_readable_on(band.rgb), anchor=(0, 0.5))
+            text = pg.TextItem(caption, color=_readable_on(colour), anchor=(0, 0.5))
             text.setPos(0.04, mid)
             text.setZValue(5)
             self._regions.addItem(text)

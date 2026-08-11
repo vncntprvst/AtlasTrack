@@ -189,9 +189,16 @@ def test_regions_are_found_along_the_track(qtbot) -> None:
 
     view.set_track(_DepthAtlas(), TIP, ENTRY)
 
+    # Sampling runs past both ends of the track, so aligning can pull a region that
+    # sits just outside it into view. Above the surface is outside the atlas.
     bands = view.bands()
-    assert [b.acronym for b in bands] == ["A", "B"]
-    assert bands[0].bottom_um == pytest.approx(2000.0, abs=20.0)
+    # Outside the atlas above the surface, and again past the tip - both real, and
+    # both kept so the column can show them if aligning brings them into view.
+    assert [b.acronym for b in bands] == ["", "A", "B", ""]
+    assert bands[0].bottom_um == pytest.approx(0.0, abs=20.0)
+    assert bands[1].bottom_um == pytest.approx(2000.0, abs=20.0)
+    assert bands[0].top_um < 0.0
+    assert bands[-1].bottom_um > INSERTION
 
 
 def test_no_atlas_leaves_the_column_empty_without_raising(qtbot) -> None:

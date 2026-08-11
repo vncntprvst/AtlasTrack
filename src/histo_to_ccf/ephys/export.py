@@ -127,3 +127,54 @@ def load_feature_export(path: str | Path) -> tuple[dict, dict]:
         arrays = {k: data[k] for k in data.files if k != "meta"}
         meta = json.loads(str(data["meta"])) if "meta" in data.files else {}
     return arrays, meta
+
+
+# Fields that describe the *alignment* rather than the ephys. Everything else in an
+# export is a measurement and is safe to reload at any time.
+_LANDMARK_FIELDS = ("landmark_feature_um", "landmark_track_um", "extremes_mode")
+
+
+def load_shank_features(path: str | Path, *, include_landmarks: bool = False
+                        ) -> tuple[dict[int, ShankFeatureExport], dict]:
+    """Reconstruct per-shank features from an export: ``({shank_index: export}, meta)``.
+
+    **Landmarks are dropped unless explicitly asked for, and that default is the
+    point.** The measured features - LFP power, spike profiles - are agnostic to the
+    histology: they describe the recording, so reloading them is always safe. The
+    landmarks are not. They encode a correspondence to a *particular* registration, so
+    if the sections have been re-registered since the export, reloading them silently
+    reinstates an alignment against a track that no longer exists, overwriting work the
+    user did in between.
+
+    So the general-purpose loader leaves them out, and the alignment view asks for them
+    deliberately, where the user can see what they are about to overwrite.
+    """
+    arrays, meta = load_feature_export(path)
+    by_shank: dict[int, dict] = {}
+    for key, value in arrays.items():
+        if not key.startswith("shank"):
+            continue
+        head, _, field = key.partition("_")
+        digits = head[len("shank"):]
+        if not digits.isdigit() or not field:
+            continue
+        by_shank.setdefault(int(digits), {})[field] = value
+
+    scalars = {int(s.get("index", -1)): s for s in meta.get("shanks", [])}
+    out: dict[int, ShankFeatureExport] = {}
+    for index, fields in sorted(by_shank.items()):
+        item = ShankFeatureExport(shank_index=index)
+        item.track_length_um = float(scalars.get(index, {}).get("track_length_um", 0.0))
+        for name, value in fields.items():
+            if name in _LANDMARK_FIELDS and not include_landmarks:
+                continue
+            if name in ("region_acronym", "channel_ids"):
+                setattr(item, name, [str(v) for v in value.tolist()])
+            elif hasattr(item, name):
+                setattr(item, name, np.asarray(value))
+        if include_landmarks:
+            item.extremes_mode = str(
+                scalars.get(index, {}).get("extremes_mode", "uniform")
+            )
+        out[index] = item
+    return out, meta

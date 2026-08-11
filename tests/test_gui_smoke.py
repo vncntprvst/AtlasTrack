@@ -1328,7 +1328,9 @@ def test_ephys_panel_lists_probes(qtbot) -> None:
         qtbot.addWidget(widget)
         widget.refresh_probes()
         assert widget._probe_combo.count() == 1
-        assert widget._shank_combo.count() == 1
+        # Probe only: shanks are chosen by tab inside the alignment dialog, so a
+        # selector here could not distinguish "chose shank 0" from "did not care".
+        assert not hasattr(widget, "_shank_combo")
     finally:
         viewer.close()
 
@@ -1383,7 +1385,8 @@ def test_landmark_dialog_reads_the_atlas_along_the_track(qtbot) -> None:
     qtbot.addWidget(dlg)
 
     panel = dlg.panels[0]
-    bands = panel.view().bands()
+    # Sampled past both track ends, so aligning can pull an outside region into view.
+    bands = [b for b in panel.view().bands() if b.acronym]
     assert [b.acronym for b in bands] == ["A", "B"]
     assert bands[0].bottom_um == pytest.approx(2000.0, abs=25.0)  # 2000 µm along track
     assert panel.landmarks().track_extent_um == pytest.approx((0.0, 4000.0))
