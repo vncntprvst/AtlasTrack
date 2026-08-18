@@ -127,6 +127,125 @@ def deepslice_worker(
 
 
 @thread_worker
+def trajectory_fit_worker(features: dict, tips, entries, atlas):
+    """Fit a rigid probe adjustment to the detected LFP boundaries.
+
+    Coarse grid first, then a fine one around its optimum. Measured on LO_07 ProbeB a
+    single placement costs ~9 ms, so the full 33x13x9 grid is ~34 s of frozen UI while
+    coarse-to-fine reaches the same answer in ~7 s. The refinement window is generous
+    enough that the fine pass can leave the coarse cell it started in.
+
+    Returns ``{"fit", "evidence", "notes"}``; ``notes`` carries the leave-one-out
+    checks, which are what say whether any of the fitted numbers should be believed.
+    """
+    import numpy as np
+
+    from histo_to_ccf.probes.trajectory_fit import (
+        evidence_from_features,
+        fit_trajectory,
+        leave_one_out,
+    )
+
+    yield {"current": 0, "total": 3, "msg": "Detecting boundaries in the features…"}
+    evidence = evidence_from_features(features)
+    if not evidence:
+        return {"fit": None, "evidence": {}, "notes":
+                "No shank produced a boundary above its own noise level, so there is "
+                "nothing to fit to."}
+
+    yield {"current": 1, "total": 3, "msg": "Searching placements (coarse)…"}
+    coarse = fit_trajectory(
+        tips, entries, evidence, atlas,
+        offsets_um=np.arange(-400.0, 401.0, 50.0),
+        rolls_deg=np.arange(-15.0, 15.1, 5.0),
+        tilts_deg=np.arange(-10.0, 10.1, 5.0),
+    )
+
+    yield {"current": 2, "total": 3, "msg": "Refining and checking each shank…"}
+    fit = fit_trajectory(
+        tips, entries, evidence, atlas,
+        offsets_um=np.arange(coarse.offset_um - 60.0, coarse.offset_um + 60.1, 15.0),
+        rolls_deg=np.arange(coarse.roll_deg - 6.0, coarse.roll_deg + 6.1, 1.5),
+        tilts_deg=np.arange(coarse.tilt_deg - 6.0, coarse.tilt_deg + 6.1, 1.5),
+    )
+
+    notes = []
+    for name, values, tol, unit in (
+        ("roll_deg", np.arange(-20.0, 20.1, 2.5), 5.0, "deg"),
+        ("offset_um", np.arange(-400.0, 401.0, 25.0), 100.0, "um"),
+    ):
+        held = {"offset_um": fit.offset_um, "roll_deg": fit.roll_deg,
+                "tilt_deg": fit.tilt_deg}
+        held.pop(name)
+        notes.append(
+            leave_one_out(tips, entries, evidence, atlas, name=name, values=values,
+                          **held).summary(tol, unit)
+        )
+    return {"fit": fit, "evidence": evidence, "notes": chr(10).join(notes)}
+
+
+@thread_worker
+def multi_lfp_power_worker(
+    refs: list,
+    shank_indices: list,
+    *,
+    window_s: float = 10.0,
+    n_windows: int = 6,
+    fmin: float = 0.0,
+    fmax: float = 300.0,
+    bin_um: float = 15.0,
+):
+    """Compute every attached recording's LFP and stack them per shank.
+
+    Yields ``{"current", "total", "msg"}`` per recording - each one is a raw read off
+    the reference disk, so a silent multi-minute wait is not acceptable - and returns
+    ``{"stacks": {shank: ShankStack}, "recordings": [...], "failed": [...]}``.
+
+    A recording that fails to read is reported and the rest are still stacked: losing
+    one bank should not cost the user the shanks the others cover.
+    """
+    from histo_to_ccf.ephys.combine import RecordingFeatures, stack_penetration
+    from histo_to_ccf.ephys.loader import excerpt_psd, load_lfp_excerpts
+
+    computed: list = []
+    failed: list[tuple[str, str]] = []
+    total = len(refs)
+    for i, ref in enumerate(refs, start=1):
+        label = getattr(ref, "label", "") or Path(getattr(ref, "path", "")).name
+        yield {"current": i - 1, "total": total, "msg": f"Reading {label} ({i}/{total})…"}
+        try:
+            data = load_lfp_excerpts(
+                ref.path, getattr(ref, "stream_name", None),
+                window_s=window_s, n_windows=n_windows,
+            )
+            freqs, psd = excerpt_psd(data, fmin=fmin, fmax=fmax)
+            if psd.size == 0:
+                raise RuntimeError("every candidate window was artifact-dominated")
+        except Exception as exc:  # one unreadable recording must not sink the rest
+            failed.append((label, str(exc)[:300]))
+            continue
+        computed.append(RecordingFeatures(
+            label=label,
+            stream_name=data.stream_name,
+            insertion_depth_um=float(getattr(ref, "insertion_depth_um", 0.0) or 0.0),
+            freqs_hz=freqs,
+            psd=psd,
+            axial_um=np.asarray(data.channel_depths_um, dtype=float),
+            x_um=np.asarray(data.channel_x_um, dtype=float),
+            shank_ids=data.channel_shank_ids,
+            electrode_range=getattr(ref, "electrode_range", None),
+            channel_ids=list(data.channel_ids),
+            reference_groups=int(getattr(data, "reference_groups", 0)),
+        ))
+    yield {"current": total, "total": total, "msg": "Stacking shanks…"}
+    return {
+        "stacks": stack_penetration(computed, shank_indices, bin_um=bin_um),
+        "recordings": computed,
+        "failed": failed,
+    }
+
+
+@thread_worker
 def lfp_power_worker(
     recording_dir: Path,
     stream_name: str | None = None,
@@ -362,3 +481,16 @@ def register_worker_progressive(
             _apply_to_shank_registered(shank, project, registered)
 
     return project
+
+
+@thread_worker
+def discover_recordings_worker(root: str, sidecar: str | None = None) -> list:
+    """Scan ``root`` for Open Ephys recordings and group them into penetrations.
+
+    Reads probe geometry only - no traces - but still walks the reference disk, which
+    is slow enough to freeze the UI if run inline: ten streams under one LO_07 session
+    took ~40 s off the spinning drive.
+    """
+    from histo_to_ccf.ephys.discovery import discover
+
+    return discover(root, sidecar=sidecar)

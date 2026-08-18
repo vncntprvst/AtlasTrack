@@ -30,6 +30,8 @@ Pure numpy - no atlas, no Qt. The scoring that needs an atlas composes these wit
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 # Lab convention (Wang lab notebooks), which this module follows exactly:
@@ -176,6 +178,138 @@ def shift_along_track(tips, entries, delta_um: float
     u, _r, _centre = array_axes(tips, entries)
     step = float(delta_um) * u
     return tips + step, entries + step
+
+
+def tilted_array(tips, entries, delta_deg: float) -> tuple[np.ndarray, np.ndarray]:
+    """Change the insertion **pitch** by ``delta_deg``, pivoting at the entry.
+
+    Rotation is about the row axis and about the *entry* centroid, because that is
+    what changing the manipulator angle does: the probe stays where it went into the
+    brain and the tips swing. Pivoting at the tips instead would drag the entry points
+    across the surface, which no manipulator adjustment can do.
+    """
+    tips = np.asarray(tips, dtype=float)
+    entries = np.asarray(entries, dtype=float)
+    _u, r, _centre = array_axes(tips, entries)
+    pivot = entries.mean(0)
+    theta = np.radians(float(delta_deg))
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+
+    def _rotate(points: np.ndarray) -> np.ndarray:
+        v = points - pivot
+        along = (v @ r)[:, None] * r
+        perp = v - along
+        spun = perp * cos_t + np.cross(r, perp) * sin_t
+        return pivot + along + spun
+
+    return _rotate(tips), _rotate(entries)
+
+
+def transformed_array(tips, entries, *, offset_um: float = 0.0, roll_deg: float = 0.0,
+                      tilt_deg: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+    """Apply a rigid probe adjustment: along-track offset, roll, and pitch.
+
+    **Moves the probe, never the anatomy.** The histology registration is taken as
+    given here; this asks only "where must the probe have been, for its recordings to
+    sit where the atlas says these structures are".
+
+    Order matters and is fixed: tilt, then roll, then offset. Roll is defined about
+    the insertion axis, so it has to be applied after the axis is final, and the
+    offset is along that same final axis.
+    """
+    out_tips, out_entries = np.asarray(tips, float), np.asarray(entries, float)
+    if tilt_deg:
+        out_tips, out_entries = tilted_array(out_tips, out_entries, tilt_deg)
+    if roll_deg:
+        out_tips, out_entries = rolled_array(out_tips, out_entries, roll_deg)
+    if offset_um:
+        out_tips, out_entries = shift_along_track(out_tips, out_entries, offset_um)
+    return out_tips, out_entries
+
+
+@dataclass(frozen=True)
+class TrajectoryFit:
+    """A candidate probe adjustment and how well it explains the ephys."""
+
+    offset_um: float = 0.0
+    roll_deg: float = 0.0
+    tilt_deg: float = 0.0
+    score: float = 0.0
+    n_boundaries: int = 0
+
+    @property
+    def mean_score(self) -> float:
+        return self.score / self.n_boundaries if self.n_boundaries else 0.0
+
+
+def score_trajectory(tips, entries, shank_profiles, atlas, *, min_band_um: float = 150.0,
+                     margin_um: float = 1200.0, step_um: float = 20.0) -> tuple[float, int]:
+    """How well a probe placement's atlas boundaries land on measured feature steps.
+
+    ``shank_profiles`` maps shank index -> ``(depth_from_tip_grid, step_score)``, the
+    output of :func:`histo_to_ccf.ephys.autolandmarks.step_profile` expressed in µm
+    **from the tip** - the one axis that does not move when the probe does, since the
+    electrodes are fixed to the shank.
+
+    Returns ``(total_score, n_boundaries)``. Summed across shanks: a placement has to
+    explain all four at once, which is what makes roll and pitch identifiable at all.
+    """
+    from histo_to_ccf.ephys.autolandmarks import candidate_boundaries
+    from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+
+    tips = np.asarray(tips, dtype=float)
+    entries = np.asarray(entries, dtype=float)
+    total, count = 0.0, 0
+    for index, (grid, score) in shank_profiles.items():
+        if index >= len(tips) or np.size(grid) == 0:
+            continue
+        tip, entry = tips[index], entries[index]
+        track = float(np.linalg.norm(tip - entry))
+        if track <= 0:
+            continue
+        depths = np.arange(-margin_um, track + margin_um + step_um, step_um)
+        bands = region_bands(
+            regions_along_track(atlas, tip, entry, depths), depths
+        )
+        for below_surface, _label in candidate_boundaries(bands, min_band_um=min_band_um):
+            from_tip = track - below_surface
+            total += float(np.interp(from_tip, grid, score, left=0.0, right=0.0))
+            count += 1
+    return total, count
+
+
+def refine_trajectory(
+    tips, entries, shank_profiles, atlas, *,
+    offsets_um=None, rolls_deg=None, tilts_deg=None, **score_kwargs
+) -> TrajectoryFit:
+    """Coarse grid search over offset / roll / pitch. Returns the best placement.
+
+    A grid, not a gradient method, and deliberately: the score is built from atlas
+    boundaries appearing and disappearing as the probe moves, so it is piecewise
+    constant in places and has no useful derivative. The grid also makes the result
+    reproducible, which matters more here than the last few µm.
+
+    Defaults scan ±500 µm of offset and ±10° of roll and pitch - the range over which
+    a histology placement is plausibly wrong, not the range the parameters can take.
+    """
+    offsets = np.arange(-500.0, 501.0, 50.0) if offsets_um is None else np.asarray(offsets_um)
+    rolls = np.arange(-10.0, 10.1, 2.5) if rolls_deg is None else np.asarray(rolls_deg)
+    tilts = np.arange(-10.0, 10.1, 2.5) if tilts_deg is None else np.asarray(tilts_deg)
+
+    best = TrajectoryFit()
+    for tilt in tilts:
+        for roll in rolls:
+            moved_t, moved_e = transformed_array(tips, entries, roll_deg=float(roll),
+                                                 tilt_deg=float(tilt))
+            for offset in offsets:
+                cand_t, cand_e = shift_along_track(moved_t, moved_e, float(offset))
+                total, n = score_trajectory(cand_t, cand_e, shank_profiles, atlas,
+                                            **score_kwargs)
+                if n and total > best.score:
+                    best = TrajectoryFit(offset_um=float(offset), roll_deg=float(roll),
+                                         tilt_deg=float(tilt), score=total,
+                                         n_boundaries=n)
+    return best
 
 
 def shank_row_positions(tips, entries) -> np.ndarray:

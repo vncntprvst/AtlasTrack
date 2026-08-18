@@ -20,6 +20,7 @@ Pure numpy. Nothing here decides to *apply* anything - it returns proposals.
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -180,6 +181,341 @@ def step_profile(depths_um, values, *, window_um: float = 250.0,
         finite = [v for v in per_feature if np.isfinite(v)]
         score[i] = float(np.mean(finite)) if finite else 0.0
     return grid, score
+
+
+# --------------------------------------------------------------- multi-scale steps
+
+#: Window widths tried when looking for a step, in µm.
+#:
+#: A single width cannot work, and this is measured rather than assumed. On LO_07
+#: ProbeA shank 1 the two atlas boundaries in range are found at *different* scales:
+#: ``MY|PGRNd`` (4245 µm) peaks at an 80 µm window and is hit to within 2 µm, while
+#: ``PGRNd|GRN`` (4590 µm) only emerges at ~180 µm. The old fixed 250 µm default
+#: missed both by 132-158 µm - it was tuned on the 5745 µm single-column recording and
+#: had never been run against a 705 µm bank.
+WINDOW_LADDER_UM: tuple[float, ...] = (60.0, 100.0, 150.0, 220.0)
+
+#: The widest window worth using, as a fraction of the recorded extent.
+#:
+#: :func:`step_profile` can only score depths at least one window from either end, so
+#: a 250 µm window on a 705 µm bank leaves 205 µm of usable grid - and the answer it
+#: gives there is dominated by the edges. A third of the extent keeps most of the
+#: coverage scorable at every scale used.
+MAX_WINDOW_FRACTION = 1.0 / 3.0
+
+#: Fallback floor when no null has been computed. A step profile is rough everywhere,
+#: so the question is never "is there a peak" but "is it more than this signal
+#: produces by itself" - which :func:`null_threshold` answers properly.
+MIN_BOUNDARY_Z = 2.0
+
+#: Surrogate datasets used to calibrate the threshold, and the percentile taken.
+#: 16 is enough to place a 90th percentile without the calibration costing more than
+#: the detection it guards.
+N_SURROGATES = 16
+NULL_PERCENTILE = 90.0
+#: Depth step for the surrogate profiles. Coarser than the real one on purpose: the
+#: null only needs the distribution of contrast values and the height of its peaks,
+#: neither of which needs 5 µm resolution, and the fine grid made calibrating the
+#: 5745 µm column take 28 s.
+NULL_STEP_UM = 20.0
+
+
+def adaptive_windows(extent_um: float, *, ladder=WINDOW_LADDER_UM,
+                     max_fraction: float = MAX_WINDOW_FRACTION) -> tuple[float, ...]:
+    """Which windows of ``ladder`` are usable over a recording of this extent.
+
+    Always returns at least the narrowest, even on a very short recording: a bad
+    estimate the caller can see is better than an empty profile that reads as "no
+    boundaries here".
+    """
+    extent = float(extent_um)
+    usable = tuple(w for w in ladder if w <= extent * float(max_fraction))
+    return usable or (min(ladder),)
+
+
+def _robust_z(values: np.ndarray) -> np.ndarray:
+    """Deviations from the median in robust SDs; zeros when there is no spread."""
+    v = np.asarray(values, dtype=float)
+    finite = np.isfinite(v)
+    if not finite.any():
+        return np.zeros_like(v)
+    centre = float(np.median(v[finite]))
+    mad = float(np.median(np.abs(v[finite] - centre)))
+    scale = 1.4826 * mad
+    if not np.isfinite(scale) or scale <= 0:
+        spread = float(np.std(v[finite]))
+        scale = spread if spread > 0 else 1.0
+    out = np.full_like(v, np.nan)
+    out[finite] = (v[finite] - centre) / scale
+    return out
+
+
+def _phase_randomised(mat: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """A surrogate with the same depth-smoothness but no localised steps.
+
+    **Why a surrogate and not plain noise.** The threshold has to answer "is this step
+    bigger than what this signal produces on its own", and that depends on how smooth
+    the signal is: measured on a 705 µm bank, white noise alone reaches a contrast of
+    d = 2.9-4.1 while the real detected boundaries sit at d = 2.4-7.6. The two overlap,
+    so no fixed number separates them and the threshold must be calibrated per signal.
+
+    Randomising the Fourier phases keeps each feature's power spectrum - hence its
+    autocorrelation, hence its roughness - and destroys the localisation that makes a
+    step a step. Shuffling the depths instead would whiten the signal and set the bar
+    far too low; rotating it would carry the step along and set it too high.
+    """
+    out = np.empty_like(mat, dtype=float)
+    n = mat.shape[0]
+    for k in range(mat.shape[1]):
+        col = np.asarray(mat[:, k], dtype=float)
+        finite = np.isfinite(col)
+        if not finite.all():
+            col = np.interp(np.arange(n), np.flatnonzero(finite), col[finite]) \
+                if finite.any() else np.zeros(n)
+        spectrum = np.fft.rfft(col)
+        phases = rng.uniform(0.0, 2.0 * np.pi, size=spectrum.size)
+        phases[0] = 0.0
+        if n % 2 == 0:
+            phases[-1] = 0.0
+        out[:, k] = np.fft.irfft(np.abs(spectrum) * np.exp(1j * phases), n=n)
+    return out
+
+
+def calibrate_scales(
+    depths_um, values, windows, *, step_um: float = NULL_STEP_UM,
+    n_surrogates: int = N_SURROGATES, percentile: float = NULL_PERCENTILE, seed: int = 0,
+) -> tuple[dict, float]:
+    """Per-window ``(median, spread)`` of the null contrast, and the peak it reaches.
+
+    Returns ``({window: (median, spread)}, null_z)``. The stats turn a raw Cohen's d
+    into "how unusual is this for *this* signal at *this* scale", which is what makes
+    scales comparable; ``null_z`` is the ``percentile``-th surrogate peak on that same
+    calibrated axis, i.e. the height to beat.
+
+    **Calibrating against the profile's own spread instead does the opposite of what
+    is wanted, and it was tried first.** A surrogate is featureless, so its profile has
+    a small spread and its largest wobble scores a big self-referential z; real data is
+    full of structure, so its spread is large and a genuine boundary scores a modest
+    one. Measured on LO_07 ProbeA the self-normalised threshold came out at 5.0-5.3
+    while the real peaks sat at 4.3-4.5 - it rejected every true boundary and still
+    passed 2 of 10 pure-noise traces. Against the surrogate distribution the same
+    shanks give real peaks of 4.4-19.2 against surrogate maxima of 3.4-4.7.
+    """
+    depths = np.asarray(depths_um, dtype=float).ravel()
+    mat = np.asarray(values, dtype=float)
+    if mat.ndim == 1:
+        mat = mat[:, None]
+    if depths.size < 8 or n_surrogates < 1 or not windows:
+        return {}, float("nan")
+
+    rng = np.random.default_rng(seed)
+    per_surrogate: list[dict] = []
+    for _ in range(int(n_surrogates)):
+        surrogate = _phase_randomised(mat, rng)
+        one: dict[float, tuple] = {}
+        for w in windows:
+            g, d = step_profile(depths, surrogate, window_um=float(w),
+                                step_um=float(step_um), reject_bad=False)
+            if g.size:
+                one[float(w)] = (g, d)
+        if one:
+            per_surrogate.append(one)
+    if not per_surrogate:
+        return {}, float("nan")
+
+    stats: dict[float, tuple[float, float]] = {}
+    for w in {k for one in per_surrogate for k in one}:
+        pool = np.concatenate([one[w][1] for one in per_surrogate if w in one])
+        pool = pool[np.isfinite(pool)]
+        if pool.size == 0:
+            continue
+        centre = float(np.median(pool))
+        spread = 1.4826 * float(np.median(np.abs(pool - centre)))
+        stats[w] = (centre, spread if spread > 0 else 1.0)
+
+    # The same surrogates, scored on the axis they just defined: what the null peaks at.
+    peaks: list[float] = []
+    for one in per_surrogate:
+        best = -np.inf
+        for w, (_g, d) in one.items():
+            if w not in stats:
+                continue
+            centre, spread = stats[w]
+            z = (d - centre) / spread
+            if np.isfinite(z).any():
+                best = max(best, float(np.nanmax(z)))
+        if np.isfinite(best):
+            peaks.append(best)
+    null_z = float(np.percentile(peaks, float(percentile))) if peaks else float("nan")
+    return stats, null_z
+
+
+@dataclass(frozen=True)
+class MultiscaleProfile:
+    """Step evidence at every depth, and the scale that supplied it.
+
+    ``score`` is a **robust z per scale, maximised over scales** - not an average.
+    Averaging is what a single wide window already does, and it is why a boundary that
+    is sharp at 80 µm and invisible at 220 µm came out mediocre at both: the scales
+    disagree because the structures differ in size, so the right combination keeps the
+    best evidence rather than diluting it. ``scale_um`` records which window won at
+    each depth, which is itself informative - a boundary found only at 220 µm is a
+    gradual transition, and should not be pinned as precisely as one found at 60.
+    """
+
+    grid_um: np.ndarray
+    score: np.ndarray
+    scale_um: np.ndarray
+    per_window: dict = None  # {window_um: z on grid_um}
+    #: What this signal's own roughness reaches, from :func:`null_threshold`.
+    #: NaN when no null was computed.
+    null_z: float = float("nan")
+
+    @property
+    def windows_um(self) -> tuple[float, ...]:
+        return tuple(sorted(self.per_window or {}))
+
+
+def multiscale_step_profile(
+    depths_um, values, *, windows=None, step_um: float = 5.0, reject_bad: bool = True,
+    n_surrogates: int = N_SURROGATES, seed: int = 0,
+) -> MultiscaleProfile:
+    """:func:`step_profile` at several window widths, combined by taking the best.
+
+    ``windows`` defaults to :func:`adaptive_windows` for the extent of ``depths_um``,
+    so a 705 µm bank and a 5745 µm column each get scales they can actually support
+    instead of one number chosen for the longer of the two.
+
+    ``n_surrogates`` calibrates :attr:`MultiscaleProfile.null_z` so the caller can tell
+    a real step from this signal's own roughness; pass 0 to skip it when the threshold
+    is being supplied some other way.
+    """
+    depths = np.asarray(depths_um, dtype=float).ravel()
+    if depths.size < 4:
+        return MultiscaleProfile(np.empty(0), np.empty(0), np.empty(0), {})
+    extent = float(depths.max() - depths.min())
+    chosen = tuple(adaptive_windows(extent) if windows is None else windows)
+    stats, null = (
+        calibrate_scales(depths, values, chosen, n_surrogates=n_surrogates, seed=seed)
+        if n_surrogates else ({}, float("nan"))
+    )
+
+    grid = np.arange(depths.min(), depths.max() + step_um, float(step_um))
+    per_window: dict[float, np.ndarray] = {}
+    for w in chosen:
+        g, s = step_profile(depths, values, window_um=float(w), step_um=float(step_um),
+                            reject_bad=reject_bad)
+        if g.size == 0:
+            continue
+        if float(w) in stats:
+            centre, spread = stats[float(w)]
+            z = (s - centre) / spread
+        else:
+            # No null available: fall back to the profile's own spread. Comparable
+            # across scales, but see calibrate_scales for why it is a poor threshold.
+            z = _robust_z(s)
+        # Outside a window's usable span it has no opinion, which is not the same as
+        # scoring zero - NaN keeps it out of the maximum instead of holding it down.
+        per_window[float(w)] = np.interp(grid, g, z, left=np.nan, right=np.nan)
+    if not per_window:
+        return MultiscaleProfile(np.empty(0), np.empty(0), np.empty(0), {})
+
+    order = sorted(per_window)
+    stack = np.vstack([per_window[w] for w in order])
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="All-NaN")
+        score = np.nanmax(stack, axis=0)
+        winner = np.nanargmax(np.where(np.isfinite(stack), stack, -np.inf), axis=0)
+    valid = np.isfinite(score)
+    scale = np.where(valid, np.asarray(order, dtype=float)[winner], np.nan)
+    return MultiscaleProfile(grid_um=grid, score=np.where(valid, score, np.nan),
+                             scale_um=scale, per_window=per_window, null_z=null)
+
+
+@dataclass(frozen=True)
+class DetectedBoundary:
+    """A depth the features step across, with how strongly and at what scale.
+
+    ``z_score`` is robust standard deviations above what this profile does at a
+    typical depth, and ``prominence`` how far the peak stands above its own
+    neighbourhood. Neither is a probability and neither is presented as one - they are
+    weights, for ranking boundaries and for letting a trajectory fit trust a sharp
+    step more than a vague one.
+    """
+
+    depth_um: float
+    z_score: float
+    prominence: float
+    scale_um: float
+
+    @property
+    def weight(self) -> float:
+        """Non-negative weight for a fit: the smaller of strength and prominence.
+
+        The minimum of the two, because either alone is fooled: a broad plateau scores
+        a high z everywhere across it, and a spike on an otherwise noisy profile is
+        prominent without being strong.
+        """
+        return max(0.0, min(float(self.z_score), float(self.prominence)))
+
+
+def detect_boundaries(
+    profile: MultiscaleProfile,
+    *,
+    min_z: float | None = None,
+    min_separation_um: float = MIN_SEPARATION_UM,
+    max_n: int | None = None,
+) -> list[DetectedBoundary]:
+    """Peaks of a multi-scale profile, strongest first then thinned by separation.
+
+    ``min_z`` defaults to the profile's own :attr:`~MultiscaleProfile.null_z` - what
+    this signal reaches with its structure destroyed. **Returning nothing is a real
+    answer**: a peak-picker always finds a maximum, so without a calibrated floor this
+    reported a confident boundary in pure noise.
+
+    Thinning is by strength rather than by depth order so that when two peaks are
+    within ``min_separation_um`` - the same transition seen at two scales - the better
+    evidenced one survives. Returned sorted by depth, which is the order a landmark
+    list has to be in.
+    """
+    if min_z is None:
+        min_z = (float(profile.null_z) if np.isfinite(profile.null_z)
+                 else float(MIN_BOUNDARY_Z))
+    grid = np.asarray(profile.grid_um, dtype=float)
+    score = np.asarray(profile.score, dtype=float)
+    if grid.size < 3:
+        return []
+    peaks: list[int] = []
+    for i in range(1, grid.size - 1):
+        s = score[i]
+        if not np.isfinite(s) or s < min_z:
+            continue
+        left, right = score[i - 1], score[i + 1]
+        if (np.isnan(left) or s >= left) and (np.isnan(right) or s > right):
+            peaks.append(i)
+    if not peaks:
+        return []
+
+    span = max(float(min_separation_um), 1.0)
+    kept: list[int] = []
+    for i in sorted(peaks, key=lambda j: -score[j]):
+        if all(abs(grid[i] - grid[j]) >= span for j in kept):
+            kept.append(i)
+        if max_n is not None and len(kept) >= max_n:
+            break
+
+    out: list[DetectedBoundary] = []
+    for i in sorted(kept):
+        near = (grid >= grid[i] - span) & (grid <= grid[i] + span)
+        neighbourhood = score[near]
+        floor = float(np.nanmin(neighbourhood)) if np.isfinite(neighbourhood).any() else 0.0
+        out.append(DetectedBoundary(
+            depth_um=float(grid[i]),
+            z_score=float(score[i]),
+            prominence=float(score[i] - floor),
+            scale_um=float(profile.scale_um[i]),
+        ))
+    return out
 
 
 def candidate_boundaries(bands, *, min_band_um: float = MIN_BAND_UM

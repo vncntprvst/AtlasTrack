@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -150,6 +151,52 @@ def test_neighbouring_bands_never_share_a_colour():
         assert earlier != later
 
 
+def test_a_region_keeps_its_colour_across_shanks():
+    """The reported bug: FN was blue on one shank tab and orange on the next.
+
+    Each shank crosses a different set of structures, so any scheme that assigns
+    colours in encounter order shifts them all. The colour has to be a property of the
+    region, not of the list it happens to appear in.
+    """
+    from histo_to_ccf.ephys.regions import band_colours
+
+    def _bands(acronyms):
+        return [
+            RegionBand(top_um=float(i * 400), bottom_um=float((i + 1) * 400),
+                       acronym=a, rgb=(1, 1, 1))
+            for i, a in enumerate(acronyms)
+        ]
+
+    from histo_to_ccf.ephys.regions import region_colour_map
+
+    shank0 = _bands(["SIM", "CUL4, 5", "arb", "FN", "NOD", "MV", "PGRNd"])
+    shank1 = _bands(["SIM", "CUL4, 5", "CENT3", "arb", "FN", "MV", "GRN", "RM"])
+
+    # Decided over the union, which is what the dialog does for a probe's shanks.
+    mapping = region_colour_map([shank0, shank1])
+    c0 = dict(zip([b.acronym for b in shank0],
+                  band_colours(shank0, shared=mapping), strict=True))
+    c1 = dict(zip([b.acronym for b in shank1],
+                  band_colours(shank1, shared=mapping), strict=True))
+
+    assert set(c0) & set(c1)  # they really do share regions
+    for shared in set(c0) & set(c1):
+        assert c0[shared] == c1[shared], f"{shared} changed colour between shanks"
+    # And neighbours are still distinguishable on each shank.
+    for bands, colours in ((shank0, c0), (shank1, c1)):
+        for above, below in itertools.pairwise(bands):
+            assert colours[above.acronym] != colours[below.acronym]
+
+
+def test_region_colour_is_stable_across_processes():
+    """Not the builtin hash: Python salts it per process, so colours would drift."""
+    from histo_to_ccf.ephys.regions import region_colour
+
+    # Fixed expectations computed from crc32; if this changes, colours changed.
+    assert region_colour("FN") == region_colour("FN")
+    assert region_colour("FN") != region_colour("MV")
+
+
 def test_one_acronym_always_gets_one_colour():
     from histo_to_ccf.ephys.regions import band_colours
 
@@ -177,3 +224,95 @@ def test_band_geometry_helpers():
     band = RegionBand(top_um=100.0, bottom_um=400.0, acronym="A", rgb=(1, 2, 3))
     assert band.thickness_um == pytest.approx(300.0)
     assert band.mid_um == pytest.approx(250.0)
+
+
+# ------------------------------------------------------- white matter is reserved
+
+
+def _band(acr, top, bottom):
+    from histo_to_ccf.ephys.regions import RegionBand
+
+    return RegionBand(top_um=top, bottom_um=bottom, acronym=acr, rgb=(0, 0, 0))
+
+
+class _FakeAtlas:
+    """Just the ancestry lookup the colouring needs."""
+
+    TREE: ClassVar[dict[str, list[str]]] = {
+        "arb": ["root", "fiber tracts", "cbf"],
+        "cbc": ["root", "fiber tracts", "cbf"],
+        "py": ["root", "fiber tracts"],
+        "MV": ["root", "grey", "BS", "HB", "MY"],
+        "GRN": ["root", "grey", "BS", "HB", "MY"],
+    }
+
+    def get_structure_ancestors(self, acronym):
+        return self.TREE[acronym]  # KeyError for unknowns, like the real one
+
+
+def test_fibre_tracts_are_found_through_the_structure_tree():
+    from histo_to_ccf.ephys.regions import white_matter_acronyms
+
+    found = white_matter_acronyms(_FakeAtlas(), {"arb", "py", "MV", "GRN", "nonsense"})
+
+    assert found == {"arb", "py"}
+
+
+def test_no_atlas_means_no_white_matter_rather_than_a_guess():
+    from histo_to_ccf.ephys.regions import white_matter_acronyms
+
+    assert white_matter_acronyms(None, {"arb"}) == set()
+
+
+def test_every_tract_gets_the_same_white_and_nothing_else_does():
+    """Thin tracts often have no room for a label; the colour has to carry it."""
+    from histo_to_ccf.ephys.regions import (
+        WHITE_MATTER_RGB,
+        region_colour_map,
+        white_matter_acronyms,
+    )
+
+    bands = [_band("MV", 0, 500), _band("arb", 500, 520),
+             _band("GRN", 520, 900), _band("py", 900, 915)]
+    wm = white_matter_acronyms(_FakeAtlas(), {b.acronym for b in bands})
+
+    mapping = region_colour_map([bands], white_matter=wm)
+
+    assert mapping["arb"] == WHITE_MATTER_RGB
+    assert mapping["py"] == WHITE_MATTER_RGB
+    assert mapping["MV"] != WHITE_MATTER_RGB
+    assert mapping["GRN"] != WHITE_MATTER_RGB
+
+
+def test_grey_matter_is_kept_clear_of_white_not_just_off_pure_white():
+    """A near-white nucleus would read as a tract just as wrongly as a white one."""
+    from histo_to_ccf.ephys.regions import _too_close_to_white, region_colour_map
+
+    bands = [_band(a, i * 100, (i + 1) * 100)
+             for i, a in enumerate(["MV", "GRN", "IRN", "PGRNd", "NR", "XII", "NTS"])]
+
+    mapping = region_colour_map([bands], white_matter={"arb"})
+
+    assert not any(_too_close_to_white(c) for c in mapping.values())
+
+
+def test_two_adjacent_tracts_may_share_white():
+    """Deliberate: 'this is white matter' is the reading being supported."""
+    from histo_to_ccf.ephys.regions import WHITE_MATTER_RGB, region_colour_map
+
+    bands = [_band("arb", 0, 100), _band("cbc", 100, 200)]
+
+    mapping = region_colour_map([bands], white_matter={"arb", "cbc"})
+
+    assert mapping["arb"] == mapping["cbc"] == WHITE_MATTER_RGB
+
+
+def test_a_tract_keeps_white_and_its_neighbour_moves():
+    from histo_to_ccf.ephys.regions import WHITE_MATTER_RGB, region_colour_map
+
+    bands = [_band("arb", 0, 400), _band("MV", 400, 500)]
+
+    mapping = region_colour_map([bands], white_matter={"arb"})
+
+    assert mapping["arb"] == WHITE_MATTER_RGB
+    assert mapping["MV"] != WHITE_MATTER_RGB

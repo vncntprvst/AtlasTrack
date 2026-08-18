@@ -62,18 +62,52 @@ def power_image(psd: np.ndarray, *, log: bool = True, per_freq: bool = False) ->
     (min-max down the depth axis), which removes the strong 1/f gradient across
     frequencies and makes depth-dependent power changes - the features that line
     up with region boundaries - far more visible.
+
+    Rows may be **NaN**: a depth-binned map covering several recordings has bins no
+    recording reached. Those come back as 0 and are excluded from the min/max, so an
+    uncovered stretch neither takes part in the scaling nor turns into whatever
+    ``astype(uint8)`` makes of a NaN. Use :func:`covered_rows` to draw them as empty
+    rather than as zero power.
     """
     a = np.asarray(psd, dtype=float)
+    if a.size == 0:
+        return np.zeros(a.shape, dtype=np.uint8)
     if log:
-        a = np.log10(a + 1e-12)
-    if per_freq:
-        lo = np.nanmin(a, axis=0, keepdims=True)
-        hi = np.nanmax(a, axis=0, keepdims=True)
-    else:
-        lo = float(np.nanmin(a))
-        hi = float(np.nanmax(a))
+        with np.errstate(invalid="ignore"):
+            a = np.log10(a + 1e-12)
+    good = np.isfinite(a)
+    if not good.any():
+        return np.zeros(a.shape, dtype=np.uint8)
+    filled = np.where(good, a, np.nan)
+    with np.errstate(invalid="ignore", all="ignore"):
+        if per_freq:
+            lo = np.nanmin(filled, axis=0, keepdims=True)
+            hi = np.nanmax(filled, axis=0, keepdims=True)
+            # A frequency column with no finite value at all: nanmin/nanmax are NaN,
+            # which would poison the whole column. Neutralise it instead.
+            lo = np.where(np.isfinite(lo), lo, 0.0)
+            hi = np.where(np.isfinite(hi), hi, 1.0)
+        else:
+            lo = float(np.nanmin(filled))
+            hi = float(np.nanmax(filled))
     rng = np.where(np.asarray(hi) <= np.asarray(lo), 1.0, np.asarray(hi) - np.asarray(lo))
-    return (np.clip((a - lo) / rng, 0.0, 1.0) * 255.0).astype(np.uint8)
+    scaled = np.zeros(a.shape, dtype=float)
+    np.divide(a - lo, rng, out=scaled, where=good)
+    return (np.clip(np.where(good, scaled, 0.0), 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+def covered_rows(psd: np.ndarray) -> np.ndarray:
+    """Which rows of a depth x frequency map hold data at all: ``(n_rows,)`` bool.
+
+    A binned multi-recording map has rows nothing reached. Zero power and no
+    measurement look identical once the map is an image, so the display needs to be
+    told them apart - a dark band that means "no recording covers this depth" must
+    not be readable as "the LFP is quiet here".
+    """
+    a = np.asarray(psd, dtype=float)
+    if a.ndim != 2 or a.size == 0:
+        return np.zeros(0 if a.ndim != 2 else a.shape[0], dtype=bool)
+    return np.isfinite(a).any(axis=1)
 
 
 # The bands IBL's alignment GUI plots on the probe view. Splitting the spectrum this

@@ -166,6 +166,32 @@ class Shank(BaseModel):
     ephys: EphysAlignment | None = None
 
 
+class TrajectoryAdjustment(BaseModel):
+    """A rigid ephys-derived correction to a probe placement, and its evidence.
+
+    Stored rather than applied to ``tip_ccf_um`` / ``entry_ccf_um``: the histology
+    placement is the measurement, this is a hypothesis about it, and overwriting the
+    first with the second loses the ability to say how far apart they were. Consumers
+    ask for the adjusted track explicitly.
+
+    ``explained`` and ``baseline_explained`` are the fraction of detected-boundary
+    weight accounted for, before and after; ``identifiable`` records which parameters
+    survived the 1-D scan and leave-one-out checks, because a fitted number whose
+    identifiability was never established is the failure this whole path already had
+    once.
+    """
+
+    offset_um: float = 0.0
+    roll_deg: float = 0.0
+    tilt_deg: float = 0.0
+    explained: float | None = None
+    baseline_explained: float | None = None
+    identifiable: dict[str, bool] = {}
+    notes: str | None = None
+    source: str = "ephys-fit"
+    created_at: str | None = None
+
+
 class ProbeSpec(BaseModel):
     """One probe instance - references a type and carries per-shank annotations."""
 
@@ -195,6 +221,10 @@ class ProbeSpec(BaseModel):
     # alignments disagreeing linearly with shank index are what constrain it.
     track_offset_ccf_um: tuple[float, float, float] | None = None
     array_roll_deg: float | None = None
+
+    # The rigid adjustment proposed by the ephys fit, if one was accepted. Additive:
+    # a project without it behaves exactly as before.
+    trajectory_adjustment: TrajectoryAdjustment | None = None
 
 
 class PlaneParams(BaseModel):

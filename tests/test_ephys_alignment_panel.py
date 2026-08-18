@@ -51,7 +51,9 @@ def _handle_indices(panel) -> list[int]:
 
 
 def _handles_for(panel, index: int) -> list:
-    return [line for line in panel._lines if line.landmark_index == index]
+    """Draggable handles only - the anatomy bar's black backing line is not one."""
+    return [line for line in panel._lines
+            if line.landmark_index == index and line.landmark_slot >= 0]
 
 
 def _panel(qtbot, *, track: bool = True) -> EphysAlignmentPanel:
@@ -199,11 +201,12 @@ def test_a_handle_is_drawn_for_each_landmark(qtbot) -> None:
     assert [line.value() for line in _handles_for(panel, 0)] == pytest.approx(
         [1500.0, 1500.0]
     )
-    assert all(line.movable for line in panel._lines)
+    assert all(line.movable for line in _handles_for(panel, 0))
+    assert all(line.movable for line in _handles_for(panel, 1))
 
 
-def test_dragging_one_handle_leaves_the_other_alone(qtbot) -> None:
-    """Regression guard for the bug that made landmarks useless."""
+def test_dragging_the_feature_bar_carries_the_anatomy_bar(qtbot) -> None:
+    """The order the work happens in: find the feature, the boundary follows."""
     panel = _panel(qtbot)
     panel.add_landmark_at(2000.0)
     ephys_bar = next(h for h in _handles_for(panel, 0) if h.landmark_slot == 0)
@@ -212,8 +215,35 @@ def test_dragging_one_handle_leaves_the_other_alone(qtbot) -> None:
     ephys_bar.setValue(1600.0)
     panel._on_line_dragged(ephys_bar)
 
-    assert anatomy_bar.value() == pytest.approx(2000.0)
-    assert panel.pending_pairs() == [(1600.0, 2000.0)]
+    assert anatomy_bar.value() == pytest.approx(1600.0)
+    assert panel.pending_pairs() == [(1600.0, 1600.0)]
+
+
+def test_dragging_the_anatomy_bar_does_not_move_the_feature_bar(qtbot) -> None:
+    """The reverse must not hold - that drag *is* the disagreement being stated."""
+    panel = _panel(qtbot)
+    panel.add_landmark_at(2000.0)
+    ephys_bar = next(h for h in _handles_for(panel, 0) if h.landmark_slot == 0)
+    anatomy_bar = next(h for h in _handles_for(panel, 0) if h.landmark_slot == 1)
+
+    anatomy_bar.setValue(2400.0)
+    panel._on_line_dragged(anatomy_bar)
+
+    assert ephys_bar.value() == pytest.approx(2000.0)
+    assert panel.pending_pairs() == [(2000.0, 2400.0)]
+
+
+def test_the_anatomy_bar_has_a_backing_line_for_legibility(qtbot) -> None:
+    """White alone vanishes on the pale bands, black alone on the dark ones."""
+    panel = _panel(qtbot)
+    panel.add_landmark_at(2000.0)
+
+    anatomy_bar = next(h for h in _handles_for(panel, 0) if h.landmark_slot == 1)
+    assert anatomy_bar.halo is not None
+
+    anatomy_bar.setValue(2400.0)
+    panel._on_line_dragging(anatomy_bar)
+    assert anatomy_bar.halo.value() == pytest.approx(2400.0)
 
 
 def test_removing_and_clearing(qtbot) -> None:

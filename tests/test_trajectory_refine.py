@@ -1,6 +1,8 @@
 """Array roll and along-track offset, plus the boundary-contrast measure they score with."""
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 import pytest
 
@@ -9,11 +11,15 @@ from histo_to_ccf.probes.trajectory_refine import (
     array_axes,
     lateral_sign,
     pitch_deg,
+    refine_trajectory,
     roll_deg,
     rolled_array,
     row_direction,
+    score_trajectory,
     shank_row_positions,
     shift_along_track,
+    tilted_array,
+    transformed_array,
 )
 
 PITCH = 250.0
@@ -192,6 +198,135 @@ def test_shift_leaves_the_roll_alone():
     new_tips, new_entries = shift_along_track(tips, entries, -250.0)
 
     assert roll_deg(new_tips, new_entries) == pytest.approx(33.0, abs=1e-6)
+
+
+# -- rigid probe adjustment ------------------------------------------------
+
+
+def test_tilt_changes_pitch_and_pivots_at_the_entry():
+    """A manipulator angle change swings the tips; it cannot drag the entry points."""
+    tips, entries = _array(0.0, pitch_degrees=0.0)
+
+    new_tips, new_entries = tilted_array(tips, entries, 8.0)
+
+    assert pitch_deg(new_tips, new_entries) == pytest.approx(8.0, abs=1e-6)
+    assert np.allclose(new_entries.mean(0), entries.mean(0), atol=1e-6)
+    assert not np.allclose(new_tips, tips)
+
+
+def test_transformed_array_composes_all_three():
+    # Start vertical: pitch is the unsigned angle from vertical, so it only adds
+    # arithmetically when the tilt is applied to an already-vertical probe. From a
+    # tipped start, tilting about the row axis rotates in a different plane and the
+    # angles compose trigonometrically, not by addition.
+    tips, entries = _array(10.0, pitch_degrees=0.0)
+
+    out_t, out_e = transformed_array(tips, entries, offset_um=200.0, roll_deg=6.0,
+                                     tilt_deg=4.0)
+
+    assert pitch_deg(out_t, out_e) == pytest.approx(4.0, abs=0.01)
+    assert roll_deg(out_t, out_e) == pytest.approx(16.0, abs=0.5)
+    # Track lengths are untouched: this moves the probe, it does not stretch it.
+    assert np.allclose(np.linalg.norm(out_t - out_e, axis=1),
+                       np.linalg.norm(tips - entries, axis=1), atol=1e-6)
+
+
+def test_a_zero_transform_is_the_identity():
+    tips, entries = _array(25.0, pitch_degrees=12.0)
+
+    out_t, out_e = transformed_array(tips, entries)
+
+    assert np.allclose(out_t, tips)
+    assert np.allclose(out_e, entries)
+
+
+class _SlabAtlas:
+    """Fake anatomy: three thick DV slabs, so boundaries sit at known depths."""
+
+    structures: ClassVar[dict] = {
+        "A": {"rgb_triplet": [1, 1, 1]},
+        "B": {"rgb_triplet": [2, 2, 2]},
+        "C": {"rgb_triplet": [3, 3, 3]},
+    }
+
+    def structure_from_coords(self, coords, *, microns=True, as_acronym=True):
+        _ap, dv, _ml = coords
+        if dv < 1000 or dv > 5000:
+            return "Outside atlas"
+        if dv < 2500:
+            return "A"
+        return "B" if dv < 3800 else "C"
+
+
+def _profile_for(tips, entries, shank: int = 0, *, offset_um: float = 0.0):
+    """A step profile peaking where this placement's atlas boundaries actually fall."""
+    from histo_to_ccf.ephys.autolandmarks import candidate_boundaries
+    from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+
+    tip, entry = np.asarray(tips)[shank], np.asarray(entries)[shank]
+    track = float(np.linalg.norm(tip - entry))
+    depths = np.arange(-200.0, track + 220.0, 20.0)
+    bands = region_bands(regions_along_track(_SlabAtlas(), tip, entry, depths), depths)
+    grid = np.arange(0.0, track, 10.0)
+    score = np.zeros_like(grid)
+    for below, _label in candidate_boundaries(bands):
+        from_tip = track - below + offset_um
+        score += np.exp(-0.5 * ((grid - from_tip) / 60.0) ** 2)
+    return {shank: (grid, score)}
+
+
+def test_scoring_peaks_at_the_placement_the_features_came_from():
+    tips, entries = _array(0.0, depth=3500.0)
+    profiles = _profile_for(tips, entries)
+
+    truth, n = score_trajectory(tips, entries, profiles, _SlabAtlas())
+    moved_t, moved_e = shift_along_track(tips, entries, 400.0)
+    wrong, _n = score_trajectory(moved_t, moved_e, profiles, _SlabAtlas())
+
+    assert n > 0
+    assert truth > wrong
+
+
+def test_refine_recovers_a_known_offset():
+    """Synthesise features displaced by a known amount, and see if the search finds it.
+
+    ``_profile_for(offset_um=200)`` puts every feature 200 µm further from the tip
+    than this placement predicts. The fit returns the offset to pass to
+    ``shift_along_track`` that best explains them - so a recovered +200 means the
+    search found exactly the displacement that was put in.
+    """
+    tips, entries = _array(0.0, depth=3500.0)
+    profiles = _profile_for(tips, entries, offset_um=200.0)
+
+    fit = refine_trajectory(tips, entries, profiles, _SlabAtlas(),
+                            offsets_um=np.arange(-400.0, 401.0, 50.0),
+                            rolls_deg=[0.0], tilts_deg=[0.0])
+
+    assert fit.offset_um == pytest.approx(200.0, abs=60.0)
+    assert fit.n_boundaries > 0
+    assert fit.mean_score > 0.5
+
+
+def test_refine_finds_nothing_to_correct_when_there_is_nothing_wrong():
+    """The control: features generated from the placement itself must fit at zero."""
+    tips, entries = _array(0.0, depth=3500.0)
+    profiles = _profile_for(tips, entries, offset_um=0.0)
+
+    fit = refine_trajectory(tips, entries, profiles, _SlabAtlas(),
+                            offsets_um=np.arange(-400.0, 401.0, 50.0),
+                            rolls_deg=[0.0], tilts_deg=[0.0])
+
+    assert fit.offset_um == pytest.approx(0.0, abs=60.0)
+
+
+def test_refine_returns_an_empty_fit_when_there_is_nothing_to_score():
+    tips, entries = _array(0.0)
+
+    fit = refine_trajectory(tips, entries, {}, _SlabAtlas(),
+                            offsets_um=[0.0], rolls_deg=[0.0], tilts_deg=[0.0])
+
+    assert fit.n_boundaries == 0
+    assert fit.mean_score == 0.0
 
 
 # -- the contrast measure --------------------------------------------------

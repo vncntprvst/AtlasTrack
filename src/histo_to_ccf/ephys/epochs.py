@@ -76,16 +76,40 @@ def activity_score(traces: np.ndarray) -> float:
     return float(np.std(rms))
 
 
-def common_median_reference(traces: np.ndarray) -> np.ndarray:
+def common_median_reference(traces: np.ndarray, groups=None) -> np.ndarray:
     """Subtract the across-channel median from every sample.
 
     The standard first defence against shared transients: whatever appears on all
     channels at once (licking, movement, reference noise) is removed, and anything
-    local to a few channels survives. Applied per shank by the caller - referencing
-    across shanks that sit in different tissue would mix unrelated signals.
+    local to a few channels survives.
+
+    ``groups`` (one label per channel, usually the shank index) takes the median
+    **within** each group. Pass it whenever the recording covers more than one
+    shank. Two reasons, and the second is why this argument exists at all:
+
+    * Shanks 250 µm apart sit in different tissue, so a median across them mixes
+      unrelated signals into the reference.
+    * The reference has to *match* across the recordings being compared. Measured on
+      LO_07 ProbeA: referencing recording 004 across all four shanks and recording
+      005 over its one 5745 µm shank left the two disagreeing by -0.57 to +0.42
+      decades in the depth range where they overlap, which is far larger than the
+      band structure the alignment reads. Referencing each shank against itself
+      brought that to -0.13 to -0.03. A per-shank reference is the only one that
+      means the same thing in a 4-shank bank recording and a single-shank one.
     """
     traces = np.asarray(traces, dtype=float)
-    return traces - np.median(traces, axis=1, keepdims=True)
+    if groups is None:
+        return traces - np.median(traces, axis=1, keepdims=True)
+    labels = np.asarray(groups).ravel()
+    if labels.size != traces.shape[1]:
+        raise ValueError(
+            f"groups has {labels.size} entries for {traces.shape[1]} channels"
+        )
+    out = np.array(traces, dtype=float, copy=True)
+    for label in np.unique(labels):
+        m = labels == label
+        out[:, m] -= np.median(traces[:, m], axis=1, keepdims=True)
+    return out
 
 
 def candidate_windows(

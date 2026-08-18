@@ -417,12 +417,33 @@ class EphysAlignmentPanel(QWidget):
             return
         index = int(line.landmark_index)
         slot = int(getattr(line, "landmark_slot", 0))
+        if slot < 0:  # a halo, not a handle
+            return
+        halo = getattr(line, "halo", None)
+        if halo is not None:
+            halo.setValue(line.value())
         if not 0 <= index < len(self._pending):
             return
         self._pending[index][slot] = float(line.value())
+        if slot == 0:
+            # Dragging the *feature* bar carries the anatomy bar with it. That is the
+            # order the work actually happens in: you find the feature first, and the
+            # boundary you think it is starts out on top of it. The reverse must not
+            # hold - once you move the anatomy bar you are stating a disagreement, and
+            # something that snapped back would erase it.
+            self._pending[index][1] = float(line.value())
+            self._sync_partner(index, 1, float(line.value()))
         self._update_status()
         self._update_buttons()
         self.landmarksChanged.emit()
+
+    def _sync_partner(self, index: int, slot: int, value: float) -> None:
+        for handle in self._lines:
+            if handle.landmark_index == index and handle.landmark_slot == slot:
+                self._set_line_value(handle, value)
+                halo = getattr(handle, "halo", None)
+                if halo is not None:
+                    halo.setValue(value)
 
     def _set_line_value(self, line, feature_um: float) -> None:
         """Move a handle without it reporting the move back to us."""
@@ -475,12 +496,28 @@ class EphysAlignmentPanel(QWidget):
                 return
             specs = (
                 (self._view.ephys_plot, 0, "feature", (255, 80, 80)),
-                (self._view.region_plot, 1, "anatomy", (90, 220, 255)),
+                (self._view.region_plot, 1, "anatomy", (255, 255, 255)),
             )
             for i, pair in enumerate(self._pending):
                 for plot, slot, role, colour in specs:
                     if plot is None:
                         continue
+                    halo = None
+                    if slot == 1:
+                        # White alone is invisible on the pale palette entries and
+                        # black alone on the dark ones, so the anatomy bar is white
+                        # over a black backing - legible on every band colour. Pale
+                        # blue, which this replaces, disappeared on half of them.
+                        halo = pg.InfiniteLine(
+                            pos=pair[slot], angle=0, movable=False,
+                            pen=pg.mkPen((0, 0, 0), width=7),
+                        )
+                        halo.setZValue(29)
+                        plot.addItem(halo)
+                        halo.parent_plot = plot
+                        halo.landmark_index = i
+                        halo.landmark_slot = -1
+                        self._lines.append(halo)
                     line = pg.InfiniteLine(
                         pos=pair[slot], angle=0, movable=True,
                         pen=pg.mkPen(colour, width=3),
@@ -495,13 +532,21 @@ class EphysAlignmentPanel(QWidget):
                     line.landmark_index = i
                     line.landmark_slot = slot
                     line.parent_plot = plot
+                    line.halo = halo
                     line.setZValue(30)
                     line.setCursor(Qt.CursorShape.SizeVerCursor)
                     line.sigPositionChangeFinished.connect(self._on_line_dragged)
+                    line.sigDragged.connect(self._on_line_dragging)
                     plot.addItem(line)
                     self._lines.append(line)
         finally:
             self._suspend_line_signals = False
+
+    def _on_line_dragging(self, line) -> None:
+        """Keep a bar's black backing under it while it is being dragged."""
+        halo = getattr(line, "halo", None)
+        if halo is not None:
+            halo.setValue(line.value())
 
     def _on_end_marker_dragged(self, track_depth: float, feature_depth: float) -> None:
         """Dragging an end marker *is* a landmark pinned to that end of the track.
@@ -699,11 +744,12 @@ class EphysProbeAlignmentDialog(QDialog):
             self._tabs.addTab(panel, self._tab_label(shank))
             self.panels.append(panel)
             panel.landmarksChanged.connect(self._refresh_tab_labels)
+        self._share_region_colours()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Close
         )
-        load_lm_btn = QPushButton("Load landmarks from file…")
+        load_lm_btn = QPushButton("Load landmarks from file")
         load_lm_btn.setToolTip(
             "Load the landmarks out of a saved depth-features file and apply them to "
             "the matching shanks.\n\n"
@@ -714,7 +760,7 @@ class EphysProbeAlignmentDialog(QDialog):
         )
         load_lm_btn.clicked.connect(self.load_landmarks_from_file)
         buttons.addButton(load_lm_btn, QDialogButtonBox.ButtonRole.ActionRole)
-        save_btn = QPushButton("Save depth features…")
+        save_btn = QPushButton("Save depth features")
         save_btn.setToolTip(
             "Save every shank's depth-resolved features as one compressed .npz: the "
             "LFP power map, the firing-rate and amplitude profiles, the atlas regions "
@@ -747,6 +793,26 @@ class EphysProbeAlignmentDialog(QDialog):
             min(1100, int(available.width() * 0.6)),
             int(available.height() * 0.92),
         )
+
+    def _share_region_colours(self) -> None:
+        """One region -> one colour across every shank tab.
+
+        Decided over the union of all shanks, not per shank: each shank crosses a
+        different set of structures, so a per-shank assignment gave the same nucleus
+        a different colour on each tab and made them impossible to compare.
+        """
+        from histo_to_ccf.ephys.regions import region_colour_map, white_matter_acronyms
+
+        band_lists = [p.view().bands() for p in self.panels]
+        mapping = region_colour_map(
+            band_lists,
+            white_matter=white_matter_acronyms(
+                self._state.atlas,
+                {b.acronym for bands in band_lists for b in bands},
+            ),
+        )
+        for panel in self.panels:
+            panel.view().set_shared_colours(mapping)
 
     def _tab_label(self, shank) -> str:
         eph = shank.ephys
@@ -799,12 +865,17 @@ class EphysProbeAlignmentDialog(QDialog):
         freqs = np.asarray(lfp_result.get("freqs", []), dtype=float)
         if depths_from_tip.size == 0 or psd.ndim != 2:
             return
-        shank_ids = lfp_result.get("shank_ids")
-        mask = np.ones(depths_from_tip.shape, dtype=bool)
-        if shank_ids is not None:
-            uniq = sorted({str(s) for s in np.asarray(shank_ids).tolist()})
-            if len(uniq) > 1 and shank.index < len(uniq):
-                mask = np.array([str(s) == uniq[shank.index] for s in shank_ids])
+        from histo_to_ccf.ephys.recordings import channels_for_shank
+
+        mask = channels_for_shank(
+            shank.index, lfp_result.get("shank_ids"), lfp_result.get("x_um")
+        )
+        if mask is None:
+            # Nothing identifies the shanks at all. Attribute the whole recording to
+            # shank 0 rather than copying it onto every tab, which is what made four
+            # tabs show one measurement.
+            mask = np.ones(depths_from_tip.shape, dtype=bool) if shank.index == 0 \
+                else np.zeros(depths_from_tip.shape, dtype=bool)
         if not mask.any():
             return
         # The recording's y is measured from the lowest electrode, but the histology
@@ -940,6 +1011,30 @@ class EphysProbeAlignmentDialog(QDialog):
         box.show()
         self._save_box = box
 
+    def _store_channel_ccf(self, shank) -> None:
+        """Recompute this shank's per-channel CCF through the new alignment.
+
+        Without this, Apply stored the landmarks and **nothing visibly changed**: the
+        napari 3-D view reads ``ephys.channel_ccf_um``, which nobody was updating, so
+        an alignment looked like it had done nothing. The CSV exports already went
+        through the alignment, which made the discrepancy worse - the file moved and
+        the picture did not.
+        """
+        from histo_to_ccf.probes.catalog import get_layout
+        from histo_to_ccf.probes.channels import shank_channel_coords
+
+        try:
+            layout = get_layout(self._probe.type.name)
+            coords = shank_channel_coords(shank, layout)
+        except Exception:
+            return
+        if coords is None:
+            return
+        shank.ephys.channel_depths_um = [
+            float(d) for d in layout.site_depths_from_tip_um()
+        ]
+        shank.ephys.channel_ccf_um = [tuple(float(v) for v in row) for row in coords]
+
     def apply(self) -> None:
         """Store every shank's landmarks, leaving untouched shanks as they were."""
         from datetime import datetime
@@ -971,6 +1066,7 @@ class EphysProbeAlignmentDialog(QDialog):
             shank.ephys.extremes_mode = panel.extremes_mode()
             shank.ephys.insertion_depth_um = insertion
             shank.ephys.created_at = stamp
+            self._store_channel_ccf(shank)
         if self._on_applied is not None:
             self._on_applied()
         self.close()

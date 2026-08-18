@@ -24,9 +24,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Neuropixels 2.0: two site columns per shank, one row every 15 µm.
+# Neuropixels 2.0: two site columns per shank, one row every 15 µm, shanks 250 µm apart.
 NP2_COLUMNS = 2
 NP2_ROW_PITCH_UM = 15.0
+SHANK_PITCH_UM = 250.0
 
 
 def bank_offset_um(
@@ -93,6 +94,53 @@ def depth_from_tip_um(local_axial_um: np.ndarray, bank_offset: float) -> np.ndar
     function for why the difference bites.
     """
     return np.asarray(local_axial_um, dtype=float) + float(bank_offset)
+
+
+def channels_for_shank(shank_index: int, shank_ids=None, x_um=None,
+                       *, pitch_um: float = 250.0) -> np.ndarray | None:
+    """Boolean mask of the channels belonging to one shank, or ``None`` if unknowable.
+
+    **Returns an empty mask, not everything, when a shank was not recorded.** A
+    recording need not cover every shank - LO_07_005 is a single column on one shank of
+    a four-shank probe - and an earlier version fell back to "all channels" whenever it
+    could not find one distinct id per shank. Every shank tab then showed the *same*
+    LFP map: four identical panels look like four measurements, and they were one,
+    copied.
+
+    **x position wins over ``shank_ids``**, because the two answer different
+    questions. x is absolute on the probe, so the rounded group *is* the physical
+    shank. ``shank_ids`` (SpikeInterface's ``group``) numbers the groups *present in
+    this recording* from zero: LO_07_005 ProbeB records one shank at x = 750/782 -
+    physically shank 3 - and reports ``group = 0`` for every channel. Trusting the id
+    there puts probe B's only data on the shank-0 tab and leaves shank 3 empty, which
+    is worse than showing nothing because it looks like an answer.
+
+    ``shank_ids`` is used only when there is no geometry to go on.
+    """
+    if x_um is not None:
+        x = np.asarray(x_um, dtype=float).ravel()
+        if x.size:
+            return np.rint(x / float(pitch_um)).astype(int) == int(shank_index)
+    if shank_ids is not None:
+        ids = np.asarray([str(s).strip() for s in np.asarray(shank_ids).ravel()])
+        if ids.size and all(i.isdigit() for i in ids):
+            # Numeric ids we understand: an empty result means "this shank was not
+            # recorded", which is a real answer, not a reason to fall back.
+            return ids == str(int(shank_index))
+    return None
+
+
+def shank_index_from_x(x_um, *, pitch_um: float = 250.0) -> int | None:
+    """Which shank a block of channels sits on, from x alone; ``None`` if it spans more.
+
+    Columns within one shank are tens of µm apart while shanks are ``pitch_um`` apart,
+    so a single rounded group means a single shank.
+    """
+    x = np.asarray(x_um, dtype=float).ravel()
+    if x.size == 0:
+        return None
+    groups = np.unique(np.rint(x / float(pitch_um)).astype(int))
+    return int(groups[0]) if groups.size == 1 else None
 
 
 def depth_below_surface_um(

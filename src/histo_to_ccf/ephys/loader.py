@@ -72,6 +72,11 @@ class LfpExcerpts:
     # a questionable rejection can be reviewed.
     verdicts: list = None  # list[EpochVerdict]
     referenced: bool = False
+    #: How many shanks the common median reference was taken within. 1 for a
+    #: single-shank recording, 4 for a full bank. Recorded because two recordings are
+    #: only comparable if this matched, and a silent mismatch shifts whole decades of
+    #: power - see :func:`histo_to_ccf.ephys.epochs.common_median_reference`.
+    reference_groups: int = 0
 
     def __post_init__(self) -> None:
         if self.verdicts is None:
@@ -161,6 +166,22 @@ def _read_window(rec, start: int, stop: int) -> np.ndarray:
     return np.asarray(traces, dtype=float)
 
 
+def _reference_groups(x_um: np.ndarray) -> np.ndarray | None:
+    """Per-channel shank label for referencing, from x alone.
+
+    x, not the probe's ``group`` property: ``group`` numbers the shanks *present in
+    this recording* from zero, so it cannot say which physical shank a single-shank
+    recording is on - but for referencing all that matters is that channels on one
+    shank get one label, which the rounded x gives directly and unambiguously.
+    """
+    from histo_to_ccf.ephys.recordings import SHANK_PITCH_UM
+
+    x = np.asarray(x_um, dtype=float).ravel()
+    if x.size == 0:
+        return None
+    return np.rint(x / SHANK_PITCH_UM).astype(int)
+
+
 def load_lfp_excerpts(
     recording_dir: str | Path,
     stream_name: str | None = None,
@@ -198,6 +219,17 @@ def load_lfp_excerpts(
     fs = float(rec.get_sampling_frequency())
     n_total = rec.get_num_samples()
 
+    # Geometry first: the reference is taken per shank, so the shank of each channel
+    # has to be known before the first window is referenced.
+    try:
+        locs = np.asarray(rec.get_channel_locations(), dtype=float)
+        x_um, depth_um = locs[:, 0], locs[:, 1]
+    except Exception:
+        # No geometry: fall back to a channel-index axis once the width is known
+        # from the first window, and reference across everything as before.
+        x_um = depth_um = None
+    ref_groups = _reference_groups(x_um) if (reference and x_um is not None) else None
+
     screen_kwargs = (
         {} if artifact_tolerance is None else {"artifact_tolerance": artifact_tolerance}
     )
@@ -213,7 +245,10 @@ def load_lfp_excerpts(
         # once referenced - and in a licking task that is most of them. What must
         # disqualify a window is what survives the standard denoising.
         if reference:
-            traces = common_median_reference(traces)
+            groups = ref_groups if (
+                ref_groups is not None and ref_groups.size == traces.shape[1]
+            ) else None
+            traces = common_median_reference(traces, groups)
         verdict = screen_window(traces, t0, t1, **screen_kwargs)
         verdicts.append(verdict)
         if verdict.kept:
@@ -224,10 +259,7 @@ def load_lfp_excerpts(
         traces_by_epoch[(v.t_start_s, v.t_end_s)] for v in verdicts if v.kept
     ]
 
-    try:
-        locs = np.asarray(rec.get_channel_locations(), dtype=float)
-        x_um, depth_um = locs[:, 0], locs[:, 1]
-    except Exception:
+    if x_um is None:
         n_ch = windows[0].shape[1] if windows else 0
         x_um, depth_um = np.zeros(n_ch), np.arange(n_ch, dtype=float)
 
@@ -250,6 +282,9 @@ def load_lfp_excerpts(
         channel_shank_ids=shank_ids,
         verdicts=verdicts,
         referenced=bool(reference and windows),
+        reference_groups=(
+            int(np.unique(ref_groups).size) if ref_groups is not None else 0
+        ),
     )
 
 

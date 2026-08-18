@@ -23,6 +23,8 @@ import numpy as np
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from histo_to_ccf.ephys.regions import band_colours, white_matter_acronyms
+
 if TYPE_CHECKING:
     from histo_to_ccf.ephys.landmarks import Landmarks
     from histo_to_ccf.ephys.penetration import PenetrationProfile
@@ -76,6 +78,30 @@ class _EmptyProfile:
 _EMPTY_PROFILE = _EmptyProfile()
 
 
+def _with_coverage_alpha(psd, img):
+    """Make depths that no recording reached transparent instead of dark.
+
+    A stacked map spans the union of its recordings, so between banks - and above the
+    top of the shallowest one - there are rows with no measurement. Drawn as a grey
+    image those rows read as "the LFP is quiet here", which is a claim about tissue
+    nothing recorded. Transparent shows the panel background through them, so the gap
+    looks like the absence it is.
+
+    Fully covered maps (every single-recording one) get no alpha channel at all, so
+    the common path is unchanged.
+    """
+    from histo_to_ccf.ephys.features import covered_rows
+
+    covered = covered_rows(psd)
+    if covered.size != img.shape[0] or covered.all():
+        return img
+    rgba = np.zeros((*img.shape, 4), dtype=np.uint8)
+    for c in range(3):
+        rgba[..., c] = img
+    rgba[..., 3] = np.where(covered, 255, 0)[:, None]
+    return rgba
+
+
 def pyqtgraph_available() -> bool:
     """Is pyqtgraph importable? The panels degrade to a message if not."""
     try:
@@ -110,6 +136,10 @@ class EphysFeaturesView(QWidget):
         # that makes a misalignment visible.
         self._bands: list[RegionBand] = []
         self._band_colours: list[tuple[int, int, int]] = []
+        self._white_matter: set[str] = set()
+        # A probe-wide colour assignment, so a region looks the same on every shank
+        # tab. None means "decide from this shank alone", which is fine standalone.
+        self._shared_colours: dict | None = None
         self._region_names: dict[str, str] = {}
         self._landmarks: Landmarks | None = None
         self._extremes_mode = "uniform"
@@ -383,7 +413,7 @@ class EphysFeaturesView(QWidget):
             return
         depths, psd, freqs = self._lfp_data
         img = power_image(psd, per_freq=self._lfp_per_freq)
-        item = pg.ImageItem(img)
+        item = pg.ImageItem(_with_coverage_alpha(psd, img))
         top, bottom = float(depths[0]), float(depths[-1])
         width = float(freqs[-1]) if freqs.size else float(psd.shape[1])
         # Rows run shallow->deep and the view is y-inverted, so row 0 lands at the
@@ -436,16 +466,23 @@ class EphysFeaturesView(QWidget):
         # Both ends are draggable: each is a histology claim the ephys can contradict,
         # and the tip especially, since the dye marks the *physical tip* while the LFP
         # only reaches the lowest electrode above it.
-        marks = [(0.0, "brain surface (drag me)", (120, 220, 255), True, 0.55)]
+        # Each end is draggable on exactly one panel, decided by what is a *claim* and
+        # what is a fact:
+        #   surface - draggable on the ephys panel, because "the brain starts here" is
+        #             something the LFP can say and the histology can be wrong about;
+        #   tip     - draggable on the region column only. Its position on the ephys
+        #             panel is fixed geometry (the bottom channel plus the 175 µm
+        #             chisel tip), so dragging it there would let the user contradict
+        #             the probe's own dimensions.
+        marks = [(0.0, "brain surface (drag me)", (120, 220, 255), "ephys", 0.55)]
         if self._track_length_um > 0:
             marks.append(
-                (self._track_length_um, "shank tip (drag me)", (255, 170, 90),
-                 True, 0.75)
+                (self._track_length_um, "shank tip", (255, 170, 90), "regions", 0.75)
             )
         for plot in self._plots:
-            for depth, label, colour, draggable, where in marks:
+            for depth, label, colour, drag_on, where in marks:
                 on_ephys = plot is self._ephys_plot
-                movable = bool(draggable and on_ephys)
+                movable = drag_on == ("ephys" if on_ephys else "regions")
                 line = pg.InfiniteLine(
                     pos=float(np.asarray(self._warp(depth)).ravel()[0]), angle=0,
                     movable=movable,
@@ -506,11 +543,7 @@ class EphysFeaturesView(QWidget):
         they should - that disagreement is exactly what the alignment is for, so it
         must be visible rather than clipped away.
         """
-        from histo_to_ccf.ephys.regions import (
-            band_colours,
-            region_bands,
-            regions_along_track,
-        )
+        from histo_to_ccf.ephys.regions import region_bands, regions_along_track
 
         self._bands = []
         if atlas is None or tip_ccf_um is None or entry_ccf_um is None:
@@ -529,7 +562,12 @@ class EphysFeaturesView(QWidget):
         depths = np.arange(top, bottom + step_um, max(step_um, 1.0))
         hits = regions_along_track(atlas, tip_ccf_um, entry_ccf_um, depths)
         self._bands = region_bands(hits, depths)
-        self._band_colours = band_colours(self._bands)
+        self._white_matter = white_matter_acronyms(
+            atlas, {b.acronym for b in self._bands}
+        )
+        self._band_colours = band_colours(
+            self._bands, shared=self._shared_colours, white_matter=self._white_matter
+        )
         self._region_names = self._lookup_names(atlas, self._bands)
         # Set the depth range explicitly. Without this the panels kept whatever
         # autorange they had (nothing, with no spike data), so the region column
@@ -562,6 +600,15 @@ class EphysFeaturesView(QWidget):
         self._landmarks = landmarks
         self._extremes_mode = mode
         self._draw_regions()
+
+    def set_shared_colours(self, mapping: dict | None) -> None:
+        """Use a probe-wide region->colour map instead of deciding per shank."""
+        self._shared_colours = mapping
+        if self._bands:
+            self._band_colours = band_colours(
+                self._bands, shared=mapping, white_matter=self._white_matter
+            )
+            self._draw_regions()
 
     def bands(self) -> list[RegionBand]:
         """The region bands in track space, exposed for assertions and reporting."""

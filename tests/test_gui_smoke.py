@@ -1413,10 +1413,12 @@ def test_landmark_dialog_apply_stores_landmarks_without_touching_the_old_fields(
     assert eph.feature_um[1:-1] == pytest.approx([1700.0])
     assert eph.track_um[1:-1] == pytest.approx([2000.0])
     assert eph.created_at
-    # The tip-referenced fields use the opposite depth convention and must be left
-    # alone; writing depth-below-surface into them would silently flip the track.
+    # ``anchors`` is the old tip-referenced convention and must stay untouched;
+    # writing depth-below-surface numbers into it would silently flip the track.
     assert eph.anchors == []
-    assert eph.channel_ccf_um == []
+    # ``channel_ccf_um`` *is* refreshed, through the new alignment: it is what the
+    # napari 3-D view reads, and leaving it stale made Apply look like it did nothing.
+    assert len(eph.channel_ccf_um) == len(eph.channel_depths_um) > 0
 
 
 @pytest.mark.qt
