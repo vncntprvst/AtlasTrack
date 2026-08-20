@@ -115,16 +115,31 @@ def aligned_site_depths_from_tip(
         return depths, False
     feature = list(eph.feature_um or [])
     track = list(eph.track_um or [])
-    if len(feature) < 2 or len(feature) != len(track) or len(feature) == 2:
-        # Two entries are the bare track end points: an alignment with no user
-        # landmarks, which is the identity. Nothing to apply.
+    if len(feature) < 2 or len(feature) != len(track):
         return depths, False
-
     from histo_to_ccf.ephys.landmarks import Landmarks
 
     reference = eph.insertion_depth_um
     if reference is None or reference <= 0:
         reference = track_length_um
+
+    # Bail only when this really is the identity, which takes *both* halves. Testing
+    # `len == 2` instead was wrong in one direction and testing the landmark map alone
+    # is wrong in the other:
+    #
+    # * The end markers are draggable on purpose - "the brain starts here" is exactly
+    #   the claim the LFP can contradict - so two entries whose ends were moved are a
+    #   perfectly good affine map. Bailing on length exported geometry while reporting
+    #   the shank as unaligned.
+    # * An identity landmark map still moves the channels when the manipulator's
+    #   insertion depth differs from the histology track length, because the feature
+    #   axis is referenced to the former and the track to the latter.
+    map_is_identity = np.allclose(
+        np.asarray(feature, dtype=float), np.asarray(track, dtype=float), atol=1e-6
+    )
+    axes_match = abs(float(reference) - float(track_length_um)) <= 1e-6
+    if map_is_identity and axes_match:
+        return depths, False
     landmarks = Landmarks(np.asarray(feature, dtype=float), np.asarray(track, dtype=float))
     feature_below = reference - depths
     track_below = np.asarray(

@@ -84,9 +84,79 @@ def test_no_alignment_leaves_the_geometry_alone():
 
 
 def test_an_alignment_with_no_user_landmarks_is_the_identity():
-    """Two entries are the bare end points - nothing was pinned, so nothing moves."""
+    """Two entries whose ends were never moved: nothing was pinned, nothing moves."""
     shank = _project(_alignment()).probes[0].shanks[0]
     depths = np.array([0.0, 1000.0, 2000.0])
+
+    out, used = aligned_site_depths_from_tip(shank, depths, TRACK_UM)
+
+    assert used is False
+    assert np.allclose(out, depths)
+
+
+def test_moving_only_the_end_points_is_still_a_real_alignment():
+    """Identity is the test, not length.
+
+    The end markers are draggable on purpose - "the brain starts here" is exactly the
+    claim the LFP can contradict - so two entries whose ends were moved describe a
+    perfectly good affine map. Bailing on ``len == 2`` exported geometry while
+    reporting the shank as unaligned.
+    """
+    shifted = EphysAlignment(
+        feature_um=[300.0, TRACK_UM + 300.0], track_um=[0.0, TRACK_UM]
+    )
+    shank = _project(shifted).probes[0].shanks[0]
+    depths = np.array([0.0, 1000.0, 2000.0])
+
+    out, used = aligned_site_depths_from_tip(shank, depths, TRACK_UM)
+
+    assert used is True
+    # Both ends moved by the same 300 µm, so it is a pure shift.
+    assert np.allclose(out, depths + 300.0)
+
+
+def test_moving_one_end_rescales_rather_than_shifts():
+    """Surface moved, tip left alone: the map is anchored at the tip and stretches.
+
+    ``depths`` are µm **from the tip**, so index 0 is the tip end and index 1 the
+    surface end - which is the pair that moves here.
+    """
+    stretched = EphysAlignment(feature_um=[300.0, TRACK_UM], track_um=[0.0, TRACK_UM])
+    shank = _project(stretched).probes[0].shanks[0]
+    depths = np.array([0.0, TRACK_UM])
+
+    out, used = aligned_site_depths_from_tip(shank, depths, TRACK_UM)
+
+    assert used is True
+    assert out[0] == pytest.approx(0.0, abs=1.0)   # the tip end is pinned
+    assert out[1] > depths[1]                      # the surface end moves out by 300
+
+
+def test_a_dragged_surface_marker_matches_the_equivalent_end_move():
+    """The GUI turns a dragged end into a user landmark; both must agree."""
+    from histo_to_ccf.ephys.landmarks import Landmarks
+
+    dragged = Landmarks.identity(0.0, TRACK_UM).added(300.0, 0.0)
+    as_landmark = _project(EphysAlignment(
+        feature_um=list(dragged.feature_um), track_um=list(dragged.track_um)
+    )).probes[0].shanks[0]
+    as_ends = _project(EphysAlignment(
+        feature_um=[300.0, TRACK_UM + 300.0], track_um=[0.0, TRACK_UM]
+    )).probes[0].shanks[0]
+    depths = np.array([175.0, 1000.0, 3000.0])
+
+    a, a_used = aligned_site_depths_from_tip(as_landmark, depths, TRACK_UM)
+    b, b_used = aligned_site_depths_from_tip(as_ends, depths, TRACK_UM)
+
+    assert a_used and b_used
+    assert np.allclose(a, b)
+
+
+def test_a_length_mismatch_is_refused_rather_than_guessed():
+    shank = _project(
+        EphysAlignment(feature_um=[0.0, 100.0, TRACK_UM], track_um=[0.0, TRACK_UM])
+    ).probes[0].shanks[0]
+    depths = np.array([0.0, 1000.0])
 
     out, used = aligned_site_depths_from_tip(shank, depths, TRACK_UM)
 
