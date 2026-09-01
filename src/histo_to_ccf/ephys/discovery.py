@@ -238,21 +238,27 @@ def _require_si():
 
 
 def find_record_nodes(root: str | Path, *, max_depth: int = 6) -> list[Path]:
-    """Open Ephys record node directories at or under ``root``.
+    """Recording directories at or under ``root``, whatever system wrote them.
 
     ``root`` itself counts: pointing the file dialog straight at
     ``.../raw_ephys_data/Record Node 104`` is the obvious thing to do, and finding
     nothing there reads as "no data" rather than "wrong level".
 
-    A record node is recognised by the ``experimentN/recordingM`` children Open Ephys
-    writes inside it, with the folder name only as a shortcut. Structure over name
-    because the name is the part people change: a copied or renamed node is still a
-    record node, and its experiments are what the reader actually opens.
+    Formats are recognised by structure rather than by folder name, because the name
+    is the part people change: a copied or renamed node is still a record node. See
+    :func:`histo_to_ccf.ephys.formats.detect_format` for the per-format rules - an
+    Open Ephys record node holds ``experimentN/recordingM``, Intan leaves an
+    ``info.rhd``, SpikeGLX leaves ``.bin``/``.meta`` pairs.
 
     Bounded in depth because these trees also contain sorting outputs and zarr
     stores with thousands of entries, and an unbounded walk over the reference disk
     is slow enough to look like a hang.
+
+    The name is historical: it returns every recording directory, not only Open
+    Ephys record nodes.
     """
+    from histo_to_ccf.ephys.formats import detect_format
+
     root = Path(root)
     if not root.exists():
         return []
@@ -267,6 +273,11 @@ def find_record_nodes(root: str | Path, *, max_depth: int = 6) -> list[Path]:
         if d.name.lower().startswith("record node") or _holds_experiments(entries):
             found.append(d)
             continue  # a record node's children are experiments, not more nodes
+        if detect_format(d) is not None:
+            found.append(d)
+            # An Intan folder holds .dat files and a SpikeGLX run holds its imec
+            # subfolders; neither contains further recordings.
+            continue
         if depth >= max_depth:
             continue
         for e in entries:

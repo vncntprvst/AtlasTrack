@@ -637,9 +637,10 @@ class RegisterPanelWidget(QWidget):
         not ``plane.ap_um`` (the request), which can differ. Rows are sorted by
         ``ap_order`` so the sequence reads the same as the ordering list.
         """
-        from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+        from histo_to_ccf.io.ccf_coords import bregma_ap_for_display
 
         ap_res = float(self._state.project.atlas.resolution_um or 25.0)
+        bregma_ap = bregma_ap_for_display(self._state.project.atlas.name)
         rows = []
         for slide in self._state.project.slides:
             for sec in slide.sections:
@@ -647,7 +648,7 @@ class RegisterPanelWidget(QWidget):
                     continue
                 a = sec.registration.anchoring  # (ox,oy,oz,ux,uy,uz,vx,vy,vz) voxels
                 ap_idx = a[0] + 0.5 * a[3] + 0.5 * a[6]  # AP of the plane centre
-                ap_bregma = BREGMA_AP_FROM_ORIGIN_UM - ap_idx * ap_res
+                ap_bregma = bregma_ap - ap_idx * ap_res
                 rows.append((sec.ap_order, sec.index, ap_bregma, sec.registration.residual))
         rows.sort(key=lambda r: r[0])
         self._residuals_table.setRowCount(len(rows))

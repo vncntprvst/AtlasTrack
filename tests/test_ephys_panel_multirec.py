@@ -219,3 +219,113 @@ def test_the_button_says_which_recordings_it_will_read(qtbot):
         assert "LO_07_004" in panel._compute_btn.toolTip()
     finally:
         viewer.close()
+
+
+# ---------------------------------------------------------------------------
+# Choosing a probe map
+#
+# Intan recordings carry no geometry, so the map is the difference between real
+# depths and a 32-channel probe reporting a span of "31". The control has to be
+# reachable from the panel or the format is only supported on paper.
+# ---------------------------------------------------------------------------
+
+
+def _map_entries(panel):
+    return [panel._map_combo.itemText(i) for i in range(panel._map_combo.count())]
+
+
+def _select(panel, text):
+    index = panel._map_combo.findText(text)
+    assert index >= 0, f"{text!r} not offered; have {_map_entries(panel)}"
+    panel._map_combo.setCurrentIndex(index)
+    return index
+
+
+class _Signal:
+    def connect(self, *_args, **_kwargs) -> None:
+        return None
+
+
+class _FakeWorker:
+    yielded = _Signal()
+    returned = _Signal()
+    errored = _Signal()
+
+    def start(self) -> None:
+        return None
+
+
+def _fake_worker(*_args, **_kwargs) -> _FakeWorker:
+    return _FakeWorker()
+
+
+def test_the_default_is_to_take_geometry_from_the_recording(qtbot):
+    """Open Ephys and SpikeGLX store the probe; overriding that would be a step back."""
+    from histo_to_ccf.gui.widgets.ephys_panel import MAP_FROM_RECORDING
+
+    panel, _ = _panel(qtbot, _state_with_probe())
+
+    assert panel._map_combo.currentText() == MAP_FROM_RECORDING
+    assert panel._selected_probe_map() is None
+
+
+def test_the_wired_poly3_map_is_offered_and_resolves_to_real_micrometres(qtbot):
+    from histo_to_ccf.ephys.probemap import (
+        NEURONEXUS_POLY3_A32_RHD2132,
+        resolve_probe_map,
+    )
+
+    panel, _ = _panel(qtbot, _state_with_probe())
+    _select(panel, NEURONEXUS_POLY3_A32_RHD2132)
+
+    assert panel._selected_probe_map() == NEURONEXUS_POLY3_A32_RHD2132
+    resolved = resolve_probe_map(panel._selected_probe_map(), n_channels=32)
+    assert resolved.extent_um == pytest.approx(275.0)
+
+
+def test_the_file_browser_entry_is_not_itself_a_probe_map(qtbot):
+    """Selecting it opens a dialog; it must never be handed on as a map name."""
+    from histo_to_ccf.gui.widgets.ephys_panel import MAP_CHOOSE_FILE
+
+    panel, _ = _panel(qtbot, _state_with_probe())
+    index = panel._map_combo.findText(MAP_CHOOSE_FILE)
+
+    assert index >= 0
+    assert panel._map_combo.itemData(index) == MAP_CHOOSE_FILE
+    assert panel._selected_probe_map() is None
+
+
+def test_a_catalog_layout_is_offered_but_labelled_as_layout_only(qtbot):
+    """It says where the sites are, not which channel each one is on."""
+    from histo_to_ccf.probes.catalog import NEURONEXUS_A1X32_POLY3
+
+    panel, _ = _panel(qtbot, _state_with_probe())
+    texts = _map_entries(panel)
+    entry = next(t for t in texts if t.startswith(NEURONEXUS_A1X32_POLY3))
+
+    assert "layout only" in entry
+    _select(panel, entry)
+    assert panel._selected_probe_map() == NEURONEXUS_A1X32_POLY3
+
+
+def test_the_chosen_map_reaches_recordings_that_have_none(qtbot, monkeypatch):
+    """The panel's choice is the penetration's default, applied at compute time."""
+    from histo_to_ccf.ephys.probemap import NEURONEXUS_POLY3_A32_RHD2132
+    from histo_to_ccf.gui import workers
+
+    state = _state_with_probe(n_shanks=1)
+    probe = state.project.probes[0]
+    probe.recordings = [
+        EphysRecordingRef(path="a", label="A", insertion_depth_um=5028.0),
+        EphysRecordingRef(path="b", label="B", insertion_depth_um=5028.0,
+                          probe_map="already/set.csv"),
+    ]
+    monkeypatch.setattr(workers, "multi_lfp_power_worker", _fake_worker)
+
+    panel, _ = _panel(qtbot, state)
+    _select(panel, NEURONEXUS_POLY3_A32_RHD2132)
+    panel._compute_multi()
+
+    assert probe.recordings[0].probe_map == NEURONEXUS_POLY3_A32_RHD2132
+    # A per-recording choice already made is not overwritten by the panel default.
+    assert probe.recordings[1].probe_map == "already/set.csv"

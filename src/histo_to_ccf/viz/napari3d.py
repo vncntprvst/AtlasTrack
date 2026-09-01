@@ -228,7 +228,8 @@ def show_3d_scene(
 
     added += add_probe_layers(viewer, project, line_width=line_width)
     added += add_ephys_channel_layers(viewer, project)
-    _apply_bregma_display(added)  # show everything bregma-referenced (display only)
+    # Bregma is atlas-specific, so the display frame follows the project's atlas.
+    _apply_bregma_display(added, getattr(project.atlas, "name", None))
     switch_to_3d(viewer)
     _set_default_camera(viewer)
     return added
@@ -241,11 +242,12 @@ def show_3d_scene(
 # negating one axis alone is a reflection that MIRRORS left/right, but negating two
 # is a proper rotation (det = +1, no mirror) - hence flipping ML alongside AP. DV is
 # left as CCF depth (ventral +); dorsal-up comes from the camera up vector.
-def _bregma_affine() -> "np.ndarray":
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM, MIDLINE_ML_UM
+def _bregma_affine(atlas_name: str | None = None) -> "np.ndarray":
+    from histo_to_ccf.io.ccf_coords import MIDLINE_ML_UM, bregma_ap_for_display
 
+    bregma_ap = bregma_ap_for_display(atlas_name)
     return np.array([
-        [-1.0, 0.0, 0.0, BREGMA_AP_FROM_ORIGIN_UM],  # AP -> bregma - AP (anterior +)
+        [-1.0, 0.0, 0.0, bregma_ap],                 # AP -> bregma - AP (anterior +)
         [0.0, -1.0, 0.0, MIDLINE_ML_UM],             # ML -> midline - ML (0 at midline)
         [0.0, 0.0, 1.0, 0.0],                        # DV unchanged (ventral +)
         [0.0, 0.0, 0.0, 1.0],
@@ -258,9 +260,9 @@ _VIEW_DIRECTION = (1.0, 0.0, 0.5)    # look toward anterior (+AP), slightly down
 _UP_DIRECTION = (0.0, 0.0, -1.0)     # dorsal is up (-DV)
 
 
-def _apply_bregma_display(layers: list) -> None:
+def _apply_bregma_display(layers: list, atlas_name: str | None = None) -> None:
     """Set the bregma display affine on every 3D-scene layer (display only)."""
-    affine = _bregma_affine()
+    affine = _bregma_affine(atlas_name)
     for layer in layers:
         try:
             layer.affine = affine

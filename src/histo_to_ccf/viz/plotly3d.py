@@ -233,7 +233,9 @@ def add_probe_traces(
 # Figure builder
 # ---------------------------------------------------------------------------
 
-def _rereference_traces_to_bregma(fig: "go.Figure") -> None:
+def _rereference_traces_to_bregma(
+    fig: "go.Figure", atlas_name: str | None = None
+) -> None:
     """Shift every trace's x (ML) and y (AP) from CCF µm to bregma-referenced µm.
 
     Applied to *all* traces (region meshes and probes) so they stay aligned:
@@ -244,15 +246,16 @@ def _rereference_traces_to_bregma(fig: "go.Figure") -> None:
     mirrors L/R (the old bug); flipping ML cancels that mirror, so the scene is
     un-mirrored AND AP reads anterior-positive. The ML sign also matches Paxinos.
     """
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM, MIDLINE_ML_UM
+    from histo_to_ccf.io.ccf_coords import MIDLINE_ML_UM, bregma_ap_for_display
 
+    bregma_ap = bregma_ap_for_display(atlas_name)
     for tr in fig.data:
         x = getattr(tr, "x", None)
         if x is not None:
             tr.x = tuple(MIDLINE_ML_UM - float(v) for v in x)
         y = getattr(tr, "y", None)
         if y is not None:
-            tr.y = tuple(BREGMA_AP_FROM_ORIGIN_UM - float(v) for v in y)
+            tr.y = tuple(bregma_ap - float(v) for v in y)
 
 
 def build_figure(
@@ -306,7 +309,7 @@ def build_figure(
     # matching the Atlas/ordering tabs). DV is left as CCF depth.
     xaxis_title, yaxis_title = "ML (µm)", "AP (µm)"
     if bregma_relative:
-        _rereference_traces_to_bregma(fig)
+        _rereference_traces_to_bregma(fig, getattr(project.atlas, "name", None))
         xaxis_title = "ML from midline (µm)"
         yaxis_title = "AP from bregma (µm, ant +)"
 

@@ -475,10 +475,14 @@ def export_paxinos_csv(
     """
     from histo_to_ccf.io.ccf_coords import (
         DEFAULT_PAXINOS_ALIGNMENT,
+        anchors_for_atlas_name,
         ccf_um_to_paxinos_mm,
     )
 
     align = alignment or DEFAULT_PAXINOS_ALIGNMENT
+    # Raises for an atlas with no known bregma rather than silently emitting Allen's.
+    anchors = anchors_for_atlas_name(getattr(project.atlas, "name", None))
+    anchors.require_bregma()
     coords_map = project_channel_coords(project)
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -491,7 +495,8 @@ def export_paxinos_csv(
             if probe_label is not None and label != probe_label:
                 continue
             ap_mm, ml_mm, dv_mm = ccf_um_to_paxinos_mm(
-                coords[:, 0], coords[:, 1], coords[:, 2], alignment=align
+                coords[:, 0], coords[:, 1], coords[:, 2],
+                alignment=align, anchors=anchors,
             )
             for ch_idx in range(len(coords)):
                 writer.writerow([

@@ -18,7 +18,7 @@ from qtpy.QtWidgets import (
 )
 
 from histo_to_ccf.gui.widgets.separators import section_header
-from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+from histo_to_ccf.io.ccf_coords import bregma_ap_for_display
 from histo_to_ccf.gui.workflow import WorkflowState
 from histo_to_ccf.sectioning.ordering import geometric_order
 
@@ -188,15 +188,18 @@ class OrderingPanelWidget(QWidget):
             return None
         return self._state.project.slides[slide_idx]
 
-    @staticmethod
-    def _item_text(section, position: int) -> str:
+    def _item_text(self, section, position: int) -> str:
         """One list row. ``position`` is the 1-based place in the AP order.
 
         Counted from 1 for display; ``section.index`` stays the stored id that
         names the transform sidecar and that shank picks point at.
+
+        An instance method rather than a static one because the bregma anchor the AP
+        is shown against depends on the project's atlas.
         """
         if section.plane is not None:
-            ap_bregma = BREGMA_AP_FROM_ORIGIN_UM - section.plane.ap_um
+            bregma_ap = bregma_ap_for_display(self._state.project.atlas.name)
+            ap_bregma = bregma_ap - section.plane.ap_um
             ap_str = f"AP {ap_bregma:+.0f} µm"
         else:
             ap_str = "AP -"
@@ -223,6 +226,7 @@ class OrderingPanelWidget(QWidget):
             spacing_um=spacing,
             anchor_index=ordered[pos].index,
             forward=self._ant_post.isChecked(),
+            bregma_ap_um=bregma_ap_for_display(self._state.project.atlas.name),
         )
         # With slide numbers the spacing is per slide-number step, so an unevenly
         # sampled series gets the AP gaps it actually has.

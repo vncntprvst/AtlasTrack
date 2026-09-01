@@ -46,6 +46,8 @@ class LfpData:
     # NOT the x location, since a Neuropixels 2.0 shank has TWO electrode columns,
     # so unique-x over-splits one shank into two.
     channel_shank_ids: np.ndarray | None = None
+    #: See :attr:`LfpExcerpts.geometry_source`.
+    geometry_source: str = "recording"
 
 
 @dataclass
@@ -72,6 +74,10 @@ class LfpExcerpts:
     # a questionable rejection can be reviewed.
     verdicts: list = None  # list[EpochVerdict]
     referenced: bool = False
+    #: Where ``channel_depths_um`` came from. ``channel_index`` means the recording
+    #: carried no geometry and none was supplied, so the depths are ordinals rather
+    #: than micrometres - see :mod:`histo_to_ccf.ephys.probemap`.
+    geometry_source: str = "recording"
     #: How many shanks the common median reference was taken within. 1 for a
     #: single-shank recording, 4 for a full bank. Recorded because two recordings are
     #: only comparable if this matched, and a silent mismatch shifts whole decades of
@@ -110,51 +116,125 @@ def excerpt_psd(excerpts: LfpExcerpts, *, fmin: float = 0.0, fmax: float = 300.0
     return freqs, total / len(excerpts.windows)
 
 
+def _detect(recording_dir: str | Path):
+    """Identify the recording, or raise naming what was actually there."""
+    from histo_to_ccf.ephys.formats import detect_format
+
+    detected = detect_format(recording_dir)
+    if detected is None:
+        raise RuntimeError(
+            f"{recording_dir} is not a recording this app can read. Expected an Open "
+            "Ephys record node (experimentN/recordingM), an Intan info.rhd/.rhs, or a "
+            "SpikeGLX run folder of .bin/.meta pairs."
+        )
+    return detected
+
+
 def list_streams(recording_dir: str | Path) -> list[str]:
-    """All Open Ephys binary stream names in a recording folder."""
-    si = _require_si()
-    names, _ = si.get_neo_streams("openephysbinary", str(recording_dir))
-    return list(names)
+    """All stream names in a recording folder, whatever wrote it."""
+    from histo_to_ccf.ephys.formats import list_streams as _list
+
+    return _list(_detect(recording_dir))
 
 
-def _select_lfp_stream(streams: list[str]) -> str | None:
-    for s in streams:
-        u = s.upper()
-        if "LFP" in u or u.endswith("-LF") or u.endswith(".LF"):
-            return s
-    return None
+def _select_lfp_stream(streams: list[str], detected=None) -> str | None:
+    from histo_to_ccf.ephys.formats import OPEN_EPHYS, DetectedRecording
+    from histo_to_ccf.ephys.formats import select_lfp_stream as _sel
+
+    if detected is None:  # back-compat: bare stream lists are Open Ephys
+        detected = DetectedRecording(OPEN_EPHYS, Path("."), Path("."))
+    return _sel(detected, streams)
 
 
-def _select_ap_stream(streams: list[str]) -> str | None:
-    cands = [s for s in streams if "Neuropix" in s and ("AP" in s.upper())]
-    if cands:
-        return cands[0]
-    cands = [s for s in streams if "Neuropix" in s]
-    return cands[0] if cands else (streams[0] if streams else None)
+def _select_ap_stream(streams: list[str], detected=None) -> str | None:
+    from histo_to_ccf.ephys.formats import OPEN_EPHYS, DetectedRecording
+    from histo_to_ccf.ephys.formats import select_wideband_stream as _sel
+
+    if detected is None:
+        detected = DetectedRecording(OPEN_EPHYS, Path("."), Path("."))
+    return _sel(detected, streams)
 
 
 def _open_lfp_recording(recording_dir, stream_name, lfp_fs: float):
-    """Build the (lazy) LFP recording and say whether it was derived from AP."""
+    """Build the (lazy) LFP recording and say whether it was derived from wideband.
+
+    Neuropixels 1.0 on Open Ephys and SpikeGLX records a real LFP stream, which is
+    used as-is. Neuropixels 2.0 and every Intan recording have only a wideband
+    stream, so LFP is derived from it: decimate to ``lfp_fs`` first (resampling
+    applies its own anti-alias low-pass) and band-limit after, because filtering at
+    30 kHz would cost about 12x more for the same result.
+    """
     si = _require_si()
-    streams = list_streams(recording_dir)
+    from histo_to_ccf.ephys.formats import list_streams as _list
+    from histo_to_ccf.ephys.formats import open_stream, select_lfp_stream, select_wideband_stream
+
+    detected = _detect(recording_dir)
+    streams = _list(detected)
     if not streams:
-        raise RuntimeError(f"No Open Ephys streams found in {recording_dir}")
+        raise RuntimeError(f"No {detected.format.label} streams found in {recording_dir}")
 
     if stream_name is None:
-        stream_name = _select_lfp_stream(streams)
+        stream_name = select_lfp_stream(detected, streams)
     if stream_name is not None:
-        return si.read_openephys(str(recording_dir), stream_name=stream_name), stream_name, False
+        return open_stream(detected, stream_name), stream_name, False
 
-    ap = _select_ap_stream(streams)
-    if ap is None:
-        raise RuntimeError(f"No LFP or AP Neuropixels stream in {recording_dir}")
-    rec = si.read_openephys(str(recording_dir), stream_name=ap)
-    # Decimate the wideband AP stream to ~LFP rate first (resample applies its own
-    # anti-alias low-pass), then band-limit: filtering at 30 kHz would cost ~12x more.
+    wideband = select_wideband_stream(detected, streams)
+    if wideband is None:
+        raise RuntimeError(
+            f"No electrode stream in {recording_dir}; found {streams}. "
+            "Auxiliary and digital streams carry no channel geometry, so they are "
+            "never selected automatically - name the stream explicitly to use one."
+        )
+    rec = open_stream(detected, wideband)
     if rec.get_sampling_frequency() > lfp_fs:
         rec = si.resample(rec, int(lfp_fs))
     rec = si.bandpass_filter(rec, freq_min=0.5, freq_max=300.0, ignore_low_freq_error=True)
-    return rec, ap, True
+    return rec, wideband, True
+
+
+def _channel_geometry(rec, probe_map, n_channels: int | None = None):
+    """Channel depths/x/shank ids and where they came from.
+
+    Order of preference: geometry stored in the recording, then an explicitly
+    supplied probe map, then channel indices. The last is not a silent fallback -
+    it is reported via the returned :class:`~histo_to_ccf.ephys.probemap.GeometrySource`
+    so a caller computing depth-referenced features can refuse rather than treat an
+    ordinal as a micrometre.
+
+    A supplied map wins over the recording's own geometry only when the recording has
+    none; overriding real stored geometry would be a silent way to break a working
+    Neuropixels recording.
+    """
+    from histo_to_ccf.ephys.probemap import GeometrySource, resolve_probe_map
+
+    try:
+        locs = np.asarray(rec.get_channel_locations(), dtype=float)
+        if locs.ndim == 2 and locs.shape[1] >= 2 and locs.shape[0] > 0:
+            shank_ids = None
+            try:
+                sids = rec.get_probe().shank_ids
+                if sids is not None and len(sids) == locs.shape[0]:
+                    shank_ids = np.asarray(sids)
+            except Exception:
+                shank_ids = None
+            return (
+                locs[:, 1], locs[:, 0], shank_ids, GeometrySource.RECORDING,
+            )
+    except Exception:
+        pass
+
+    n_ch = n_channels if n_channels is not None else len(rec.channel_ids)
+    resolved = resolve_probe_map(probe_map, n_channels=n_ch)
+    if resolved is not None:
+        return (
+            resolved.depth_um, resolved.x_um, resolved.shank_ids, resolved.source,
+        )
+    return (
+        np.arange(n_ch, dtype=float),
+        np.zeros(n_ch, dtype=float),
+        None,
+        GeometrySource.CHANNEL_INDEX,
+    )
 
 
 def _read_window(rec, start: int, stop: int) -> np.ndarray:
@@ -192,6 +272,7 @@ def load_lfp_excerpts(
     lfp_fs: float = 2500.0,
     reference: bool = True,
     artifact_tolerance: float | None = None,
+    probe_map: object = None,
 ) -> LfpExcerpts:
     """Read a handful of screened LFP windows spread across a recording.
 
@@ -221,14 +302,9 @@ def load_lfp_excerpts(
 
     # Geometry first: the reference is taken per shank, so the shank of each channel
     # has to be known before the first window is referenced.
-    try:
-        locs = np.asarray(rec.get_channel_locations(), dtype=float)
-        x_um, depth_um = locs[:, 0], locs[:, 1]
-    except Exception:
-        # No geometry: fall back to a channel-index axis once the width is known
-        # from the first window, and reference across everything as before.
-        x_um = depth_um = None
-    ref_groups = _reference_groups(x_um) if (reference and x_um is not None) else None
+    depth_um, x_um, shank_ids, geometry_source = _channel_geometry(rec, probe_map)
+    physical = geometry_source.is_physical
+    ref_groups = _reference_groups(x_um) if (reference and physical) else None
 
     screen_kwargs = (
         {} if artifact_tolerance is None else {"artifact_tolerance": artifact_tolerance}
@@ -259,18 +335,6 @@ def load_lfp_excerpts(
         traces_by_epoch[(v.t_start_s, v.t_end_s)] for v in verdicts if v.kept
     ]
 
-    if x_um is None:
-        n_ch = windows[0].shape[1] if windows else 0
-        x_um, depth_um = np.zeros(n_ch), np.arange(n_ch, dtype=float)
-
-    shank_ids = None
-    try:
-        sids = rec.get_probe().shank_ids
-        if sids is not None and len(sids) == len(rec.channel_ids):
-            shank_ids = np.asarray(sids)
-    except Exception:
-        shank_ids = None
-
     return LfpExcerpts(
         windows=windows,
         fs=fs,
@@ -285,6 +349,7 @@ def load_lfp_excerpts(
         reference_groups=(
             int(np.unique(ref_groups).size) if ref_groups is not None else 0
         ),
+        geometry_source=str(geometry_source.value),
     )
 
 
@@ -294,42 +359,19 @@ def load_lfp(
     *,
     max_seconds: float = 60.0,
     lfp_fs: float = 2500.0,
+    probe_map: object = None,
 ) -> LfpData:
-    """Load an LFP segment + channel geometry from an Open Ephys recording.
+    """Load an LFP segment + channel geometry from one recording.
 
-    Picks an LFP stream automatically when ``stream_name`` is omitted; if none
-    exists it derives LFP from the AP stream (low-pass + resample to ``lfp_fs``).
-    A central ``max_seconds`` window is read to keep memory bounded.
+    Reads Open Ephys, Intan and SpikeGLX (see :mod:`histo_to_ccf.ephys.formats`).
+    Picks a dedicated LFP stream automatically when ``stream_name`` is omitted; where
+    the format has none - Neuropixels 2.0, and every Intan recording - LFP is derived
+    from the wideband stream. A central ``max_seconds`` window is read to keep memory
+    bounded.
     """
-    si = _require_si()
-    streams = list_streams(recording_dir)
-    if not streams:
-        raise RuntimeError(f"No Open Ephys streams found in {recording_dir}")
-
-    derived = False
-    if stream_name is None:
-        stream_name = _select_lfp_stream(streams)
-    if stream_name is None:
-        ap = _select_ap_stream(streams)
-        if ap is None:
-            raise RuntimeError(f"No LFP or AP Neuropixels stream in {recording_dir}")
-        rec = si.read_openephys(str(recording_dir), stream_name=ap)
-        # Decimate the wideband AP stream to ~LFP rate first (resample applies its
-        # own anti-alias low-pass), then band-limit. Doing the filter on the
-        # decimated stream is far cheaper than filtering at 30 kHz.
-        if rec.get_sampling_frequency() > lfp_fs:
-            rec = si.resample(rec, int(lfp_fs))
-        # ignore_low_freq_error: SpikeInterface rejects freq_min < ~1 Hz by default
-        # (chunk-edge artifacts); we read one central window with a wide margin, so
-        # the bypass is safe here and keeps the LFP drift band.
-        rec = si.bandpass_filter(
-            rec, freq_min=0.5, freq_max=300.0, ignore_low_freq_error=True
-        )
-        stream_name = ap
-        derived = True
-    else:
-        rec = si.read_openephys(str(recording_dir), stream_name=stream_name)
-
+    rec, stream_name, derived = _open_lfp_recording(
+        recording_dir, stream_name, lfp_fs
+    )
     fs = float(rec.get_sampling_frequency())
     n_total = rec.get_num_samples()
     n_keep = min(n_total, int(max_seconds * fs))
@@ -340,24 +382,11 @@ def load_lfp(
     except TypeError:
         traces = rec.get_traces(start_frame=start, end_frame=start + n_keep, return_scaled=True)
 
-    try:
-        locs = np.asarray(rec.get_channel_locations(), dtype=float)
-        x_um, depth_um = locs[:, 0], locs[:, 1]
-    except Exception:
-        n_ch = traces.shape[1]
-        x_um = np.zeros(n_ch)
-        depth_um = np.arange(n_ch, dtype=float)
-
-    # Per-channel shank id, in recording-channel order (the probe attached to the
-    # recording is already aligned to the channels). Lets the alignment view split
+    # Per-channel geometry, in recording-channel order. Lets the alignment view split
     # a multi-shank probe correctly instead of guessing from x.
-    shank_ids = None
-    try:
-        sids = rec.get_probe().shank_ids
-        if sids is not None and len(sids) == traces.shape[1]:
-            shank_ids = np.asarray(sids)
-    except Exception:
-        shank_ids = None
+    depth_um, x_um, shank_ids, geometry_source = _channel_geometry(
+        rec, probe_map, traces.shape[1]
+    )
 
     return LfpData(
         traces=np.asarray(traces, dtype=float),
@@ -368,4 +397,5 @@ def load_lfp(
         stream_name=stream_name,
         derived_from_ap=derived,
         channel_shank_ids=shank_ids,
+        geometry_source=str(geometry_source.value),
     )

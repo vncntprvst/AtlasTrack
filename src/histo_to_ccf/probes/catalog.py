@@ -88,31 +88,45 @@ NEURONEXUS_A1X32_POLY3 = "NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP"
 def _neuronexus_a1x32_poly3() -> ProbeLayout:
     """Build the NeuroNexus A1x32-Poly3-10mm-25s-177(-OA32LP) site layout.
 
-    The Poly3 topology is taken from the catalogued ProbeInterface entry
-    ``neuronexus / A1x32-Poly3-10mm-50-177`` (verified geometry: 3 columns, the
-    centre column carrying 12 sites and each side column 10, for 32 total) with
-    the site grid rescaled from the 50 µm to the 25 µm pitch of this model:
+    Geometry from the NeuroNexus catalog drawing for this exact part number
+    (*Penetrating Probes*, p. 52; the 5 mm sibling on p. 49 is the same site layout),
+    which agrees with the rig's own RHX ``A1x32-Poly3-A32-RHD2132-probe.xml``:
 
-      * 25 µm vertical pitch within a column; 25 µm lateral column pitch
-      * the physical shank tip sits 100 µm below the lowest site (the taper is a
-        property of the 10 mm shank, so it is *not* rescaled with the pitch)
+      * three columns at -18 / 0 / +18 µm from the centreline
+      * the centre column carries 12 sites at 25 µm pitch; each side column carries
+        10, **interleaved** by half a pitch rather than aligned with the centre rows
+      * the shank tapers to a point 62 µm below the lowest site
+
+    The drawing quotes 18 µm, 25 µm and 22 µm: the last is the centre-to-side site
+    distance, and sqrt(18^2 + 12.5^2) = 21.9 µm is what fixes the interleave at half
+    a pitch. Total site span 275 µm.
+
+    These values previously came from rescaling the ProbeInterface entry
+    ``neuronexus / A1x32-Poly3-10mm-50-177`` to a 25 µm pitch, which put every site
+    38 µm too deep and left the side columns level with the centre rows. That entry is
+    correct for *its own* part - the catalog drawing on p. 53 gives 50 µm columns, a
+    550 µm span and a 100 µm tip, exactly as ProbeInterface has it. The 25 µm probe is
+    a different design, not a scaled one, and ProbeInterface has no entry for it.
 
     The OA32LP optical assembly carries a fibre 50 µm above the top-most site;
     that offset is recorded as metadata and does not affect the site
-    coordinates.  Sites are ordered tip → base (ascending depth), ties broken
-    left → right, matching the channel convention used elsewhere in the catalog.
+    coordinates.  Sites are ordered tip -> base (ascending depth), ties broken
+    left -> right, matching the channel convention used elsewhere in the catalog.
+
+    This is the *site layout* only. Which recording channel each site lands on
+    depends on the adapter; see :mod:`histo_to_ccf.ephys.probemap`.
     """
     pitch = 25.0
-    tip_to_lowest_site = 100.0
-    left, centre, right = -pitch, 0.0, pitch
+    tip_to_lowest_site = 62.0
+    left, centre, right = -18.0, 0.0, 18.0
 
     sites: list[tuple[float, float]] = []  # (depth_from_tip, lateral_offset)
-    # Centre column spans rows 0..11; side columns the inner rows 1..10.
     for row in range(12):
         sites.append((tip_to_lowest_site + row * pitch, centre))
-    for row in range(1, 11):
-        sites.append((tip_to_lowest_site + row * pitch, left))
-        sites.append((tip_to_lowest_site + row * pitch, right))
+    for row in range(10):
+        depth = tip_to_lowest_site + pitch / 2.0 + row * pitch
+        sites.append((depth, left))
+        sites.append((depth, right))
     sites.sort(key=lambda s: (s[0], s[1]))
 
     return ProbeLayout(

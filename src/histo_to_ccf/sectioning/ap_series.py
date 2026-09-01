@@ -83,6 +83,7 @@ def assign_section_ap(
     anchor_index: int | None = None,
     anchor_ap_um: float | None = None,
     forward: bool = True,
+    bregma_ap_um: float | None = None,
 ) -> tuple[int, Mode]:
     """Write ``plane.ap_um`` across ``sections``, spaced from one anchor.
 
@@ -91,6 +92,11 @@ def assign_section_ap(
     fixed; it defaults to the first in ``ap_order``. ``anchor_ap_um`` overrides
     that section's current AP, which is otherwise kept (or taken as bregma when
     it has no plane yet).
+
+    ``bregma_ap_um`` is that fallback bregma position, which differs between atlases
+    (see :data:`histo_to_ccf.io.ccf_coords.BREGMA_AP_BY_ATLAS`). It defaults to the
+    Allen anchor, which is right for Allen and Kim but 346 µm off for the BBP
+    augmented CCFv3.
 
     Returns ``(n_sections_updated, mode)`` - see the module docstring for modes.
     """
@@ -113,7 +119,9 @@ def assign_section_ap(
     elif anchor_sec.plane is not None:
         anchor_ap = float(anchor_sec.plane.ap_um)
     else:
-        anchor_ap = BREGMA_AP_FROM_ORIGIN_UM
+        anchor_ap = (
+            BREGMA_AP_FROM_ORIGIN_UM if bregma_ap_um is None else float(bregma_ap_um)
+        )
 
     offsets, mode = ap_offsets(
         [s.slide_number for s in ordered],

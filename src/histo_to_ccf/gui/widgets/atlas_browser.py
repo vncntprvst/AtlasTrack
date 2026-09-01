@@ -16,7 +16,10 @@ from qtpy.QtWidgets import (
 )
 
 from histo_to_ccf.gui.widgets.separators import section_header
-from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+from histo_to_ccf.io.ccf_coords import (
+    BREGMA_AP_FROM_ORIGIN_UM,
+    bregma_ap_from_origin_um,
+)
 from histo_to_ccf.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
@@ -92,6 +95,16 @@ class AtlasBrowserWidget(QWidget):
         self._atlas_status.setWordWrap(True)
         layout.addWidget(self._atlas_status)
 
+        # Users look for Paxinos in this list. It is not here, and its absence on
+        # its own reads as an omission rather than a design decision.
+        frame_note = QLabel(
+            "Registration works in CCF; only CCF-space atlases are listed. "
+            "Paxinos coordinates are produced at export - see 3D & Export."
+        )
+        frame_note.setWordWrap(True)
+        frame_note.setStyleSheet("color: palette(mid);")
+        layout.addWidget(frame_note)
+
         # The AP controls are a distinct job from choosing and loading an atlas
         # above, so they get their own heading and a clear gap before it.
         layout.addWidget(section_header("AP assignment", top_margin=22))
@@ -159,13 +172,24 @@ class AtlasBrowserWidget(QWidget):
     # The resampler indexes the volume with an absolute "distance from the
     # anterior edge" AP. The UI shows bregma-relative AP (anterior positive),
     # so convert on the way in and out.
-    @staticmethod
-    def _bregma_to_absolute(ap_bregma: float) -> float:
-        return BREGMA_AP_FROM_ORIGIN_UM - ap_bregma
+    def _bregma_ap(self) -> float:
+        """Bregma AP for the atlas in use.
 
-    @staticmethod
-    def _absolute_to_bregma(ap_abs: float) -> float:
-        return BREGMA_AP_FROM_ORIGIN_UM - ap_abs
+        Falls back to the Allen anchor for an atlas we have no measurement for, so the
+        spin box still works - but ``_on_atlas_loaded`` says so in the status line, and
+        the CSV exports refuse outright rather than shipping a guessed frame.
+        """
+        return bregma_ap_from_origin_um(self._atlas_name()) or BREGMA_AP_FROM_ORIGIN_UM
+
+    def _atlas_name(self) -> str | None:
+        loaded = getattr(self._state.atlas, "atlas_name", None)
+        return loaded or getattr(self._state.project.atlas, "name", None)
+
+    def _bregma_to_absolute(self, ap_bregma: float) -> float:
+        return self._bregma_ap() - ap_bregma
+
+    def _absolute_to_bregma(self, ap_abs: float) -> float:
+        return self._bregma_ap() - ap_abs
 
     def _on_combo_changed(self, idx: int) -> None:
         label, _ = _QUICK_PICKS[idx]
@@ -204,18 +228,61 @@ class AtlasBrowserWidget(QWidget):
         self._atlas_loading = False
         self._load_btn.setEnabled(True)
 
+    def _atlas_switch_warning(self, previous: str | None, atlas_id: str) -> str:
+        """Warn when the project's section APs were assigned under another atlas.
+
+        Section APs are stored as absolute distance from the atlas's *anterior
+        edge*, so they do not carry across atlases whose volumes begin at
+        different places: Allen and the BBP-augmented CCFv3 put the same anatomy
+        346 µm apart, and the augmented volume is 38 slices longer. Loading a
+        different atlas recomputes nothing, so without this the change is silent
+        and every stored AP quietly comes to mean something else.
+        """
+        if not previous or previous == atlas_id:
+            return ""
+        assigned = sum(
+            1
+            for slide in self._state.project.slides
+            for sec in slide.sections
+            if getattr(sec, "ap_source", None) is not None
+        )
+        if not assigned:
+            return ""
+        old_anchor = bregma_ap_from_origin_um(previous)
+        new_anchor = bregma_ap_from_origin_um(atlas_id)
+        shift = ""
+        if old_anchor is not None and new_anchor is not None:
+            shift = (
+                f" The same anatomy sits {new_anchor - old_anchor:+.0f} µm along"
+                " the AP axis between these two atlases."
+            )
+        return (
+            f"\n⚠ {assigned} section(s) had their AP assigned under '{previous}'. "
+            f"Those values are NOT converted.{shift} Re-assign the section APs "
+            "and re-register before exporting against this atlas."
+        )
+
     def _on_atlas_loaded(self, atlas) -> None:
+        previous = getattr(self._state.project.atlas, "name", None)
         self._state.atlas = atlas
         atlas_id = self._current_atlas_id()
         self._state.project.atlas.name = atlas_id
         ap_max = atlas.reference.shape[0] * atlas.resolution[0]
         # Bregma-relative range: bregma (0) down to the posterior-most slice.
         self._ap_spin.setRange(
-            self._absolute_to_bregma(float(ap_max)), BREGMA_AP_FROM_ORIGIN_UM
+            self._absolute_to_bregma(float(ap_max)), self._bregma_ap()
         )
         location = getattr(atlas, "root_dir", None) or self._atlas_dir.text()
+        caveat = ""
+        if bregma_ap_from_origin_um(atlas_id) is None:
+            caveat = (
+                f"\n⚠ No bregma anchor known for {atlas_id}: AP is shown against the "
+                "Allen anchor, and Paxinos export is unavailable."
+            )
         self._atlas_status.setText(
-            f"Loaded {atlas.atlas_name} ({atlas.resolution[0]:.0f} µm)\nfrom {location}"
+            f"Loaded {atlas.atlas_name} ({atlas.resolution[0]:.0f} µm)\n"
+            f"from {location}{caveat}"
+            f"{self._atlas_switch_warning(previous, atlas_id)}"
         )
         if self._settings is not None:
             self._settings.last_atlas_id = atlas_id

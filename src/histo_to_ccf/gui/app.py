@@ -12,6 +12,7 @@ def launch() -> None:
     import napari
 
     from histo_to_ccf.gui import crashlog
+    from histo_to_ccf.gui.widgets.welcome_overlay import APP_TITLE
 
     # Armed before anything else: a fault in Qt/vispy/the GL driver kills the
     # process with no traceback and no dialog, and this is the only thing that
@@ -21,7 +22,7 @@ def launch() -> None:
 
     _install_exception_handler()
     try:
-        viewer = napari.Viewer(title="Histo-to-CCF")
+        viewer = napari.Viewer(title=APP_TITLE)
     except Exception as exc:
         # A dead GPU/OpenGL context (bad driver, RDP session, disabled GPU) makes
         # Viewer creation raise - print an actionable GL diagnosis instead of a
@@ -38,8 +39,59 @@ def launch() -> None:
     viewer.window.add_dock_widget(panel, area="left", name="Registration", tabify=False)
     viewer.window.add_dock_widget(viz_panel, area="right", name="3D & Export", tabify=False)
     _hide_layer_panels(viewer)
+    _install_welcome_overlay(viewer)
     _size_main_window(viewer)
     napari.run()
+
+
+def _install_welcome_overlay(viewer: "napari.Viewer"):
+    """Swap napari's welcome screen for the workflow schematic.
+
+    napari's own screen shows its logo, a shortcut list and tips about menus this
+    app hides, and it is the first thing anyone sees. Ours follows the same rule -
+    visible exactly while the canvas holds no layers - so *Close Project* brings it
+    back.
+
+    Best-effort: if the private Qt handles are missing (headless, a future napari),
+    the app runs with napari's own screen rather than refusing to start.
+    """
+    from histo_to_ccf.gui.widgets.welcome_overlay import WelcomeOverlayWidget
+
+    try:
+        # Parent to the canvas, NOT to ``_qt_viewer``: that is a QSplitter, so a
+        # child added to it becomes a splitter pane laid out below the canvas
+        # instead of an overlay on top of it.
+        canvas = viewer.window._qt_viewer.canvas.native
+    except Exception:
+        return None
+
+    # Turn napari's off first: ours is opaque, but two welcome screens sharing one
+    # canvas is a redraw bug waiting to happen.
+    try:
+        viewer.window._qt_viewer.show_welcome_screen = False
+    except Exception:
+        try:
+            viewer.welcome_screen.visible = False
+        except Exception:
+            pass
+
+    overlay = WelcomeOverlayWidget(canvas, theme=getattr(viewer, "theme", None))
+
+    def _sync(_event=None) -> None:
+        overlay.setGeometry(canvas.rect())
+        empty = len(viewer.layers) == 0
+        overlay.setVisible(empty)
+        if empty:
+            overlay.raise_()  # stay above the canvas after layers come and go
+
+    viewer.layers.events.inserted.connect(_sync)
+    viewer.layers.events.removed.connect(_sync)
+    try:
+        viewer.events.theme.connect(lambda _e: overlay.set_theme(viewer.theme))
+    except Exception:
+        pass
+    _sync()
+    return overlay
 
 
 def _hide_layer_panels(viewer: "napari.Viewer") -> None:

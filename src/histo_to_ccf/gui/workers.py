@@ -217,7 +217,19 @@ def multi_lfp_power_worker(
             data = load_lfp_excerpts(
                 ref.path, getattr(ref, "stream_name", None),
                 window_s=window_s, n_windows=n_windows,
+                probe_map=getattr(ref, "probe_map", None),
             )
+            # Depth-referenced features are meaningless on ordinal positions, and a
+            # 32-channel probe spanning "31" would look plausible on a plot. Refuse
+            # here so the recording is reported as failed with the reason, rather
+            # than silently stacked against real micrometres from other recordings.
+            if getattr(data, "geometry_source", "recording") == "channel_index":
+                raise RuntimeError(
+                    "this recording stores no channel geometry and no probe map was "
+                    "set, so channel depths are indices rather than micrometres. Set "
+                    "a probe map on the recording (a .json/.prb/.imro/.csv file, or a "
+                    "catalog probe name)."
+                )
             freqs, psd = excerpt_psd(data, fmin=fmin, fmax=fmax)
             if psd.size == 0:
                 raise RuntimeError("every candidate window was artifact-dominated")
@@ -254,8 +266,9 @@ def lfp_power_worker(
     n_windows: int = 6,
     fmin: float = 0.0,
     fmax: float = 300.0,
+    probe_map: object = None,
 ) -> dict:
-    """Load an Open Ephys LFP segment and compute its depth x frequency power map.
+    """Load an LFP segment and compute its depth x frequency power map.
 
     Returns a dict with: ``freqs`` (n_freq), ``psd`` (n_channels, n_freq, depth-
     sorted), ``image`` (uint8 power map), ``depths_um`` (sorted, µm from tip),
@@ -269,8 +282,15 @@ def lfp_power_worker(
     # dominated by cross-channel artifact (licking) are rejected and reported instead
     # of being averaged in. This is why there is no "seconds to analyse" control.
     data = load_lfp_excerpts(
-        recording_dir, stream_name, window_s=window_s, n_windows=n_windows
+        recording_dir, stream_name, window_s=window_s, n_windows=n_windows,
+        probe_map=probe_map,
     )
+    if getattr(data, "geometry_source", "recording") == "channel_index":
+        raise RuntimeError(
+            "This recording stores no channel geometry (Intan writes none), and no "
+            "probe map was supplied, so the depth axis would be channel indices "
+            "rather than micrometres. Set a probe map for this recording."
+        )
     freqs, psd = excerpt_psd(data, fmin=fmin, fmax=fmax)
     if psd.size == 0:
         raise RuntimeError(

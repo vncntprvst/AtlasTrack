@@ -3,8 +3,9 @@
 ## Prerequisites
 
 ```
-# Install with extras (DeepSlice for atlas-plane prediction, ephys for LFP-based depth refinement):
-uv pip install -e ".[deepslice,ephys]"   
+# Install with all features
+uv pip install -e ".[all]" 
+
 # or a subset:
 #   uv pip install -e .                   # base only
 #   uv pip install -e ".[deepslice]"      # just DeepSlice

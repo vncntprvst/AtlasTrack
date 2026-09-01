@@ -78,6 +78,12 @@ class EphysRecordingRef(BaseModel):
     # known to be wrong (see the LO_04 2025-08-26 bank discrepancy in dataset.md).
     bank_offset_um: float | None = None
     epochs: list[EphysEpoch] = []
+    # Channel geometry for formats that store none. Intan writes no probe at all, and
+    # the headstage-to-site wiring lives in the adapter, so it has to be supplied:
+    # either a path to a .json/.prb/.imro/.csv map or the name of a probe in
+    # histo_to_ccf.probes.catalog. Open Ephys and SpikeGLX carry their own geometry
+    # and ignore this. See histo_to_ccf.ephys.probemap.
+    probe_map: str | None = None
 
 
 class EphysAlignment(BaseModel):

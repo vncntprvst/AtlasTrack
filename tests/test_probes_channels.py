@@ -47,12 +47,18 @@ def test_neuronexus_poly3_layout() -> None:
     assert len(depths) == 32 and len(offsets) == 32
     # Ordered tip → base.
     assert list(depths) == sorted(depths)
-    # Lowest site is the centre column at 100 µm above the tip; centred laterally.
-    assert depths[0] == pytest.approx(100.0)
+    # Lowest site is the centre column at 62 µm above the tip; centred laterally.
+    assert depths[0] == pytest.approx(62.0)
     assert offsets[0] == pytest.approx(0.0)
     assert offsets.mean() == pytest.approx(0.0, abs=1e-6)  # symmetric about centreline
-    # 3 columns at -25 / 0 / +25 µm.
-    assert sorted(set(round(o, 3) for o in offsets)) == [-25.0, 0.0, 25.0]
+    # 3 columns at -18 / 0 / +18 µm.
+    assert sorted(set(round(o, 3) for o in offsets)) == [-18.0, 0.0, 18.0]
+    # Side columns sit half a pitch above the centre rows, not level with them.
+    centre_rows = np.unique(depths[offsets == 0.0])
+    side_rows = np.unique(depths[offsets != 0.0])
+    assert len(centre_rows) == 12 and len(side_rows) == 10
+    assert side_rows == pytest.approx(centre_rows[:10] + 12.5)
+    assert depths.max() - depths.min() == pytest.approx(275.0)
     assert layout.fiber_offset_above_top_site_um == pytest.approx(50.0)
 
 

@@ -31,6 +31,11 @@ if TYPE_CHECKING:
     from histo_to_ccf.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
 
 
+#: Combo entries that are not probe maps: no map, and the file browser.
+MAP_FROM_RECORDING = "From the recording (Open Ephys / SpikeGLX)"
+MAP_CHOOSE_FILE = "Choose a map file…"
+
+
 class EphysPanelWidget(QWidget):
     """Select a shank, load its Open Ephys LFP, and launch depth alignment."""
 
@@ -116,6 +121,23 @@ class EphysPanelWidget(QWidget):
         list_btn.clicked.connect(self._list_streams)
         stream_row.addWidget(list_btn)
         rec_layout.addLayout(stream_row)
+
+        map_row = QHBoxLayout()
+        map_row.addWidget(QLabel("Probe map:"))
+        self._map_combo = QComboBox()
+        self._map_combo.setToolTip(
+            "Where channel depths come from. Open Ephys and SpikeGLX store the probe, "
+            "so leave this on 'From the recording'. Intan stores none - the wiring "
+            "lives in the adapter - so pick the matching probe + adapter, or the RHX "
+            "'-probe.xml' for the rig. Without one, features are refused rather than "
+            "plotted against channel indices."
+        )
+        self._last_map_index = 0
+        self._fill_map_combo()
+        self._map_combo.currentIndexChanged.connect(self._on_map_choice)
+        map_row.addWidget(self._map_combo, 1)
+        rec_layout.addLayout(map_row)
+
 
         # "Seconds to analyse" used to live here. It is gone: the excerpt reader picks
         # windows spread across the recording and rejects the ones dominated by
@@ -257,6 +279,43 @@ class EphysPanelWidget(QWidget):
 
     # -- recording -------------------------------------------------------
 
+    def _fill_map_combo(self) -> None:
+        """Offer: nothing, a wired probe+adapter, a bare layout, or a file.
+
+        The three are not interchangeable. A wired map includes the adapter, so it
+        puts each site on the right channel; a catalog layout only says where the
+        sites are, and still assumes the adapter does not permute them.
+        """
+        from histo_to_ccf.ephys.probemap import BUILTIN_MAPS
+        from histo_to_ccf.probes.catalog import CATALOG
+
+        self._map_combo.addItem(MAP_FROM_RECORDING, None)
+        for name in sorted(BUILTIN_MAPS):
+            self._map_combo.addItem(name, name)
+        for name in sorted(CATALOG):
+            self._map_combo.addItem(f"{name} - site layout only", name)
+        self._map_combo.addItem(MAP_CHOOSE_FILE, MAP_CHOOSE_FILE)
+
+    def _on_map_choice(self, index: int) -> None:
+        if self._map_combo.itemData(index) != MAP_CHOOSE_FILE:
+            self._last_map_index = index
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a probe map",
+            filter="Probe maps (*.xml *.json *.prb *.imro *.csv);;All files (*)",
+        )
+        if not path:
+            # Leave the previous choice in place rather than silently falling back to
+            # "from the recording", which would produce a different result.
+            self._map_combo.setCurrentIndex(self._last_map_index)
+            return
+        self._map_combo.insertItem(index, Path(path).name, path)
+        self._map_combo.setCurrentIndex(index)
+
+    def _selected_probe_map(self) -> str | None:
+        data = self._map_combo.currentData()
+        return None if data in (None, MAP_CHOOSE_FILE) else str(data)
+
     def _browse(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Open Ephys recording folder")
         if path:
@@ -320,7 +379,9 @@ class EphysPanelWidget(QWidget):
         # No user-set duration: the excerpt reader spreads windows across the
         # recording and rejects the artifact-dominated ones, which is strictly better
         # than a single number nobody could choose well.
-        worker = lfp_power_worker(Path(path), self._selected_stream())
+        worker = lfp_power_worker(
+            Path(path), self._selected_stream(), probe_map=self._selected_probe_map()
+        )
         worker.returned.connect(self._on_computed)
         worker.errored.connect(self._on_error)
         worker.start()
@@ -359,6 +420,13 @@ class EphysPanelWidget(QWidget):
                     "dialog (Insertion depth column).",
                 )
                 return
+        # The combo is the penetration's map; a recording that already carries its
+        # own keeps it, so a per-recording choice is never overwritten from here.
+        chosen = self._selected_probe_map()
+        if chosen is not None:
+            for ref in refs:
+                if not getattr(ref, "probe_map", None):
+                    ref.probe_map = chosen
         shanks = [s.index for s in probe.shanks] or [0]
         self._compute_btn.setEnabled(False)
         self._status.setText(

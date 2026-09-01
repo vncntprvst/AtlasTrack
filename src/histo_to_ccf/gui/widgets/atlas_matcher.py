@@ -49,7 +49,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+from histo_to_ccf.io.ccf_coords import (
+    BREGMA_AP_FROM_ORIGIN_UM,
+    bregma_ap_for_display,
+)
 from histo_to_ccf.gui import crashlog
 from histo_to_ccf.gui.workflow import WorkflowState
 
@@ -481,13 +484,18 @@ class AtlasMatcherDialog(QDialog):
 
     # -- bregma <-> absolute AP -----------------------------------------
 
-    @staticmethod
-    def _bregma_to_absolute(ap_bregma: float) -> float:
-        return BREGMA_AP_FROM_ORIGIN_UM - ap_bregma
+    def _bregma_ap(self) -> float:
+        """Bregma AP for the loaded atlas (Allen's anchor if it is unrecognised)."""
+        name = getattr(self._state.atlas, "atlas_name", None) or getattr(
+            self._state.project.atlas, "name", None
+        )
+        return bregma_ap_for_display(name)
 
-    @staticmethod
-    def _absolute_to_bregma(ap_abs: float) -> float:
-        return BREGMA_AP_FROM_ORIGIN_UM - ap_abs
+    def _bregma_to_absolute(self, ap_bregma: float) -> float:
+        return self._bregma_ap() - ap_bregma
+
+    def _absolute_to_bregma(self, ap_abs: float) -> float:
+        return self._bregma_ap() - ap_abs
 
     # -- UI --------------------------------------------------------------
 
@@ -704,7 +712,7 @@ class AtlasMatcherDialog(QDialog):
             return
         ap_max = atlas.reference.shape[0] * atlas.resolution[0]
         self._ap_spin.setRange(
-            self._absolute_to_bregma(float(ap_max)), BREGMA_AP_FROM_ORIGIN_UM
+            self._absolute_to_bregma(float(ap_max)), self._bregma_ap()
         )
 
     # -- atlas sampling --------------------------------------------------

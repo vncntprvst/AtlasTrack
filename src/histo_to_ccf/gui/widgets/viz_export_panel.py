@@ -168,6 +168,19 @@ class VizExportPanelWidget(QWidget):
         export_layout.addWidget(herbs_btn)
         export_layout.addWidget(ch_btn)
 
+        # Paxinos is not in the atlas list and never will be: registration, the
+        # overlay and every stored coordinate are CCF. Saying so here is the only
+        # way a user learns it without guessing from its absence.
+        pax_note = QLabel(
+            "Paxinos is a conversion applied here, at export - not an atlas you "
+            "register to. Registration and all stored coordinates are CCF; the "
+            "button below converts the finished CCF coordinates to Paxinos "
+            "stereotaxic mm (bregma origin)."
+        )
+        pax_note.setWordWrap(True)
+        pax_note.setStyleSheet("color: palette(mid);")
+        export_layout.addWidget(pax_note)
+
         pax_row = QHBoxLayout()
         pax_row.addWidget(QLabel("Paxinos align:"))
         self._paxinos_combo = QComboBox()
