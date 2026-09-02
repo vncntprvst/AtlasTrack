@@ -94,6 +94,58 @@ def _install_welcome_overlay(viewer: "napari.Viewer"):
     return overlay
 
 
+def _section_at(state: "WorkflowState", y: float, x: float):
+    """Index of the section whose bbox covers ``(y, x)`` on the active slide.
+
+    Overlapping boxes resolve to the smallest, which is the one a click was most
+    likely aimed at. Returns None outside every box.
+    """
+    slide_idx = state.active_slide_idx
+    if slide_idx is None or slide_idx >= len(state.project.slides):
+        return None
+    best, best_area = None, None
+    for section in state.project.slides[slide_idx].sections:
+        x0, y0, x1, y1 = section.bbox_px
+        if not (x0 <= x < x1 and y0 <= y < y1):
+            continue
+        area = (x1 - x0) * (y1 - y0)
+        if best_area is None or area < best_area:
+            best, best_area = section.index, area
+    return best
+
+
+def _install_section_click(viewer: "napari.Viewer", state: "WorkflowState", panels) -> None:
+    """Select the section under a plain left click, in any tab.
+
+    Hit-tests the stored bboxes rather than reading the outline Labels layer: that
+    layer only paints the *border*, so a click in the middle of a section would
+    return background and select nothing.
+    """
+
+    def _on_click(_viewer, event):
+        if getattr(event, "button", 1) != 1 or set(getattr(event, "modifiers", ()) or ()):
+            return
+        position = getattr(event, "position", None)
+        if position is None or len(position) < 2:
+            return
+        index = _section_at(state, float(position[-2]), float(position[-1]))
+        if index is None:
+            return
+        state.active_section_idx = int(index)
+        for panel in panels:
+            select = getattr(panel, "select_section", None)
+            if callable(select):
+                try:
+                    select(int(index))
+                except Exception:  # noqa: BLE001 - one panel must not block the rest
+                    pass
+
+    try:
+        viewer.mouse_drag_callbacks.append(_on_click)
+    except Exception:  # noqa: BLE001 - headless viewer without a canvas
+        pass
+
+
 def _hide_layer_panels(viewer: "napari.Viewer") -> None:
     """Hide napari's built-in 'layer list' + 'layer controls' docks.
 
@@ -201,6 +253,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
         viewer=viewer,
         on_slide_loaded=lambda idx, img: _on_slide_loaded(viewer, state, idx, img),
         on_sections_detected=lambda secs: _on_sections_detected(viewer, state, secs),
+        on_section_selected=image_tools.select_section,
     )
     load_layout.addWidget(slide_loader)
     load_layout.addWidget(image_tools)
@@ -301,8 +354,8 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # A "Registration" menu hosts the parameters dialog (kept out of the panel),
     # and napari's default menus are hidden - the user only wants Project +
     # Registration in the bar.
-    _install_registration_menu(viewer, register_panel)
-    _keep_only_menus(viewer, {"Project", "Registration"})
+    _install_settings_menu(viewer, register_panel)
+    _keep_only_menus(viewer, {"Project", "Settings"})
     _install_wheel_pan(viewer)
 
     # Persist settings when the tab changes (cheap enough to do on every switch).
@@ -314,6 +367,18 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     tabs.currentChanged.connect(_on_tab_change)
 
+    # Clicking a section in the canvas selects it everywhere that acts on "the
+    # section": Adjustments in Histology and Manual atlas adjustment in Register.
+    # Deliberately not tied to the Shapes layer that "Edit boxes" creates - having
+    # to enter an edit mode before a box could be picked was the complaint.
+    _install_section_click(viewer, state, (image_tools, register_panel))
+
+    # One pass over the finished tree: Qt never wraps a plain-text tooltip, and
+    # several here run past 300 characters.
+    from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+
+    wrap_tooltips(container)
+    wrap_tooltips(viz_panel)
     return container, viz_panel
 
 
@@ -459,10 +524,40 @@ def _install_project_menu(
     ):
         action.setShortcut(seq)
         action.setShortcutContext(Qt.ApplicationShortcut)
+    # After the shortcuts are set, so their width is known.
+    _fit_menu_width(menu)
 
 
-def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
-    """Add a "Registration" menu whose "Parameters" opens the params dialog.
+def _fit_menu_width(menu) -> None:
+    """Widen a menu so its shortcuts cannot be drawn over its labels.
+
+    Under napari's stylesheet Qt's size hint accounts for the label text but leaves
+    almost nothing for the icon column and the label-to-shortcut gap: the Project
+    menu came out 165 px wide when "Save Project As" + "Ctrl+Shift+S" alone need
+    145, so the two overlapped. Qt lays these out as columns, so the width needed
+    is the widest label plus the widest shortcut plus the gap - not the widest
+    label+shortcut pair.
+    """
+    from qtpy.QtGui import QFontMetrics
+
+    metrics = QFontMetrics(menu.font())
+    labels, shortcuts = [0], [0]
+    for action in menu.actions():
+        if action.isSeparator():
+            continue
+        labels.append(metrics.horizontalAdvance(action.text()))
+        if not action.shortcut().isEmpty():
+            shortcuts.append(metrics.horizontalAdvance(action.shortcut().toString()))
+    if not max(shortcuts):
+        return
+    # Gap between the two columns, plus the icon/checkmark column and margins Qt
+    # draws either side. Measured against the styled menu rather than guessed.
+    gap, chrome = 28, 52
+    menu.setMinimumWidth(max(labels) + gap + max(shortcuts) + chrome)
+
+
+def _install_settings_menu(viewer: "napari.Viewer", register_panel) -> None:
+    """Add a "Settings" menu: registration parameters, and the atlas reference.
 
     The registration parameters were moved out of the Register panel (the
     defaults are good); this is where to bring them back up when needed.
@@ -475,10 +570,32 @@ def _install_registration_menu(viewer: "napari.Viewer", register_panel) -> None:
     except Exception:
         return
 
-    menu = QMenu("Registration", menubar)
+    menu = QMenu("Settings", menubar)
     menubar.addMenu(menu)
-    params_action = menu.addAction("Parameters")
-    params_action.triggered.connect(register_panel.open_parameters_dialog)
+    # "Registration", not "Parameters": the menu already says these are settings, so
+    # the item should say what they are settings *for*.
+    registration_action = menu.addAction("Registration")
+    registration_action.triggered.connect(register_panel.open_parameters_dialog)
+
+    atlases_action = menu.addAction("Atlases")
+    atlases_action.setToolTip(
+        "What each atlas is, where it came from, and where its bregma sits."
+    )
+    atlases_action.triggered.connect(
+        lambda: _show_atlas_reference(viewer)
+    )
+    _fit_menu_width(menu)
+
+
+def _show_atlas_reference(viewer: "napari.Viewer"):
+    """Open the atlas reference sheet, parented to the main window."""
+    from histo_to_ccf.gui.widgets.atlas_help_dialog import show_atlas_reference
+
+    try:
+        parent = viewer.window._qt_window
+    except Exception:
+        parent = None
+    return show_atlas_reference(parent)
 
 
 def _install_wheel_pan(viewer: "napari.Viewer") -> None:
@@ -519,7 +636,7 @@ def _keep_only_menus(viewer: "napari.Viewer", keep: set[str]) -> None:
     """Hide every top-level menu-bar menu except those whose title is in ``keep``.
 
     napari adds File / View / Plugins / Window / Help; the user only wants Project
-    and Registration. Hiding (not removing) is reversible and robust to napari
+    and Settings. Hiding (not removing) is reversible and robust to napari
     re-adding menus. Best-effort: no-op if the menu bar is unavailable.
     """
     try:

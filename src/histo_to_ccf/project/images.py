@@ -25,6 +25,42 @@ if TYPE_CHECKING:
     from histo_to_ccf.project.schema import Project, Slide
 
 
+def deepslice_rotation_deg(anchoring: list[float] | tuple[float, ...]) -> float:
+    """In-plane rotation of a section, degrees, from its stored anchoring.
+
+    A stored anchoring is ``[o_ap, o_dv, o_ml, u_ap, u_dv, u_ml, v_ap, v_dv, v_ml]``
+    in atlas voxels: ``u`` runs along the image width. For a section lying square on
+    the slide ``u`` is purely ML, so any DV component is the angle it was mounted at
+    - the thing that makes a flick-through series wobble.
+
+    This is a *suggestion*, never applied on its own: rotation changes the image
+    registration runs on, so applying a prediction automatically would invalidate
+    every fit the moment a pre-match ran.
+    """
+    import math
+
+    return math.degrees(math.atan2(float(anchoring[4]), float(anchoring[5])))
+
+
+def rotate_in_bbox(patch: np.ndarray, degrees: float) -> np.ndarray:
+    """Rotate a section patch about its centre, keeping its exact shape.
+
+    The shape has to survive: ``bbox_px`` is the section's frame everywhere else -
+    overlay placement, landmarks, per-channel coordinates - so a rotation that grew
+    the canvas would silently desynchronise all of them. A detection box is
+    axis-aligned around tilted tissue, so it normally has the slack to absorb the
+    few degrees this is used for; a large angle will clip the corners.
+    """
+    if abs(degrees) < 1e-6:
+        return patch
+    from scipy.ndimage import rotate as _rotate
+
+    out = _rotate(
+        patch, degrees, axes=(1, 0), reshape=False, order=1, mode="constant", cval=0
+    )
+    return out.astype(patch.dtype, copy=False)
+
+
 def rebuild_slide_image(
     slide: "Slide",
     *,
@@ -68,6 +104,17 @@ def rebuild_slide_image(
         if section.flip_v:
             patch = np.flipud(patch)
         img[y0:y1, x0:x1] = patch
+
+    # Rotation is baked in for the same reason flips are: it changes the pixels the
+    # registration is computed against, so it has to be part of the working image
+    # rather than something applied later at export time. Rotating a section that is
+    # already registered invalidates that section's fit - the GUI warns about it.
+    for section in slide.sections:
+        angle = float(getattr(section, "rotation_deg", 0.0) or 0.0)
+        if abs(angle) < 1e-6:
+            continue
+        x0, y0, x1, y1 = section.bbox_px
+        img[y0:y1, x0:x1] = rotate_in_bbox(img[y0:y1, x0:x1], angle)
 
     return img, bands
 

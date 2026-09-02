@@ -66,6 +66,7 @@ class SlideLoaderWidget(QWidget):
         viewer: "napari.Viewer | None" = None,
         on_slide_loaded: Callable[[int, np.ndarray], None] | None = None,
         on_sections_detected: Callable | None = None,
+        on_section_selected: Callable[[int], object] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -73,6 +74,7 @@ class SlideLoaderWidget(QWidget):
         self._viewer = viewer
         self._on_slide_loaded = on_slide_loaded
         self._on_sections_detected = on_sections_detected
+        self._on_section_selected = on_section_selected
         self._box_layer = None  # editable rectangle Shapes layer
         self._syncing_boxes = False  # re-entrancy guard for the data handler
         self._committing_drawn = False  # same, for the draw-to-add handler
@@ -89,7 +91,7 @@ class SlideLoaderWidget(QWidget):
         # --- Load -------------------------------------------------------
         load_box = QGroupBox("Slide image")
         load_layout = QVBoxLayout(load_box)
-        load_btn = QPushButton("Open slide")
+        load_btn = QPushButton("Open histology image(s)")
         load_btn.setToolTip("Open a TIFF, PNG, or JPEG composite slide image.")
         load_btn.clicked.connect(self._open_file)
         self._path_label = QLabel("No file loaded")
@@ -209,7 +211,7 @@ class SlideLoaderWidget(QWidget):
     def _open_file(self) -> None:
         # Allow selecting several images at once; they are merged into one slide.
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Open slide image(s)", "",
+            self, "Open histology image(s) image(s)", "",
             "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;All files (*)",
         )
         if not paths:
@@ -618,6 +620,14 @@ class SlideLoaderWidget(QWidget):
 
         self._box_layer = layer
         layer.events.data.connect(self._sync_boxes_from_shapes)
+        # Selecting a box selects the section: mirror it into the Adjustments
+        # dropdown so Flip/Levels act on what is highlighted in the canvas.
+        try:
+            layer.selected_data.events.items_changed.connect(
+                self._on_box_selection_changed
+            )
+        except Exception:
+            pass
         _bind_safe_delete(layer)
 
         # Hide the static outline + numbers so the editable boxes are the only
@@ -632,6 +642,27 @@ class SlideLoaderWidget(QWidget):
             "Edit boxes: drag handles to resize, drag inside to move, "
             "Delete to remove, rectangle tool to add."
         )
+
+    def _on_box_selection_changed(self, *_args) -> None:
+        """Mirror a single box selection into the section dropdown.
+
+        Only one selected box names one section. With several selected there is no
+        single answer, so the dropdown is left alone rather than given an arbitrary
+        one of them; likewise for a freshly drawn box, which carries idx -1 until
+        :meth:`_sync_boxes_from_shapes` has turned it into a section.
+        """
+        if self._on_section_selected is None or self._box_layer is None:
+            return
+        selected = list(self._box_layer.selected_data)
+        if len(selected) != 1:
+            return
+        try:
+            index = int(self._box_layer.features["idx"].iloc[selected[0]])
+        except Exception:
+            return
+        if index < 0:
+            return
+        self._on_section_selected(index)
 
     def _sync_boxes_from_shapes(self, event=None) -> None:
         """Write edited rectangles back to the project sections."""

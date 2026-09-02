@@ -53,6 +53,7 @@ class OrderingPanelWidget(QWidget):
         self._spacing.valueChanged.connect(self._store_spacing)
         spacing_row.addWidget(self._spacing)
         layout.addLayout(spacing_row)
+        layout.addSpacing(8)
 
         dir_row = QHBoxLayout()
         dir_lbl = QLabel("Direction:")
@@ -93,6 +94,7 @@ class OrderingPanelWidget(QWidget):
         order_row.addWidget(self._col_first)
         order_row.addWidget(self._row_first)
         layout.addLayout(order_row)
+        layout.addSpacing(8)
 
         resort_btn = QPushButton("Re-sort by slide layout")
         resort_btn.setToolTip(
@@ -101,6 +103,7 @@ class OrderingPanelWidget(QWidget):
         )
         resort_btn.clicked.connect(self._resort_sections)
         layout.addWidget(resort_btn)
+        layout.addSpacing(10)
 
         anchor_row = QHBoxLayout()
         anchor_lbl = QLabel("Anchor section (1 = first):")

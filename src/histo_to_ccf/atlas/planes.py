@@ -55,6 +55,32 @@ class Anchoring:
         return cls(*[float(v) for v in values])
 
 
+def rescale_atlas_anchoring(
+    anchoring: Anchoring,
+    *,
+    source_shape: tuple[int, int, int],
+    target_shape: tuple[int, int, int],
+) -> Anchoring:
+    """Re-express a voxel-space anchoring on a different voxel grid.
+
+    Every component of an anchoring is a count of voxels, so one measured on a
+    25 um grid points somewhere else entirely on a 20 um grid even when the two
+    atlases cover the identical physical volume. That is exactly the Allen CCFv3 /
+    Chon-Kim-isotropic pair: (528, 320, 456) against (660, 400, 570), both spanning
+    13200 x 8000 x 11400 um, so every axis scales by 1.25.
+
+    Scaling from the shapes rather than the resolutions keeps this honest for any
+    pair that shares an extent, and needs nothing recorded in the project.
+    """
+    scale = [
+        float(t) / float(s)
+        for s, t in zip(source_shape, target_shape, strict=True)
+    ]
+    values = list(anchoring.as_tuple())
+    scaled = [values[i * 3 + k] * scale[k] for i in range(3) for k in range(3)]
+    return Anchoring(*scaled)
+
+
 def coronal_anchoring(
     atlas: "BrainGlobeAtlas",
     ap_um: float,

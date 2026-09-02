@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,29 +21,114 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from histo_to_ccf.gui.workflow import WorkflowState
 
-# CCFv3-aligned atlases that share the Allen 25 µm voxel space, so probe
-# coordinates are identical and only the region annotation/meshes/acronyms differ.
-# (label, brainglobe id) - mirrors the Atlas tab's quick picks.
+#: What a single Export button can write (label, key). Both are the same registered
+#: coordinates in different containers, which is why one button and a selector beat
+#: one button per file type - the old panel had two "export CSV" buttons that differed
+#: only by a coordinate frame.
+_EXPORT_FORMATS = [
+    ("Per-channel coordinates (CSV)", "csv"),
+    ("Probe tracks for Python / HERBS (pkl)", "pkl"),
+    ("3D view as interactive HTML", "html"),
+    ("Registered section series (folder of images)", "series"),
+]
+
+
+def _muted(text: str) -> QLabel:
+    """A wrapped, de-emphasised explanatory line."""
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setStyleSheet("color: palette(mid);")
+    return label
+
+# CCFv3-aligned atlases: all cover the same physical volume as the registration
+# atlas, so probe coordinates are identical and only the naming/annotation differs.
+# The isotropic Chon/Kim samples that volume at 20 µm rather than 25, which the
+# section-series export handles by restating each anchoring on its grid (see
+# atlas.planes.rescale_atlas_anchoring) - the 3D views work from meshes in µm and
+# never cared. (label, brainglobe id).
 _COMPATIBLE_REGION_ATLASES = [
     ("Allen CCFv3 25 µm", "allen_mouse_25um"),
     ("CCFv3-BBP Augmented 25 µm", "ccfv3augmented_mouse_25um"),
-    ("Chon/Kim Unified 25 µm", "kim_mouse_25um"),
+    ("Chon/Kim Unified 25 µm (Franklin-Paxinos labels)", "kim_mouse_25um"),
+    (
+        "Chon/Kim Unified v2, isotropic 20 µm (Franklin-Paxinos labels)",
+        "kim_mouse_isotropic_20um",
+    ),
 ]
 
-# CCF→Paxinos stereotaxic alignment presets for the Paxinos export (label, key).
-# All but "none" un-pitch CCFv3's ~5° nose-down tilt; see ccf_coords.PAXINOS_ALIGNMENTS.
+#: Region atlases whose annotation does not sit exactly on the registration atlas's,
+#: with the measured offset. Not corrected for: the shift belongs to the atlas
+#: release, and silently moving v2's labels back onto v1 would throw away the
+#: corrections that are the reason to use v2. Surfaced so labels within a section or
+#: two of a boundary are not over-trusted.
+_REGION_ATLAS_CAVEATS = {
+    "kim_mouse_isotropic_20um": (
+        "its annotation sits ~102 µm posterior of the 25 µm release (volume "
+        "centroids over 811 structures: +101.8 +/- 26.6 µm, a pure translation)"
+    ),
+}
+
+# CCF→Paxinos presets (label, key). The labels lead with what the preset *does*;
+# the citation is secondary, because "Pinpoint" and "Allen forum" name the source of
+# the numbers and tell a user nothing about the effect. Full detail lives behind the
+# "?" button. All but "none" un-pitch CCFv3's ~5° nose-down tilt; the scale factors
+# are in ccf_coords.PAXINOS_ALIGNMENTS.
 _PAXINOS_ALIGNMENT_CHOICES = [
-    ("Pinpoint / Qiu 2018 (5° pitch)", "qiu2018"),
-    ("Pinpoint / Dorr 2008 (5° pitch)", "dorr2008"),
-    ("Allen forum (5° pitch, DV ×0.943)", "allen_forum"),
-    ("None - linear mirror, no tilt", "none"),
+    ("Tilt + all-axis scaling - recommended (Qiu 2018)", "qiu2018"),
+    ("Tilt + AP/DV scaling (Dorr 2008)", "dorr2008"),
+    ("Tilt + DV scaling only (Allen community)", "allen_forum"),
+    ("No correction - mirror onto bregma, no tilt", "none"),
 ]
+
+#: Shown by the "?" next to the Paxinos checkbox. Long-form on purpose: this is the
+#: one place the CCF/Paxinos distinction and the size of the guess are spelled out.
+_PAXINOS_HELP = """\
+<b>Paxinos is a conversion applied at export, not an atlas you register to.</b>
+
+<p>Registration, the atlas overlay and every coordinate stored in your project are in
+Allen CCF. There is no Paxinos volume to warp onto - it is a stereotaxic reference
+frame, so it can only be reached by transforming finished CCF coordinates.</p>
+
+<p>The conversion re-origins on bregma, un-pitches CCFv3's ~5° nose-down tilt relative
+to a flat-skull frame, and applies published per-axis scale factors:</p>
+
+<table cellpadding="4">
+<tr><th align="left">Preset</th><th>Tilt</th><th>AP</th><th>ML</th><th>DV</th></tr>
+<tr><td>Qiu 2018 (recommended)</td><td align="center">5°</td>
+    <td align="center">1.031</td><td align="center">0.952</td>
+    <td align="center">0.885</td></tr>
+<tr><td>Dorr 2008</td><td align="center">5°</td>
+    <td align="center">1.087</td><td align="center">1.000</td>
+    <td align="center">0.952</td></tr>
+<tr><td>Allen community</td><td align="center">5°</td>
+    <td align="center">1.000</td><td align="center">1.000</td>
+    <td align="center">0.943</td></tr>
+<tr><td>No correction</td><td align="center">0°</td>
+    <td align="center">1.000</td><td align="center">1.000</td>
+    <td align="center">1.000</td></tr>
+</table>
+
+<p>Output is millimetres from bregma: AP anterior-positive, ML 0 at the midline, DV
+depth below bregma.</p>
+
+<p><b>Paxinos region <i>labels</i> are a separate thing, and they need no estimate at
+all.</b> The Chon/Kim Unified atlases carry Franklin-Paxinos nomenclature over the
+same CCF volume as Allen, so selecting one under <i>Region atlas</i> names regions
+M1, S1BF, 4V rather than MOp, SSp-bfd, V4 - in the hover readout, the 3D views, and the
+section series' outlines and region list. That is a relabelling, not a transform, so
+nothing is approximated.</p>
+
+<p><b>These presets are estimates and they disagree with each other</b> - by more than
+a millimetre deep in the brain. None of them is ground truth for your animal. Treat
+the choice as a stated assumption and validate against your own histology.</p>
+"""
 
 if TYPE_CHECKING:
     import napari
@@ -83,8 +169,13 @@ class VizExportPanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
+        # Both rows act on the probes, so they belong together and apart from the
+        # visualisation and export groups below.
+        probe_box = QGroupBox("Probe")
+        probe_layout = QVBoxLayout(probe_box)
+
         # Recompute probe/electrode CCF coordinates from the current registration.
-        self._update_btn = QPushButton("Update coordinates")
+        self._update_btn = QPushButton("Update probe coordinates")
         self._update_btn.setToolTip(
             "Re-map every probe tip / entry (and per-channel) from its pixel "
             "position through the current registration - including manual atlas "
@@ -94,7 +185,7 @@ class VizExportPanelWidget(QWidget):
             "open 3D window is refreshed too. Needs the atlas loaded."
         )
         self._update_btn.clicked.connect(self._update_coordinates)
-        layout.addWidget(self._update_btn)
+        probe_layout.addWidget(self._update_btn)
 
         # Enforce a rigid multi-shank array when re-mapping (physically, a
         # Neuropixels shank set is parallel + evenly spaced; independent per-section
@@ -110,14 +201,22 @@ class VizExportPanelWidget(QWidget):
             "little slack. Re-applied on every Update coordinates / View 3D."
         )
         rigid_row.addWidget(self._rigid_check)
-        rigid_row.addWidget(QLabel("tolerance"))
+        # Without the stretch the checkbox label and "tolerance" run together and
+        # read as one sentence.
+        rigid_row.addStretch(1)
+        tol_label = QLabel("tolerance")
+        tol_label.setToolTip("0 = strict even array; 1 = keep picks unchanged.")
+        rigid_row.addWidget(tol_label)
         self._rigid_tol = QDoubleSpinBox()
         self._rigid_tol.setRange(0.0, 1.0)
         self._rigid_tol.setSingleStep(0.05)
         self._rigid_tol.setValue(0.25)
+        self._rigid_tol.setFixedWidth(88)
         self._rigid_tol.setToolTip("0 = strict even array; 1 = keep picks unchanged.")
         rigid_row.addWidget(self._rigid_tol)
-        layout.addLayout(rigid_row)
+        probe_layout.addLayout(rigid_row)
+        layout.addWidget(probe_box)
+        layout.addSpacing(10)
 
         viz_box = QGroupBox("3D Visualization")
         viz_layout = QVBoxLayout(viz_box)
@@ -131,10 +230,16 @@ class VizExportPanelWidget(QWidget):
         for label, aid in _COMPATIBLE_REGION_ATLASES:
             self._region_atlas_combo.addItem(label, aid)
         self._region_atlas_combo.setToolTip(
-            "Draw region meshes / acronyms from this atlas in the 3D views and Plotly "
-            "export. These CCFv3-aligned 25 µm atlases share the registration atlas's "
-            "voxel space, so probe coordinates are identical - only the region "
-            "annotation differs. 'Same as registration' uses the project atlas."
+            "Which atlas names the regions - in the 3D views, the hover readout and "
+            "the section-series outlines and region list. These CCFv3-aligned "
+            "atlases cover the same volume as the registration atlas, so probe "
+            "coordinates are identical and only the naming differs.\n"
+            "Chon/Kim carries Franklin-Paxinos labels (M1, S1BF, 4V) where Allen uses "
+            "its own (MOp, SSp-bfd, V4), so pick it to get Paxinos region names out.\n"
+            "'Same as registration' uses the project atlas.\n"
+            "Note: kim_mouse_isotropic_20um samples the same volume at 20 µm and "
+            "its annotation sits ~102 µm posterior of the 25 µm release, so a label "
+            "within a section of a boundary may differ."
         )
         atlas_row.addWidget(self._region_atlas_combo)
         viz_layout.addLayout(atlas_row)
@@ -151,57 +256,109 @@ class VizExportPanelWidget(QWidget):
         reg_row.addWidget(self._extra_regions)
         viz_layout.addLayout(reg_row)
 
-        plotly_btn = QPushButton("Export Plotly HTML")
-        plotly_btn.clicked.connect(self._export_plotly)
-        napari_btn = QPushButton("View in napari 3D")
+        napari_btn = QPushButton("3D view")
+        napari_btn.setToolTip(
+            "Open the probes and atlas in a separate napari 3D window. For a file "
+            "you can share, use Export with the '3D view as interactive HTML' format."
+        )
         napari_btn.clicked.connect(self._view_napari3d)
-        viz_layout.addWidget(plotly_btn)
         viz_layout.addWidget(napari_btn)
         layout.addWidget(viz_box)
+        layout.addSpacing(10)
 
         export_box = QGroupBox("Export")
         export_layout = QVBoxLayout(export_box)
-        herbs_btn = QPushButton("Export pkl file")
-        herbs_btn.clicked.connect(self._export_herbs)
-        ch_btn = QPushButton("Export per-channel CSV")
-        ch_btn.clicked.connect(self._export_channel_csv)
-        export_layout.addWidget(herbs_btn)
-        export_layout.addWidget(ch_btn)
-
-        # Paxinos is not in the atlas list and never will be: registration, the
-        # overlay and every stored coordinate are CCF. Saying so here is the only
-        # way a user learns it without guessing from its absence.
-        pax_note = QLabel(
-            "Paxinos is a conversion applied here, at export - not an atlas you "
-            "register to. Registration and all stored coordinates are CCF; the "
-            "button below converts the finished CCF coordinates to Paxinos "
-            "stereotaxic mm (bregma origin)."
+        export_layout.addWidget(
+            _muted(
+                "Writes the registered result to a file - coordinates, or the 3D "
+                "view as a shareable page. Pick the format, then Export."
+            )
         )
-        pax_note.setWordWrap(True)
-        pax_note.setStyleSheet("color: palette(mid);")
-        export_layout.addWidget(pax_note)
+
+        fmt_row = QHBoxLayout()
+        fmt_row.addWidget(QLabel("Format:"))
+        #: Paxinos is disabled for pkl, so the tick is remembered across a
+        #: format switch instead of being lost.
+        self._paxinos_wanted = False
+        self._format_combo = QComboBox()
+        for label, key in _EXPORT_FORMATS:
+            self._format_combo.addItem(label, key)
+        self._format_combo.currentIndexChanged.connect(self._on_export_format_changed)
+        fmt_row.addWidget(self._format_combo, 1)
+        export_layout.addLayout(fmt_row)
 
         pax_row = QHBoxLayout()
-        pax_row.addWidget(QLabel("Paxinos align:"))
+        self._paxinos_check = QCheckBox("Convert to Paxinos stereotaxic coordinates")
+        self._paxinos_check.toggled.connect(self._on_paxinos_toggled)
+        pax_row.addWidget(self._paxinos_check, 1)
+        help_btn = QToolButton()
+        help_btn.setText("?")
+        help_btn.setToolTip("What Paxinos conversion means, and how much to trust it")
+        help_btn.clicked.connect(self._show_paxinos_help)
+        pax_row.addWidget(help_btn)
+        export_layout.addLayout(pax_row)
+
+        align_row = QHBoxLayout()
+        align_row.addSpacing(18)  # indented: it only qualifies the checkbox above
+        self._paxinos_label = QLabel("Alignment:")
+        align_row.addWidget(self._paxinos_label)
         self._paxinos_combo = QComboBox()
         for label, key in _PAXINOS_ALIGNMENT_CHOICES:
             self._paxinos_combo.addItem(label, key)
-        self._paxinos_combo.setToolTip(
-            "CCF→Paxinos stereotaxic transform. CCFv3 is pitched ~5° nose-down vs a "
-            "flat-skull frame, so all but 'None' un-pitch by 5° and apply published "
-            "axis scaling (Qiu 2018 = Pinpoint's recommended default). These are "
-            "ESTIMATES with real variance - validate against histology."
-        )
-        pax_row.addWidget(self._paxinos_combo)
-        export_layout.addLayout(pax_row)
+        align_row.addWidget(self._paxinos_combo, 1)
+        export_layout.addLayout(align_row)
 
-        pax_btn = QPushButton("Export per-channel Paxinos CSV")
-        pax_btn.setToolTip(
-            "Per-channel coordinates in Paxinos stereotaxic mm (bregma origin): "
-            "AP anterior-positive, ML 0 at midline, DV depth below bregma."
+        # Only meaningful for the section-series format, so shown only for it
+        # rather than sitting there greyed out next to three other formats.
+        self._series_box = QWidget()
+        series_layout = QVBoxLayout(self._series_box)
+        series_layout.setContentsMargins(18, 0, 0, 0)
+        self._series_outlines = QCheckBox("Atlas outlines as sidecar images")
+        self._series_outlines.setChecked(True)
+        self._series_outlines.setToolTip(
+            "One transparent PNG per section holding the registered region "
+            "contours, in that section's own pixel frame."
         )
-        pax_btn.clicked.connect(self._export_paxinos_csv)
-        export_layout.addWidget(pax_btn)
+        self._series_overlays = QCheckBox("Also write sections with outlines burnt in")
+        self._series_overlays.setToolTip(
+            "A third image per section with the contours drawn on the histology - "
+            "convenient to flick through, not editable."
+        )
+        self._series_svg = QCheckBox("Outlines also as SVG (editable)")
+        self._series_svg.setToolTip(
+            "One vector path per atlas region, tagged with its acronym and full "
+            "name, so the outlines can be restyled and labelled in Illustrator or "
+            "Inkscape instead of traced from a picture."
+        )
+        self._series_regions = QCheckBox("Region list (regions.csv)")
+        self._series_regions.setToolTip(
+            "Every atlas region appearing in each section, with the acronym and "
+            "full name the canvas shows on hover, plus its area in pixels."
+        )
+        self._series_straighten = QCheckBox("Straighten sections (DeepSlice angle)")
+        self._series_straighten.setChecked(True)
+        self._series_straighten.setToolTip(
+            "Rotate each exported section - and its outline - by the tilt DeepSlice "
+            "measured, so the series is continuous to flick through. Presentation "
+            "only: the project, the registration and every CCF coordinate are "
+            "untouched. Any rotation you set in the Histology tab is already in the "
+            "image, and is not applied twice."
+        )
+        self._series_outlines.toggled.connect(self._series_svg.setEnabled)
+        self._series_outlines.toggled.connect(self._series_regions.setEnabled)
+        for box in (
+            self._series_outlines, self._series_overlays, self._series_svg,
+            self._series_regions, self._series_straighten,
+        ):
+            series_layout.addWidget(box)
+        self._series_outlines.toggled.connect(self._series_overlays.setEnabled)
+        self._series_overlays.setEnabled(True)
+        export_layout.addWidget(self._series_box)
+
+        export_btn = QPushButton("Export\u2026")
+        export_btn.clicked.connect(self._export)
+        export_layout.addWidget(export_btn)
+        self._on_export_format_changed()
         layout.addWidget(export_box)
 
         self._status = QLabel("")
@@ -434,12 +591,143 @@ class VizExportPanelWidget(QWidget):
         except Exception as exc:  # noqa: BLE001
             _error_dialog(self, "3D view failed", str(exc))
 
-    def _export_herbs(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save HERBS pkl", "", "Pickle files (*.pkl);;All files (*)"
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+
+    def _on_export_format_changed(self, _idx: int = 0) -> None:
+        """Paxinos is a CSV-only option, so say so rather than exporting CCF quietly.
+
+        The pkl carries CCF micrometres for downstream tools that expect them; there
+        is no Paxinos variant of it, and silently ignoring a ticked box would be the
+        worst of the options.
+        """
+        fmt = self._format_combo.currentData()
+        self._series_box.setVisible(fmt == "series")
+        csv = fmt == "csv"
+        self._paxinos_check.setEnabled(csv)
+        self._paxinos_check.setToolTip(
+            ""
+            if csv
+            else "Only the CSV carries stereotaxic coordinates; the other formats "
+            "are CCF."
         )
-        if not path:
+        if csv:
+            # Restore what the user asked for: passing through pkl should not quietly
+            # cost them the Paxinos choice they had already made.
+            self._paxinos_check.setChecked(self._paxinos_wanted)
+        else:
+            self._paxinos_wanted = self._paxinos_check.isChecked()
+            self._paxinos_check.setChecked(False)
+        self._on_paxinos_toggled(self._paxinos_check.isChecked())
+
+    def _on_paxinos_toggled(self, checked: bool) -> None:
+        if self._paxinos_check.isEnabled():
+            self._paxinos_wanted = checked
+        self._paxinos_label.setEnabled(checked)
+        self._paxinos_combo.setEnabled(checked)
+
+    def _show_paxinos_help(self) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle("Paxinos stereotaxic coordinates")
+        box.setTextFormat(Qt.RichText)
+        box.setText(_PAXINOS_HELP)
+        box.exec_() if hasattr(box, "exec_") else box.exec()
+
+    def _export(self) -> None:
+        """One button: pick a destination for the selected format, then write it."""
+        fmt = self._format_combo.currentData()
+        if fmt == "series":
+            self._ensure_display_atlas(self._export_series)
             return
+        if fmt == "html":
+            self._export_plotly()
+            return
+        if fmt == "pkl":
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export coordinates to pkl", "", "Pickle files (*.pkl);;All files (*)"
+            )
+            if path:
+                self._write_herbs_pkl(path)
+            return
+        paxinos = self._paxinos_check.isChecked()
+        title = "Export Paxinos CSV" if paxinos else "Export per-channel CSV"
+        path, _ = QFileDialog.getSaveFileName(
+            self, title, "", "CSV files (*.csv);;All files (*)"
+        )
+        if path:
+            self._write_channel_csv(path, paxinos=paxinos)
+
+    def _export_series(self) -> None:
+        """Write the section series into a folder the user picks.
+
+        A folder, not a file: this export is a set of images plus a manifest, and
+        asking for one filename would only invite a name that is then decorated.
+        """
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose a folder for the section series"
+        )
+        if not directory:
+            return
+        try:
+            from histo_to_ccf.io.series_export import export_section_series
+
+            project_path = self._state.project_path
+            result = export_section_series(
+                self._state.project,
+                directory,
+                atlas=self._display_atlas,
+                base_dir=None if project_path is None else Path(project_path).parent,
+                write_outlines=self._series_outlines.isChecked(),
+                write_overlays=(
+                    self._series_outlines.isChecked()
+                    and self._series_overlays.isChecked()
+                ),
+                write_svg=(
+                    self._series_outlines.isChecked() and self._series_svg.isChecked()
+                ),
+                write_regions=(
+                    self._series_outlines.isChecked()
+                    and self._series_regions.isChecked()
+                ),
+                straighten=self._series_straighten.isChecked(),
+                # The anchorings were measured on the registration atlas's grid;
+                # the region atlas may sample the same volume differently.
+                source_shape=getattr(
+                    getattr(self._state.atlas, "reference", None), "shape", None
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "Section series export failed", str(exc))
+            return
+        if result.sections == 0:
+            _error_dialog(
+                self, "Nothing to export",
+                "No sections found. Detect sections on a slide first.",
+            )
+            return
+        extras = "".join(
+            part
+            for part, n in (
+                (f", {result.svgs} svg", result.svgs),
+                (f", {result.regions} region row(s)", result.regions),
+            )
+            if n
+        )
+        message = (
+            f"Section series: {result.sections} section(s), {result.outlines} "
+            f"outline(s){extras} \u2192 {Path(directory).name}"
+        )
+        if result.skipped_outlines:
+            # Naming the count is the difference between a gap and a silent omission.
+            reasons = {reason for _idx, reason in result.skipped_outlines}
+            message += (
+                f"  \u00b7  no outline for {len(result.skipped_outlines)}: "
+                + "; ".join(sorted(reasons))
+            )
+        self._status.setText(message)
+
+    def _write_herbs_pkl(self, path: str) -> None:
         try:
             import numpy as np
 
@@ -459,43 +747,29 @@ class VizExportPanelWidget(QWidget):
                 _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
                 return
             write_herbs_pkl(path, all_ccf)
-            self._status.setText(f"HERBS pkl → {Path(path).name}")
+            self._status.setText(
+                f"Coordinates (pkl, {len(all_ccf)} shank(s)) \u2192 {Path(path).name}"
+            )
         except Exception as exc:  # noqa: BLE001
-            _error_dialog(self, "HERBS export failed", str(exc))
+            _error_dialog(self, "pkl export failed", str(exc))
 
-    def _export_channel_csv(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save per-channel CSV", "", "CSV files (*.csv);;All files (*)"
-        )
-        if not path:
-            return
+    def _write_channel_csv(self, path: str, *, paxinos: bool) -> None:
         try:
-            from histo_to_ccf.probes.channels import export_channel_csv
+            from histo_to_ccf.probes.channels import (
+                export_channel_csv,
+                export_paxinos_csv,
+            )
 
-            n = export_channel_csv(self._state.project, path)
+            if paxinos:
+                align = self._paxinos_combo.currentData()
+                n = export_paxinos_csv(self._state.project, path, alignment=align)
+                what = f"Paxinos CSV ({align})"
+            else:
+                n = export_channel_csv(self._state.project, path)
+                what = "Per-channel CSV (CCF)"
             if n == 0:
                 _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
             else:
-                self._status.setText(f"Per-channel CSV ({n} rows) → {Path(path).name}")
+                self._status.setText(f"{what}, {n} rows \u2192 {Path(path).name}")
         except Exception as exc:  # noqa: BLE001
             _error_dialog(self, "CSV export failed", str(exc))
-
-    def _export_paxinos_csv(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Paxinos CSV", "", "CSV files (*.csv);;All files (*)"
-        )
-        if not path:
-            return
-        try:
-            from histo_to_ccf.probes.channels import export_paxinos_csv
-
-            align = self._paxinos_combo.currentData()
-            n = export_paxinos_csv(self._state.project, path, alignment=align)
-            if n == 0:
-                _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
-            else:
-                self._status.setText(
-                    f"Paxinos CSV ({n} rows, {align}) → {Path(path).name}"
-                )
-        except Exception as exc:  # noqa: BLE001
-            _error_dialog(self, "Paxinos export failed", str(exc))

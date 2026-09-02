@@ -44,12 +44,12 @@ always available). The menu bar has two menus: **Project** (Save / Load / Close 
 
 ## 2 - Histology tab: load the slide and detect sections
 
-1. Click **Open slide** → select your image. You can select **several images at
+1. Click **Open histology image(s)** → select your image. You can select **several images at
    once**; they are merged into one combined canvas, stacked top-to-bottom, so all
    sections share one coordinate space.  
    The slide appears as a gray layer in the viewer.  
    **Swapping the image:** once a slide is loaded (e.g. after reloading a project),
-   **Open slide** again *replaces* the current image instead of merging. If the new
+   **Open histology image(s)** again *replaces* the current image instead of merging. If the new
    image is the **same size**, the section boxes + registration are kept - handy for
    reusing a registration on the same section imaged in a different channel/dye. A
    different-size image is treated as a new slide (sections cleared, re-detect).

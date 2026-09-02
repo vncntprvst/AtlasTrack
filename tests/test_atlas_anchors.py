@@ -78,11 +78,22 @@ def test_the_lookup_is_case_and_whitespace_tolerant():
 
 
 def test_a_longer_prefix_wins_over_a_shorter_one():
-    """Guards the table against a future entry that is a prefix of another."""
+    """Overlapping keys are expected - "kim_mouse" against "kim_mouse_isotropic",
+    where one release of a family needs its own anchor. What matters is that the
+    longest match wins, so the specific entry is never shadowed by the family one.
+    """
     table = dict(BREGMA_AP_BY_ATLAS)
-    for key in table:
-        others = [k for k in table if k != key and k.startswith(key)]
-        assert not others, f"{key!r} shadows {others!r}; the sort must break the tie"
+    overlaps = [
+        (short, long)
+        for short in table
+        for long in table
+        if long != short and long.startswith(short)
+    ]
+    assert overlaps, "no overlapping keys left to exercise; drop this test"
+    for short, long in overlaps:
+        assert bregma_ap_from_origin_um(long) == pytest.approx(table[long]), (
+            f"{short!r} shadowed {long!r}"
+        )
 
 
 # ------------------------------------------------------------------- the anchors
@@ -267,3 +278,113 @@ def test_the_augmented_offset_matches_the_measurement():
     assert float(np.std(deltas)) < 10.0
     tabulated = bregma_ap_from_origin_um("ccfv3augmented_mouse_25um")
     assert tabulated - BREGMA_AP_FROM_ORIGIN_UM == pytest.approx(measured, abs=SHIFT_TOL_UM)
+
+
+# ---------------------------------------------------------------------------
+# The isotropic Chon/Kim release has its own anchor
+# ---------------------------------------------------------------------------
+
+
+def test_the_isotropic_kim_release_does_not_inherit_the_25um_anchor():
+    """Its annotation is translated +102 µm along AP relative to the 25 µm release
+    (volume centroids over 811 structures whose volumes agree within 10%: AP
+    +101.8 ± 26.6 µm, and a shift-vs-AP slope of +0.0008 µm/µm, so a pure
+    translation). Prefix-matching "kim_mouse" would have silently given it 5400."""
+    from histo_to_ccf.io.ccf_coords import bregma_ap_from_origin_um
+
+    assert bregma_ap_from_origin_um("kim_mouse_25um") == 5400.0
+    assert bregma_ap_from_origin_um("kim_mouse_isotropic_20um") == 5502.0
+
+
+def test_the_longer_prefix_wins_over_the_family_prefix():
+    """Both "kim_mouse" and "kim_mouse_isotropic" match; the specific one must win."""
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_BY_ATLAS, bregma_ap_from_origin_um
+
+    assert "kim_mouse" in BREGMA_AP_BY_ATLAS
+    assert "kim_mouse_isotropic" in BREGMA_AP_BY_ATLAS
+    assert bregma_ap_from_origin_um("kim_mouse_isotropic_20um") == pytest.approx(
+        BREGMA_AP_BY_ATLAS["kim_mouse_isotropic"]
+    )
+
+
+def test_the_isotropic_offset_matches_the_measured_shift():
+    """The anchor is the 25 µm one plus the measured translation, not a guess."""
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_BY_ATLAS
+
+    shift = BREGMA_AP_BY_ATLAS["kim_mouse_isotropic"] - BREGMA_AP_BY_ATLAS["kim_mouse"]
+    assert shift == pytest.approx(102.0, abs=1.0)
+
+
+def test_paxinos_export_now_works_for_the_isotropic_release():
+    """It used to inherit 5400 by accident; now it has a stated value, so the
+    export neither refuses nor ships a frame that is 102 µm out."""
+    from histo_to_ccf.io.ccf_coords import anchors_for_atlas_name
+
+    anchors = anchors_for_atlas_name("kim_mouse_isotropic_20um")
+
+    assert anchors.has_bregma
+    assert anchors.require_bregma() == 5502.0
+
+
+@pytest.mark.slow
+def test_the_isotropic_kim_offset_matches_the_measurement():
+    """Re-derive the tabulated +102 µm from the two Kim releases themselves.
+
+    Both are the same ontology on the same physical volume, so structures can be
+    matched by id and every shared one is usable - unlike the Allen/augmented pair,
+    where parent regions are redrawn. Skipped unless both are already downloaded;
+    this must never trigger a network fetch.
+    """
+    pytest.importorskip("brainglobe_atlasapi")
+    from brainglobe_atlasapi import BrainGlobeAtlas
+    from brainglobe_atlasapi.list_atlases import get_downloaded_atlases
+
+    from histo_to_ccf.io.ccf_coords import BREGMA_AP_BY_ATLAS
+
+    needed = {"kim_mouse_25um", "kim_mouse_isotropic_20um"}
+    have = set(get_downloaded_atlases())
+    if not needed <= have:
+        pytest.skip(f"needs {sorted(needed - have)} downloaded")
+
+    def ap_centroids(atlas):
+        """AP centroid (µm) per label id, from the AP profile of each label."""
+        annotation = atlas.annotation
+        n = int(annotation.max()) + 1
+        counts = np.zeros(n, dtype=np.int64)
+        weighted = np.zeros(n, dtype=np.float64)
+        for i in range(annotation.shape[0]):
+            c = np.bincount(annotation[i].ravel(), minlength=n)
+            counts += c
+            weighted += c * i
+        ok = counts > 0
+        out = np.full(n, np.nan)
+        out[ok] = weighted[ok] / counts[ok] * atlas.resolution[0]
+        return out, counts
+
+    coarse = BrainGlobeAtlas("kim_mouse_25um", check_latest=False)
+    fine = BrainGlobeAtlas("kim_mouse_isotropic_20um", check_latest=False)
+    ap_c, n_c = ap_centroids(coarse)
+    ap_f, n_f = ap_centroids(fine)
+
+    n = min(ap_c.size, ap_f.size)
+    # Volume in µm³, so the two grids are comparable; keep structures whose volume
+    # agrees within 10%, which drops the handful that were re-annotated.
+    vol_c = n_c[:n] * coarse.resolution[0] ** 3
+    vol_f = n_f[:n] * fine.resolution[0] ** 3
+    with np.errstate(invalid="ignore", divide="ignore"):
+        agree = np.minimum(vol_c, vol_f) / np.maximum(vol_c, vol_f)
+    keep = (
+        (n_c[:n] > 0) & (n_f[:n] > 0) & (agree > 0.90) & (vol_c > 2e6)
+    )
+    keep[0] = False  # background
+
+    shifts = ap_f[:n][keep] - ap_c[:n][keep]
+    assert keep.sum() > 500, f"only {keep.sum()} usable structures"
+
+    tabulated = (
+        BREGMA_AP_BY_ATLAS["kim_mouse_isotropic"] - BREGMA_AP_BY_ATLAS["kim_mouse"]
+    )
+    assert float(np.median(shifts)) == pytest.approx(tabulated, abs=15.0)
+    # A pure translation: the shift must not grow with AP, or it is a scale error.
+    slope = np.polyfit(ap_c[:n][keep], shifts, 1)[0]
+    assert abs(slope) < 0.01

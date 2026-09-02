@@ -40,6 +40,7 @@ from histo_to_ccf.ephys.landmarks import (
     segment_scales,
 )
 from histo_to_ccf.gui.widgets.ephys_features_view import EphysFeaturesView, pyqtgraph_available
+from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
 
 if TYPE_CHECKING:
     from histo_to_ccf.ephys.penetration import PenetrationProfile
@@ -68,6 +69,9 @@ class EphysAlignmentPanel(QWidget):
         # Held apart from the applied fit so the two can disagree until Align.
         self._pending: list[list[float]] = []
         self._build_ui()
+        # Long explanatory tooltips would otherwise render as one screen-wide
+        # line; see histo_to_ccf.gui.widgets.tooltips.
+        wrap_tooltips(self)
 
     # -- construction ----------------------------------------------------
 

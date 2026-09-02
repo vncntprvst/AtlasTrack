@@ -85,8 +85,7 @@ class RegisterPanelWidget(QWidget):
         self._use_deepslice.setToolTip(
             "Run DeepSlice on all section images first to predict a consistent set "
             "of atlas planes across the series (with angle propagation and AP "
-            "ordering), then refine each with the B-spline. No manual AP needed.\n"
-            "First run downloads the DeepSlice model and is slow."
+            "ordering), then refine each with the B-spline. No manual AP needed."
         )
         params_layout.addWidget(self._use_deepslice)
 
@@ -423,6 +422,7 @@ class RegisterPanelWidget(QWidget):
             return
 
         import numpy as np
+
         from histo_to_ccf.io.image import crop
 
         use_deepslice = self._use_deepslice.isChecked()
@@ -468,7 +468,13 @@ class RegisterPanelWidget(QWidget):
                 )
                 self._start_register(section_images, transforms_dir, cached)
                 return
-            self._status.setText("Running DeepSlice plane prediction (first run is slow)")
+            from histo_to_ccf.registration.deepslice_adapter import (
+                deepslice_run_note,
+            )
+
+            self._status.setText(
+                f"Running DeepSlice plane prediction{deepslice_run_note()}"
+            )
             from histo_to_ccf.gui.workers import deepslice_worker
 
             ds_dir = transforms_dir.parent / "deepslice"
@@ -820,6 +826,25 @@ class RegisterPanelWidget(QWidget):
     # ------------------------------------------------------------------
     # Manual atlas adjustment (drag the overlay in the viewer)
     # ------------------------------------------------------------------
+
+    def select_section(self, section_index: int) -> bool:
+        """Point the manual-adjust picker at ``section_index``; True if it took.
+
+        Driven by clicking a section in the canvas. Refused while a manual adjust
+        is in progress: the drag applies to whichever section the picker names, so
+        switching it mid-gesture would land the correction on the wrong section.
+        Only registered sections are listed, so an unregistered one is not an error.
+        """
+        if self._adjust_btn.isChecked():
+            return False
+        pos = self._adjust_combo.findData(section_index)
+        if pos < 0:
+            self._populate_adjust_combo()
+            pos = self._adjust_combo.findData(section_index)
+        if pos < 0:
+            return False
+        self._adjust_combo.setCurrentIndex(pos)
+        return True
 
     def _populate_adjust_combo(self) -> None:
         """List registered sections in the manual-adjust picker."""

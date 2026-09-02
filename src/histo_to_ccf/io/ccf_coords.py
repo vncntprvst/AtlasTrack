@@ -73,6 +73,13 @@ BREGMA_AP_BY_ATLAS: dict[str, float] = {
     "allen_mouse": 5400.0,
     "kim_mouse": 5400.0,
     "ccfv3augmented_mouse": 5746.0,
+    # The isotropic Chon/Kim v2 samples the same volume at 20 um, but its annotation
+    # is translated +102 um along AP relative to the 25 um release. Measured as volume
+    # centroids over the 811 structures whose volume agrees between the two releases
+    # within 10%: AP +101.8 +/- 26.6 um, DV +5.8, ML +7.7, and a shift-vs-AP slope of
+    # +0.0008 um/um - i.e. a pure translation, not a scaling difference. Longest
+    # prefix wins in the lookup below, so this beats the "kim_mouse" entry.
+    "kim_mouse_isotropic": 5502.0,
 }
 
 

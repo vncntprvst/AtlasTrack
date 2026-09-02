@@ -5,12 +5,14 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import (
     QComboBox,
+    QGroupBox,
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -59,7 +61,20 @@ class AtlasBrowserWidget(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
 
         # Atlas selector
-        layout.addWidget(QLabel("Atlas:"))
+        atlas_label_row = QHBoxLayout()
+        atlas_label_row.addWidget(QLabel("Atlas:"))
+        atlas_label_row.addStretch(1)
+        # Which atlas you pick changes the region names and, less visibly, where
+        # bregma sits. The reference sheet is the same one under Settings > Atlases.
+        atlas_help = QToolButton()
+        atlas_help.setText("?")
+        atlas_help.setToolTip(
+            "What each atlas is, where it came from, and where its bregma sits "
+            "(also under Settings ▸ Atlases)."
+        )
+        atlas_help.clicked.connect(self._show_atlas_reference)
+        atlas_label_row.addWidget(atlas_help)
+        layout.addLayout(atlas_label_row)
         self._atlas_combo = QComboBox()
         for label, _ in _QUICK_PICKS:
             self._atlas_combo.addItem(label)
@@ -109,6 +124,11 @@ class AtlasBrowserWidget(QWidget):
         # above, so they get their own heading and a clear gap before it.
         layout.addWidget(section_header("AP assignment", top_margin=22))
 
+        # Two ways to do the same job, so they are two boxes rather than one list
+        # of controls in which the last button looks like the final step.
+        quick_box = QGroupBox("Quick manual assignment")
+        quick_layout = QVBoxLayout(quick_box)
+
         # AP position, shown relative to bregma (bregma = 0, anterior positive).
         ap_row = QHBoxLayout()
         ap_row.addWidget(QLabel("AP from bregma (µm):"))
@@ -121,7 +141,7 @@ class AtlasBrowserWidget(QWidget):
             "0 = bregma, negative = posterior, positive = anterior."
         )
         ap_row.addWidget(self._ap_spin)
-        layout.addLayout(ap_row)
+        quick_layout.addLayout(ap_row)
 
         # Section selector
         sec_row = QHBoxLayout()
@@ -130,20 +150,24 @@ class AtlasBrowserWidget(QWidget):
         self._sec_spin.setRange(0, 9999)
         self._sec_spin.setDecimals(0)
         sec_row.addWidget(self._sec_spin)
-        layout.addLayout(sec_row)
+        quick_layout.addLayout(sec_row)
 
         assign_btn = QPushButton("Assign AP to section")
         assign_btn.clicked.connect(self._assign_ap)
-        layout.addWidget(assign_btn)
+        quick_layout.addWidget(assign_btn)
+        layout.addWidget(quick_box)
 
         # Below the one-section-at-a-time controls it replaces: the matcher is
         # the fuller way to do the same job, not a prerequisite for it.
+        matcher_box = QGroupBox("Matching viewer")
+        matcher_layout = QVBoxLayout(matcher_box)
         matcher_btn = QPushButton("Open atlas matcher")
         matcher_btn.setToolTip(
             "Side-by-side / overlay tool to match each section to an atlas AP."
         )
         matcher_btn.clicked.connect(self._open_matcher)
-        layout.addWidget(matcher_btn)
+        matcher_layout.addWidget(matcher_btn)
+        layout.addWidget(matcher_box)
 
         self._assign_status = QLabel("")
         layout.addWidget(self._assign_status)
@@ -227,6 +251,11 @@ class AtlasBrowserWidget(QWidget):
     def _on_atlas_load_finished(self) -> None:
         self._atlas_loading = False
         self._load_btn.setEnabled(True)
+
+    def _show_atlas_reference(self) -> None:
+        from histo_to_ccf.gui.widgets.atlas_help_dialog import show_atlas_reference
+
+        show_atlas_reference(self.window())
 
     def _atlas_switch_warning(self, previous: str | None, atlas_id: str) -> str:
         """Warn when the project's section APs were assigned under another atlas.

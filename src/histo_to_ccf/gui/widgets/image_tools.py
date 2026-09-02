@@ -75,11 +75,48 @@ class ImageToolsWidget(QWidget):
         # Refresh the section list whenever section scope is chosen.
         self._scope_section.toggled.connect(self._on_scope_section_toggled)
 
+        # Rotation is its own job, not a footnote to the scope selector: it gets a
+        # box of its own, matching Flip below.
+        rot_box = QGroupBox("Rotation")
+        rot_box_layout = QVBoxLayout(rot_box)
+        rot_row = QHBoxLayout()
+        rot_row.addWidget(QLabel("Angle (°):"))
+        self._rotation_spin = QDoubleSpinBox()
+        self._rotation_spin.setRange(-180.0, 180.0)
+        self._rotation_spin.setSingleStep(0.5)
+        self._rotation_spin.setDecimals(2)
+        self._rotation_spin.setToolTip(
+            "Rotate this section in the working image, the way Flip does. Because "
+            "registration is computed on that image, rotating a section that is "
+            "already registered invalidates its fit - re-register it.\n"
+            "For a straight series you usually do not need this: the section-series "
+            "export removes DeepSlice's measured tilt on its own."
+        )
+        self._rotation_spin.valueChanged.connect(self._on_rotation_changed)
+        rot_row.addWidget(self._rotation_spin, 1)
+        # DeepSlice knows the in-plane angle, but applying it automatically would
+        # rotate every section the moment a pre-match ran - and so invalidate every
+        # registration. Offer it; never take it.
+        self._rotation_ds_btn = QPushButton("From DeepSlice")
+        self._rotation_ds_btn.setToolTip(
+            "Set this section's rotation to the in-plane angle of DeepSlice's "
+            "predicted plane. Enabled only for sections that have a prediction."
+        )
+        self._rotation_ds_btn.clicked.connect(self._rotation_from_deepslice)
+        rot_row.addWidget(self._rotation_ds_btn)
+        rot_box_layout.addLayout(rot_row)
+
+        self._rotation_warning = QLabel("")
+        self._rotation_warning.setWordWrap(True)
+        self._rotation_warning.setStyleSheet("color: #e3b617;")  # napari warning
+        rot_box_layout.addWidget(self._rotation_warning)
+
         # "Adjustments" heads this block, set apart from the slide-loading
         # controls above it in this tab. Scope comes first: it says what Flip and
         # Levels below will act on.
         layout.addWidget(section_header("Adjustments", top_margin=4))
         layout.addWidget(scope_box)
+        layout.addWidget(rot_box)
 
         # Flip controls
         flip_box = QGroupBox("Flip")
@@ -152,6 +189,28 @@ class ImageToolsWidget(QWidget):
                 else:
                     self._state.active_section_idx = self._section_combo.currentData()
 
+    def select_section(self, section_index: int) -> bool:
+        """Point the Section dropdown at ``section_index``; True if it exists.
+
+        Called when a bounding box is selected in the viewer. The box *is* the
+        section, so re-picking it in the dropdown is a step that adds nothing and
+        can be got wrong - adjust the wrong section and the mistake is silent.
+
+        The list is repopulated first because a box can be newer than it: draw a
+        box, select it, and it would otherwise not be an option yet.
+        """
+        if self._section_combo.findData(section_index) < 0:
+            self._populate_sections()
+        pos = self._section_combo.findData(section_index)
+        if pos < 0:
+            return False
+        self._section_combo.setCurrentIndex(pos)
+        # setCurrentIndex is silent when the index is unchanged, so do not rely
+        # on the signal to have updated the active section.
+        self._state.active_section_idx = int(section_index)
+        self._show_rotation_for_active_section()
+        return True
+
     def _on_scope_section_toggled(self, checked: bool) -> None:
         if checked:
             self._populate_sections()
@@ -160,6 +219,73 @@ class ImageToolsWidget(QWidget):
         data = self._section_combo.currentData()
         if data is not None:
             self._state.active_section_idx = int(data)
+            self._show_rotation_for_active_section()
+
+    def _active_section(self):
+        """The section the 'Selected section' scope acts on, if there is one."""
+        slide_idx = self._state.active_slide_idx
+        section_idx = self._state.active_section_idx
+        if slide_idx is None or section_idx is None:
+            return None
+        if slide_idx >= len(self._state.project.slides):
+            return None
+        for section in self._state.project.slides[slide_idx].sections:
+            if section.index == section_idx:
+                return section
+        return None
+
+    def _show_rotation_for_active_section(self) -> None:
+        """Load the selected section's stored rotation without writing it back."""
+        section = self._active_section()
+        self._rotation_spin.blockSignals(True)
+        self._rotation_spin.setValue(
+            0.0 if section is None else float(getattr(section, "rotation_deg", 0.0))
+        )
+        self._rotation_spin.blockSignals(False)
+        anchoring = None if section is None else getattr(
+            section, "deepslice_anchoring", None
+        )
+        self._rotation_ds_btn.setEnabled(bool(anchoring) and len(anchoring) >= 6)
+        self._refresh_rotation_warning()
+
+    def _on_rotation_changed(self, value: float) -> None:
+        section = self._active_section()
+        if section is not None:
+            section.rotation_deg = float(value)
+        self._refresh_rotation_warning()
+
+    def _refresh_rotation_warning(self) -> None:
+        """Say so when a rotation has invalidated a fit that already exists.
+
+        Rotation is baked into the image the registration is computed against, so
+        rotating an already-registered section leaves its stored fit describing
+        pixels that have moved. Silence here would be the expensive kind: the
+        section still has a registration, it is just quietly wrong.
+        """
+        section = self._active_section()
+        rotated = section is not None and abs(
+            float(getattr(section, "rotation_deg", 0.0) or 0.0)
+        ) > 1e-6
+        registered = section is not None and (
+            getattr(section, "registration", None) is not None
+        )
+        self._rotation_warning.setText(
+            f"⚠ Section {section.index} was registered before this rotation. "
+            "Its fit was computed on the un-rotated image - re-register it."
+            if rotated and registered
+            else ""
+        )
+
+    def _rotation_from_deepslice(self) -> None:
+        section = self._active_section()
+        anchoring = None if section is None else getattr(
+            section, "deepslice_anchoring", None
+        )
+        if not anchoring or len(anchoring) < 6:
+            return
+        from histo_to_ccf.project.images import deepslice_rotation_deg
+
+        self._rotation_spin.setValue(round(deepslice_rotation_deg(anchoring), 2))
 
     # ------------------------------------------------------------------
     # Flip helpers

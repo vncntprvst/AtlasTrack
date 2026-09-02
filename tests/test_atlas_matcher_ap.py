@@ -406,3 +406,97 @@ def test_view_controls_are_enabled_only_where_they_act(qtbot) -> None:
     assert dlg._spread.isEnabled()
     assert not dlg._opacity.isEnabled()
     assert not dlg._edges_check.isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# Pre-match must not silently discard hand-set APs
+# ---------------------------------------------------------------------------
+
+
+def _prematch_with_dialog(qtbot, monkeypatch, sources, answer):
+    """Click Pre-match with ``answer`` given to the overwrite prompt.
+
+    The DeepSlice worker is replaced: this is about the guard in front of it, and
+    the real thing would load TensorFlow and run a model.
+    """
+    from qtpy.QtWidgets import QMessageBox
+
+    from histo_to_ccf.gui import workers
+
+    state = _state(aps=[1000.0 * i for i in range(8)], sources=sources)
+    dlg = _dialog(qtbot, state)
+    dlg._spacing_spin.setValue(500.0)  # so the "no spacing" prompt stays out of it
+
+    asked = []
+
+    def _question(_parent, title, text, *_args, **_kwargs):
+        asked.append((title, text))
+        return answer
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_question))
+    started = []
+    monkeypatch.setattr(
+        workers, "deepslice_worker", lambda *a, **k: started.append(a) or _NoWorker()
+    )
+    dlg._prematch_deepslice()
+    return dlg, asked, started
+
+
+class _NoWorker:
+    """A worker that is never going to run; only its wiring is exercised."""
+
+    class _Sig:
+        def connect(self, *_a, **_k):
+            return None
+
+    returned = _Sig()
+    errored = _Sig()
+
+    def start(self):
+        return None
+
+
+@pytest.mark.qt
+def test_prematch_warns_before_overwriting_hand_set_aps(qtbot, monkeypatch) -> None:
+    from qtpy.QtWidgets import QMessageBox
+
+    sources = ["deepslice"] * 8
+    sources[2] = sources[5] = "manual"
+
+    _dlg, asked, started = _prematch_with_dialog(
+        qtbot, monkeypatch, sources, QMessageBox.No
+    )
+
+    assert len(asked) == 1
+    title, text = asked[0]
+    assert "Overwrite" in title
+    assert "2 section(s)" in text
+    assert "2, 5" in text  # names which ones, so the user can judge the cost
+    assert not started  # declining must not run DeepSlice
+
+
+@pytest.mark.qt
+def test_prematch_proceeds_when_the_overwrite_is_accepted(qtbot, monkeypatch) -> None:
+    from qtpy.QtWidgets import QMessageBox
+
+    sources = ["manual"] + ["deepslice"] * 7
+
+    _dlg, asked, started = _prematch_with_dialog(
+        qtbot, monkeypatch, sources, QMessageBox.Yes
+    )
+
+    assert len(asked) == 1
+    assert started
+
+
+@pytest.mark.qt
+def test_prematch_does_not_prompt_when_nothing_was_set_by_hand(qtbot, monkeypatch):
+    """A prompt on every run is one people learn to click through."""
+    from qtpy.QtWidgets import QMessageBox
+
+    _dlg, asked, started = _prematch_with_dialog(
+        qtbot, monkeypatch, ["deepslice"] * 8, QMessageBox.No
+    )
+
+    assert asked == []
+    assert started

@@ -40,6 +40,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
 from histo_to_ccf.probes.trajectory_refine import array_axes, transformed_array
 
 if TYPE_CHECKING:
@@ -154,6 +155,9 @@ class TrajectoryPreviewDialog(QDialog):
             # asking it here would raise rather than report the real problem.
             self._after_tips, self._after_entries = self._tips, self._entries
         self._build_ui()
+        # Long explanatory tooltips would otherwise render as one screen-wide
+        # line; see histo_to_ccf.gui.widgets.tooltips.
+        wrap_tooltips(self)
         self.refresh()
 
     # -- state -----------------------------------------------------------

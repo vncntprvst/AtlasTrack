@@ -48,6 +48,7 @@ from histo_to_ccf.ephys.discovery import (
     derive_electrode_range,
     grouping_warnings,
 )
+from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
 from histo_to_ccf.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
@@ -78,6 +79,9 @@ class EphysDiscoveryDialog(QDialog):
         self._worker = None
         self._plot_ok = False
         self._build_ui()
+        # Long explanatory tooltips would otherwise render as one screen-wide
+        # line; see histo_to_ccf.gui.widgets.tooltips.
+        wrap_tooltips(self)
         if start_dir:
             self._folder_edit.setText(start_dir)
 

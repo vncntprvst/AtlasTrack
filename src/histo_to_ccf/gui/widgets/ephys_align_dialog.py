@@ -38,6 +38,7 @@ from histo_to_ccf.ephys.alignment import apply_depth_alignment, channel_ccf_um, 
 from histo_to_ccf.ephys.features import power_image
 from histo_to_ccf.ephys.regions import region_strip_image, regions_at_ccf
 from histo_to_ccf.gui.widgets.atlas_matcher import _to_pixmap
+from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
 from histo_to_ccf.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
@@ -140,6 +141,9 @@ class EphysAlignmentDialog(QDialog):
 
         self._prepare_channels(lfp_result)
         self._build_ui()
+        # Long explanatory tooltips would otherwise render as one screen-wide
+        # line; see histo_to_ccf.gui.widgets.tooltips.
+        wrap_tooltips(self)
         self._restore_anchors()
         self._render()
 

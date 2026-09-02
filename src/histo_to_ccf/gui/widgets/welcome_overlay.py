@@ -22,7 +22,7 @@ from qtpy.QtWidgets import QWidget
 #: AtlasTrack has a single place to change.
 APP_TITLE = "Histo-to-CCF"
 
-_SUBTITLE = "histology  →  atlas  →  registered probe coordinates"
+_SUBTITLE = "Register histology and probe coordinates to an atlas"
 
 #: (tab name, what you do there). The order is the tab order in ``app._build_panel``;
 #: if one moves, this must move with it or the figure teaches the wrong path.

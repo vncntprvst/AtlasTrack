@@ -49,12 +49,13 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from histo_to_ccf.gui import crashlog
+from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+from histo_to_ccf.gui.workflow import WorkflowState
 from histo_to_ccf.io.ccf_coords import (
     BREGMA_AP_FROM_ORIGIN_UM,
     bregma_ap_for_display,
 )
-from histo_to_ccf.gui import crashlog
-from histo_to_ccf.gui.workflow import WorkflowState
 
 # How each section's AP was arrived at, shown next to the section navigation so a
 # prediction is never mistaken for something the user set.
@@ -422,6 +423,9 @@ class AtlasMatcherDialog(QDialog):
         self._updating = False
         self._thumb_cache: dict[tuple, QPixmap] = {}
         self._build_ui()
+        # Long explanatory tooltips would otherwise render as one screen-wide
+        # line; see histo_to_ccf.gui.widgets.tooltips.
+        wrap_tooltips(self)
         self._init_ap_range()
         self._sync_from_tab()
         self._refresh(fit=True)
@@ -697,7 +701,7 @@ class AtlasMatcherDialog(QDialog):
             "Run DeepSlice on every section of the active slide to fill a consistent\n"
             "set of AP positions in one pass, then fine-tune above. The full predicted\n"
             "planes (incl. tilt) are cached so Register can reuse them.\n"
-            "First run downloads the DeepSlice model and is slow."
+            "Overwrites every AP on the slide, including ones you set by hand."
         )
         self._prematch_btn.clicked.connect(self._prematch_deepslice)
         bottom.addWidget(self._prematch_btn)
@@ -979,6 +983,28 @@ class AtlasMatcherDialog(QDialog):
             if resp != QMessageBox.Yes:
                 return
 
+        # Pre-match writes an AP to every section on the slide, so a hand-set AP is
+        # silently replaced. That is the one edit here the user cannot get back, and
+        # it is easy to trigger: fine-tune one section, then click Pre-match again.
+        by_hand = [s for s in ordered if getattr(s, "ap_source", None) == "manual"]
+        if by_hand:
+            shown = ", ".join(str(s.index) for s in by_hand[:8])
+            if len(by_hand) > 8:
+                shown += f" (+{len(by_hand) - 8} more)"
+            resp = QMessageBox.question(
+                self,
+                "Overwrite hand-set APs?",
+                f"{len(by_hand)} section(s) have an AP you set by hand: {shown}.\n\n"
+                "Pre-match assigns a DeepSlice AP to every section on this slide, so "
+                "those values will be replaced and cannot be recovered.\n\n"
+                "Run the pre-match anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if resp != QMessageBox.Yes:
+                self._status.setText("Pre-match cancelled - hand-set APs kept.")
+                return
+
         # AP-sequence rank per section, so DeepSlice orders the series the way the
         # user did (ap_order), not by raw detection index.
         order = {s.index: rank for rank, s in enumerate(ordered)}
@@ -991,8 +1017,11 @@ class AtlasMatcherDialog(QDialog):
         from histo_to_ccf.gui.workers import deepslice_worker
 
         self._prematch_btn.setEnabled(False)
+        from histo_to_ccf.registration.deepslice_adapter import deepslice_run_note
+
         self._status.setText(
-            f"Running DeepSlice on {len(section_images)} section(s) (first run is slow)"
+            f"Running DeepSlice on {len(section_images)} section(s)"
+            f"{deepslice_run_note()}"
         )
         crashlog.note(f"DeepSlice pre-match starting on {len(section_images)} sections")
         worker = deepslice_worker(section_images, atlas, ds_dir, order=order)

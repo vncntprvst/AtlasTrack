@@ -309,6 +309,12 @@ class Section(BaseModel):
     # Where ``plane.ap_um`` came from, so the matcher can show it and the user can
     # tell a prediction from something they set. None = never assigned.
     ap_source: Literal["deepslice", "manual", "even_spacing"] | None = None
+    # In-plane rotation for presenting the series (degrees, anticlockwise). Applied
+    # by the section-series export and the section view, NOT baked into the image
+    # registration runs on: the fit already absorbs in-plane rotation, so rotating
+    # its input would invalidate every existing registration to change nothing
+    # anatomical. 0 = take DeepSlice's predicted angle, if there is one.
+    rotation_deg: float = 0.0
     # DeepSlice's raw predicted plane (QuickNII 9-vector). ``PlaneParams`` can only
     # express a coronal plane plus two tilts, so without this the predicted
     # obliquity is lost on reload and a re-register silently flattens the plane.

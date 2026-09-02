@@ -224,3 +224,67 @@ def predict_anchorings(
         if tok is not None and tok in idx_of_token:
             out[idx_of_token[tok]] = _quicknii_to_atlas_anchoring(list(sl.anchoring), shape)
     return out
+
+
+def deepslice_weights_missing(species: str = "mouse") -> list[str] | None:
+    """Weight files DeepSlice would have to download before it can run.
+
+    ``[]`` means everything is already on disk, so a run is *not* a download.
+    ``None`` means DeepSlice is not installed or its config could not be read, so
+    the answer is genuinely unknown and must not be claimed either way.
+
+    DeepSlice ships no weights in the wheel. It fetches them from EBRAINS into its
+    own ``metadata/weights`` directory the first time a model is built, driven by
+    ``metadata/config.json``: the species entry (primary + secondary) plus the
+    shared ``xception_imagenet`` backbone. Existence of those files is therefore
+    the only honest test of whether a download is pending.
+    """
+    try:
+        import json
+        from importlib.util import find_spec
+        from pathlib import Path
+
+        # find_spec, not import: importing DeepSlice pulls in TensorFlow, which
+        # costs seconds and would also make the "already loaded" test below always
+        # true - this helper would cause the very state it reports on.
+        spec = find_spec("DeepSlice")
+        locations = list(getattr(spec, "submodule_search_locations", None) or [])
+        if not locations:
+            return None
+        meta = Path(locations[0]) / "metadata"
+        paths = json.loads((meta / "config.json").read_text(encoding="utf-8"))[
+            "weight_file_paths"
+        ]
+    except Exception:
+        return None
+
+    wanted: list[str] = []
+    for entry in (paths.get(species) or {}).values():
+        if isinstance(entry, dict) and "path" in entry:
+            wanted.append(entry["path"])
+    backbone = paths.get("xception_imagenet")
+    if isinstance(backbone, dict) and "path" in backbone:
+        wanted.append(backbone["path"])
+    return [rel for rel in wanted if not (meta / rel).exists()]
+
+
+def deepslice_run_note(species: str = "mouse") -> str:
+    """Trailing clause for a "running DeepSlice" message, or ``""`` if none applies.
+
+    The button used to say "first run downloads the model and is slow" on every
+    run, which is unfalsifiable from the user's side: it reads as "this might take
+    forever" forever. There are three genuinely different situations and this tells
+    them apart, so the warning is worth reading when it does appear.
+    """
+    import sys
+
+    missing = deepslice_weights_missing(species)
+    if missing is None:
+        return " - the first run is slow"
+    if missing:
+        return (
+            f" - first run: downloading {len(missing)} model file(s), which is slow"
+        )
+    if "DeepSlice" not in sys.modules:
+        return " - first run this session, so the model has to load"
+    return ""

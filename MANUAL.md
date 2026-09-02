@@ -100,7 +100,7 @@ The app opens a napari viewer with a **left dock** of five workflow tabs -
 
 ### 5.1 Load and prepare slides
 
-1. **Histology** tab → **Open slide** → pick one or more images
+1. **Histology** tab → **Open histology image(s)** → pick one or more images
    (TIFF/PNG/JPEG). Selecting several **merges** them top-to-bottom into one
    canvas so all sections share a coordinate space.
 2. Reopening a slide while one is loaded **swaps** the pixels (same-size keeps your

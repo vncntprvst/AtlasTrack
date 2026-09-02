@@ -26,7 +26,6 @@ from histo_to_ccf.project.schema import PlaneParams, RegistrationResult
 
 if TYPE_CHECKING:
     import SimpleITK as sitk
-
     from brainglobe_atlasapi import BrainGlobeAtlas
 
 
@@ -160,6 +159,7 @@ def warp_annotation_to_section(
     section_shape: tuple[int, int],
     *,
     project_dir: Path | None = None,
+    source_shape: tuple[int, int, int] | None = None,
 ) -> np.ndarray:
     """Render the registered atlas annotation in a section's pixel grid.
 
@@ -171,9 +171,18 @@ def warp_annotation_to_section(
     B-spline was stored the plane annotation is returned resized to the section
     (i.e. the un-refined plane), which is still a useful sanity overlay.
     """
-    from histo_to_ccf.atlas.planes import resample_atlas_at_plane
+    from histo_to_ccf.atlas.planes import resample_atlas_at_plane, rescale_atlas_anchoring
 
     anchoring = Anchoring.from_iterable(result.anchoring)
+    # ``result.anchoring`` counts voxels of the atlas the fit was computed on. When
+    # the labels are being drawn from a *different* atlas - the region-atlas picker -
+    # that count has to be restated on the new grid, or every plane lands wrong.
+    if source_shape is not None:
+        target_shape = tuple(int(v) for v in atlas.reference.shape)
+        if tuple(int(v) for v in source_shape) != target_shape:
+            anchoring = rescale_atlas_anchoring(
+                anchoring, source_shape=source_shape, target_shape=target_shape
+            )
     h_slice, w_slice = result.output_size_px
     _, ann_slice = resample_atlas_at_plane(atlas, anchoring, (int(h_slice), int(w_slice)))
 
