@@ -20,9 +20,9 @@ from qtpy.QtWidgets import QWidget
 
 #: Window title and the name on the figure. One literal so the queued rename to
 #: AtlasTrack has a single place to change.
-APP_TITLE = "Histo-to-CCF"
+APP_TITLE = "AtlasTrack"
 
-_SUBTITLE = "Register histology and probe coordinates to an atlas"
+_SUBTITLE = "Register histology and probe tracks to an atlas"
 
 #: (tab name, what you do there). The order is the tab order in ``app._build_panel``;
 #: if one moves, this must move with it or the figure teaches the wrong path.

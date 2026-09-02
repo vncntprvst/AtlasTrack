@@ -6,7 +6,7 @@ signature actually appears, and the region column is redrawn through that warp. 
 alternative - warping the ephys onto a fixed anatomy - looks equivalent but is not,
 because it makes the measured data the thing that visibly bends.
 
-The maths is entirely in :mod:`histo_to_ccf.ephys.landmarks` (headless, tested); this
+The maths is entirely in :mod:`atlastrack.ephys.landmarks` (headless, tested); this
 widget is the handles, the buttons and the diagnostic plot around it.
 
 The fit-quality plot below the panels is the honest summary: a straight diagonal is
@@ -33,17 +33,17 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.ephys.landmarks import (
+from atlastrack.ephys.landmarks import (
     AlignmentHistory,
     LandmarkCrossingError,
     Landmarks,
     segment_scales,
 )
-from histo_to_ccf.gui.widgets.ephys_features_view import EphysFeaturesView, pyqtgraph_available
-from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+from atlastrack.gui.widgets.ephys_features_view import EphysFeaturesView, pyqtgraph_available
+from atlastrack.gui.widgets.tooltips import wrap_tooltips
 
 if TYPE_CHECKING:
-    from histo_to_ccf.ephys.penetration import PenetrationProfile
+    from atlastrack.ephys.penetration import PenetrationProfile
 
 _LANDMARK_PEN = (255, 80, 80)
 # A double-click within this fraction of the visible depth span of an existing
@@ -70,7 +70,7 @@ class EphysAlignmentPanel(QWidget):
         self._pending: list[list[float]] = []
         self._build_ui()
         # Long explanatory tooltips would otherwise render as one screen-wide
-        # line; see histo_to_ccf.gui.widgets.tooltips.
+        # line; see atlastrack.gui.widgets.tooltips.
         wrap_tooltips(self)
 
     # -- construction ----------------------------------------------------
@@ -805,7 +805,7 @@ class EphysProbeAlignmentDialog(QDialog):
         different set of structures, so a per-shank assignment gave the same nucleus
         a different colour on each tab and made them impossible to compare.
         """
-        from histo_to_ccf.ephys.regions import region_colour_map, white_matter_acronyms
+        from atlastrack.ephys.regions import region_colour_map, white_matter_acronyms
 
         band_lists = [p.view().bands() for p in self.panels]
         mapping = region_colour_map(
@@ -832,7 +832,7 @@ class EphysProbeAlignmentDialog(QDialog):
     def _load_shank(self, panel: EphysAlignmentPanel, shank, lfp_result, profile,
                     features=None) -> None:
         if profile is None:
-            from histo_to_ccf.ephys.penetration import PenetrationProfile
+            from atlastrack.ephys.penetration import PenetrationProfile
 
             profile = PenetrationProfile()
         track_length = 0.0
@@ -869,7 +869,7 @@ class EphysProbeAlignmentDialog(QDialog):
         freqs = np.asarray(lfp_result.get("freqs", []), dtype=float)
         if depths_from_tip.size == 0 or psd.ndim != 2:
             return
-        from histo_to_ccf.ephys.recordings import channels_for_shank
+        from atlastrack.ephys.recordings import channels_for_shank
 
         mask = channels_for_shank(
             shank.index, lfp_result.get("shank_ids"), lfp_result.get("x_um")
@@ -886,7 +886,7 @@ class EphysProbeAlignmentDialog(QDialog):
         # track ends at the **physical tip**, which is a 175 µm chisel below it
         # (Neuropixels spec: TIP LENGTH 175 µm). Without this every channel sits
         # 175 µm too deep - small, but the same size as the nuclei being aligned to.
-        from histo_to_ccf.probes.geometry import SHANK_TIP_LENGTH_UM
+        from atlastrack.probes.geometry import SHANK_TIP_LENGTH_UM
 
         depth_from_tip = depths_from_tip[mask] - depths_from_tip[mask].min()
         depth_from_tip = depth_from_tip + SHANK_TIP_LENGTH_UM
@@ -901,7 +901,7 @@ class EphysProbeAlignmentDialog(QDialog):
         """
         from qtpy.QtWidgets import QFileDialog, QMessageBox
 
-        from histo_to_ccf.ephys.export import default_export_path, load_shank_features
+        from atlastrack.ephys.export import default_export_path, load_shank_features
 
         if path is None:
             start = default_export_path(
@@ -934,8 +934,8 @@ class EphysProbeAlignmentDialog(QDialog):
 
     def feature_exports(self) -> list:
         """Assemble every shank's features for export. Headless-testable."""
-        from histo_to_ccf.ephys.export import ShankFeatureExport
-        from histo_to_ccf.ephys.features import depth_profiles
+        from atlastrack.ephys.export import ShankFeatureExport
+        from atlastrack.ephys.features import depth_profiles
 
         out = []
         for panel, shank in zip(self.panels, self._shanks, strict=True):
@@ -982,7 +982,7 @@ class EphysProbeAlignmentDialog(QDialog):
     def save_features(self) -> None:
         from qtpy.QtWidgets import QFileDialog, QMessageBox
 
-        from histo_to_ccf.ephys.export import default_export_path, save_feature_export
+        from atlastrack.ephys.export import default_export_path, save_feature_export
 
         suggested = default_export_path(
             getattr(self._state, "project_path", None), self._probe.label
@@ -1024,8 +1024,8 @@ class EphysProbeAlignmentDialog(QDialog):
         through the alignment, which made the discrepancy worse - the file moved and
         the picture did not.
         """
-        from histo_to_ccf.probes.catalog import get_layout
-        from histo_to_ccf.probes.channels import shank_channel_coords
+        from atlastrack.probes.catalog import get_layout
+        from atlastrack.probes.channels import shank_channel_coords
 
         try:
             layout = get_layout(self._probe.type.name)
@@ -1043,7 +1043,7 @@ class EphysProbeAlignmentDialog(QDialog):
         """Store every shank's landmarks, leaving untouched shanks as they were."""
         from datetime import datetime
 
-        from histo_to_ccf.project.schema import EphysAlignment
+        from atlastrack.project.schema import EphysAlignment
 
         stamp = datetime.now().isoformat(timespec="seconds")
         # One insertion depth for the whole penetration when the recordings agree;

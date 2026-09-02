@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from histo_to_ccf.project.schema import Project
+from atlastrack.project.schema import Project
 
 
 def load_project(path: str | Path) -> Project:

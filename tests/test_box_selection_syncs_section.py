@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.project.schema import Section, Slide
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.project.schema import Section, Slide
 
 pytestmark = pytest.mark.qt
 
@@ -33,8 +33,8 @@ def _widgets(qtbot, state):
     """Build the two widgets wired the way ``app._build_panel`` wires them."""
     import napari
 
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
-    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
 
     viewer = napari.Viewer(show=False)
     tools = ImageToolsWidget(state)
@@ -135,7 +135,7 @@ def test_a_freshly_drawn_box_is_ignored_until_it_becomes_a_section(qtbot):
 
 def test_select_section_fills_a_dropdown_that_was_never_populated(qtbot):
     """The list is only built when section scope is chosen; a click can come first."""
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
 
     state = _state()
     tools = ImageToolsWidget(state)
@@ -147,7 +147,7 @@ def test_select_section_fills_a_dropdown_that_was_never_populated(qtbot):
 
 
 def test_select_section_reports_an_index_it_cannot_offer(qtbot):
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
 
     state = _state()
     tools = ImageToolsWidget(state)

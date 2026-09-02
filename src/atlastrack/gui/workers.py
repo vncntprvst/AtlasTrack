@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 from napari.qt.threading import thread_worker
 
-from histo_to_ccf.sectioning.ordering import OrderedSection, order_sections
-from histo_to_ccf.sectioning.split import detect_sections
+from atlastrack.sectioning.ordering import OrderedSection, order_sections
+from atlastrack.sectioning.split import detect_sections
 
 if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
 
-    from histo_to_ccf.project.schema import Project
+    from atlastrack.project.schema import Project
 
 
 @thread_worker
@@ -87,7 +87,7 @@ def register_worker(
     boundary_snap: bool = True,
 ) -> Project:
     """Run the full registration pipeline in a background thread (no progress)."""
-    from histo_to_ccf.registration.pipeline import register_project_with_atlas
+    from atlastrack.registration.pipeline import register_project_with_atlas
 
     return register_project_with_atlas(
         project,
@@ -119,7 +119,7 @@ def deepslice_worker(
     user's intended anterior→posterior order, so its serial-section ordering isn't
     bound to the raw detection index.
     """
-    from histo_to_ccf.registration.deepslice_adapter import predict_anchorings
+    from atlastrack.registration.deepslice_adapter import predict_anchorings
 
     return predict_anchorings(
         section_images, atlas, workdir=workdir, species=species, order=order
@@ -140,7 +140,7 @@ def trajectory_fit_worker(features: dict, tips, entries, atlas):
     """
     import numpy as np
 
-    from histo_to_ccf.probes.trajectory_fit import (
+    from atlastrack.probes.trajectory_fit import (
         evidence_from_features,
         fit_trajectory,
         leave_one_out,
@@ -204,8 +204,8 @@ def multi_lfp_power_worker(
     A recording that fails to read is reported and the rest are still stacked: losing
     one bank should not cost the user the shanks the others cover.
     """
-    from histo_to_ccf.ephys.combine import RecordingFeatures, stack_penetration
-    from histo_to_ccf.ephys.loader import excerpt_psd, load_lfp_excerpts
+    from atlastrack.ephys.combine import RecordingFeatures, stack_penetration
+    from atlastrack.ephys.loader import excerpt_psd, load_lfp_excerpts
 
     computed: list = []
     failed: list[tuple[str, str]] = []
@@ -275,8 +275,8 @@ def lfp_power_worker(
     ``x_um`` (shank column per channel), ``channel_ids``, ``stream_name`` and
     ``derived_from_ap``. Runs the SpikeInterface load in the background thread.
     """
-    from histo_to_ccf.ephys.features import power_image
-    from histo_to_ccf.ephys.loader import excerpt_psd, load_lfp_excerpts
+    from atlastrack.ephys.features import power_image
+    from atlastrack.ephys.loader import excerpt_psd, load_lfp_excerpts
 
     # Screened excerpts spread across the recording, not one central slab: windows
     # dominated by cross-channel artifact (licking) are rejected and reported instead
@@ -360,13 +360,13 @@ def register_worker_progressive(
     """
     import SimpleITK as sitk
 
-    from histo_to_ccf.io.ccf_coords import atlas_resolution_um
-    from histo_to_ccf.registration.pipeline import (
+    from atlastrack.io.ccf_coords import atlas_resolution_um
+    from atlastrack.registration.pipeline import (
         _apply_to_shank_registered,
         anchoring_for_section,
         register_section_image,
     )
-    from histo_to_ccf.registration.transforms import RegisteredSectionTransform
+    from atlastrack.registration.transforms import RegisteredSectionTransform
 
     anchorings = anchorings or {}
 
@@ -431,7 +431,7 @@ def register_worker_progressive(
         # L/R-asymmetry where a paramedian nucleus sits on tissue one side but in a
         # gap the other). Conservative: only accepts a meaningful residual gain.
         if refine_tilt:
-            from histo_to_ccf.registration.tilt_refine import refine_tilt as _refine_tilt
+            from atlastrack.registration.tilt_refine import refine_tilt as _refine_tilt
 
             anchoring, tinfo = _refine_tilt(
                 img, atlas, anchoring, reference_volume=ref_vol,
@@ -511,6 +511,6 @@ def discover_recordings_worker(root: str, sidecar: str | None = None) -> list:
     is slow enough to freeze the UI if run inline: ten streams under one LO_07 session
     took ~40 s off the spinning drive.
     """
-    from histo_to_ccf.ephys.discovery import discover
+    from atlastrack.ephys.discovery import discover
 
     return discover(root, sidecar=sidecar)

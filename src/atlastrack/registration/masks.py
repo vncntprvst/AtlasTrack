@@ -9,7 +9,7 @@ Used in two places:
   - the strongest cue - is preserved) and subtracts the saturated label blobs.
 
 The overlay's far-off boundary "stripes" are clipped to the *warped atlas
-extent* in :func:`histo_to_ccf.registration.transforms.warp_annotation_to_section`,
+extent* in :func:`atlastrack.registration.transforms.warp_annotation_to_section`,
 not to a tissue mask - clipping to tissue would wrongly delete region outlines
 over damaged/dim tissue.
 

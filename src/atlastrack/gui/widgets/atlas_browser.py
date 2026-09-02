@@ -18,12 +18,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.widgets.separators import section_header
-from histo_to_ccf.io.ccf_coords import (
+from atlastrack.gui.widgets.separators import section_header
+from atlastrack.io.ccf_coords import (
     BREGMA_AP_FROM_ORIGIN_UM,
     bregma_ap_from_origin_um,
 )
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
     import napari
@@ -192,7 +192,7 @@ class AtlasBrowserWidget(QWidget):
             saved = getattr(self._settings, "atlas_dir", "")
             if saved:
                 return saved
-        from histo_to_ccf.config import get_settings
+        from atlastrack.config import get_settings
 
         return str(get_settings().atlas_cache_dir)
 
@@ -249,7 +249,7 @@ class AtlasBrowserWidget(QWidget):
             return
         atlas_dir = self._atlas_dir.text().strip() or None
         self._atlas_status.setText(f"Loading {atlas_id}")
-        from histo_to_ccf.gui.workers import load_atlas_worker
+        from atlastrack.gui.workers import load_atlas_worker
 
         self._atlas_loading = True
         self._load_btn.setEnabled(False)
@@ -273,7 +273,7 @@ class AtlasBrowserWidget(QWidget):
         if self._on_show_atlas_help is not None:
             self._on_show_atlas_help()
             return
-        from histo_to_ccf.gui.widgets.atlas_help_dialog import show_atlas_reference
+        from atlastrack.gui.widgets.atlas_help_dialog import show_atlas_reference
 
         show_atlas_reference(self.window())
 
@@ -364,8 +364,8 @@ class AtlasBrowserWidget(QWidget):
         if self._state.active_slide_idx is None:
             self._assign_status.setText("Load a slide with sections first.")
             return
-        from histo_to_ccf.gui import crashlog
-        from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
+        from atlastrack.gui import crashlog
+        from atlastrack.gui.widgets.atlas_matcher import AtlasMatcherDialog
 
         crashlog.note("opening the Atlas matcher")
         # Keep a reference so the non-modal dialog is not garbage-collected.
@@ -445,7 +445,7 @@ class AtlasBrowserWidget(QWidget):
         if section is None:
             self._assign_status.setText(f"Section {sec_idx} not found.")
             return
-        from histo_to_ccf.project.schema import PlaneParams
+        from atlastrack.project.schema import PlaneParams
 
         ap_abs = self._bregma_to_absolute(self._ap_spin.value())
         if section.plane is not None:

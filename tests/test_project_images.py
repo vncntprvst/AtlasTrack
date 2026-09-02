@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from histo_to_ccf.io.image import merge_images
-from histo_to_ccf.project.images import rebuild_slide_image, section_images
-from histo_to_ccf.project.schema import AtlasRef, Project, Section, Slide
+from atlastrack.io.image import merge_images
+from atlastrack.project.images import rebuild_slide_image, section_images
+from atlastrack.project.schema import AtlasRef, Project, Section, Slide
 
 
 def _write(path, arr) -> str:

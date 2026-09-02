@@ -15,7 +15,7 @@ this application can die:
 * ``sys.excepthook`` / ``threading.excepthook`` - ordinary Python exceptions,
   including ones raised in a worker thread where nothing else would show them.
 
-Everything is appended to ``~/.histo2ccf/logs/crash.log`` with a session header,
+Everything is appended to ``~/.atlastrack/logs/crash.log`` with a session header,
 so a user who says "it just closed" has a file to send.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-LOG_DIR = Path.home() / ".histo2ccf" / "logs"
+LOG_DIR = Path.home() / ".atlastrack" / "logs"
 LOG_FILE = LOG_DIR / "crash.log"
 
 # Roll the log over past this size so a long session cannot grow it without
@@ -81,9 +81,9 @@ def _session_header() -> str:
         f"platform {platform.platform()}",
     ]
     try:
-        from histo_to_ccf import __version__
+        from atlastrack import __version__
 
-        lines.append(f"histo2ccf {__version__}")
+        lines.append(f"atlastrack {__version__}")
     except Exception:  # pragma: no cover - version import cannot realistically fail
         pass
     for mod in ("napari", "qtpy", "numpy", "scipy", "vispy"):
@@ -119,7 +119,7 @@ def log_gl_info() -> None:
     would then take the log's session header with it.
     """
     try:
-        from histo_to_ccf.gui.gl_diagnostics import format_gl_report
+        from atlastrack.gui.gl_diagnostics import format_gl_report
 
         _write("OpenGL:\n" + format_gl_report())
     except Exception as exc:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from histo_to_ccf.ephys.formats import (
+from atlastrack.ephys.formats import (
     INTAN,
     OPEN_EPHYS,
     SPIKEGLX,
@@ -283,7 +283,7 @@ def test_a_real_intan_session_is_detected_and_its_streams_listed():
     if not Path(REAL_INTAN).is_dir():
         pytest.skip("reference drive F: not mounted")
     pytest.importorskip("spikeinterface")
-    from histo_to_ccf.ephys.formats import list_streams
+    from atlastrack.ephys.formats import list_streams
 
     got = detect_format(REAL_INTAN)
     assert got.format is INTAN

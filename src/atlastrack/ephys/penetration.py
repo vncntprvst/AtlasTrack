@@ -1,7 +1,7 @@
 """Combining several recordings of one penetration into one depth profile.
 
 Each recording contributes a window of the track (see
-:mod:`histo_to_ccf.ephys.recordings`); this module puts them on the common
+:mod:`atlastrack.ephys.recordings`); this module puts them on the common
 depth-below-surface axis and merges them into the arrays the viewer plots.
 
 Two things it deliberately does **not** do:
@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from histo_to_ccf.ephys.recordings import (
+from atlastrack.ephys.recordings import (
     RecordingSpan,
     coverage_gaps_um,
     depth_below_surface_um,

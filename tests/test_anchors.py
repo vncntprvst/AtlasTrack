@@ -1,7 +1,7 @@
 """AnchorPoint / AnchorSet serialization."""
 from __future__ import annotations
 
-from histo_to_ccf.landmarks.anchors import AnchorPoint, AnchorSet
+from atlastrack.landmarks.anchors import AnchorPoint, AnchorSet
 
 
 def test_anchor_set_roundtrip() -> None:

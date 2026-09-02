@@ -1,4 +1,4 @@
-# histo-to-ccf
+# AtlasTrack
 
 Guided registration of histological brain sections to a reference atlas
 (Allen Mouse CCF), with probe (Neuropixels / NeuroNexus) trajectory mapping in 3D.
@@ -49,7 +49,7 @@ GUI reference, task recipes, troubleshooting) is in [`MANUAL.md`](MANUAL.md).
 ## Install
 
 ```bash
-uv pip install histo-to-ccf                      # or:  pip install histo-to-ccf
+uv pip install atlastrack                      # or:  pip install atlastrack
 histo2ccf gui                                    # launch the guided workflow
 ```
 
@@ -62,8 +62,8 @@ Optional features live behind **extras**:
   (pulls SpikeInterface + neo/probeinterface).
 
 ```bash
-uv pip install "histo-to-ccf[deepslice]"             # one extra
-uv pip install "histo-to-ccf[deepslice,elastix]"     # several, comma-separated
+uv pip install "atlastrack[deepslice]"             # one extra
+uv pip install "atlastrack[deepslice,elastix]"     # several, comma-separated
 ```
 
 To install for development (editable):
@@ -96,7 +96,7 @@ zooms; **Ctrl+wheel** pans left/right and **Shift+wheel** pans up/down.
 ## Repository layout
 
 ```
-src/histo_to_ccf/   # the package
+src/atlastrack/   # the package
   io/  atlas/  sectioning/  landmarks/  registration/  probes/  viz/  gui/
 tests/              # pytest suite (run: pytest -q)
 TUTORIAL.md         # step-by-step walkthrough on the example slide

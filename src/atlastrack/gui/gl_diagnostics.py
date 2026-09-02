@@ -23,7 +23,7 @@ How to restore hardware OpenGL (in order of likelihood):
   3. GPU driver: update via the vendor app (NVIDIA/AMD/Intel). If a recent
      auto-update broke it, roll back: Device Manager -> Display adapters ->
      (your GPU) -> Properties -> Driver -> Roll Back Driver.
-  4. Dual-GPU laptop: force Python/histo2ccf onto the discrete GPU
+  4. Dual-GPU laptop: force Python/atlastrack onto the discrete GPU
      (Windows Settings -> Display -> Graphics, or the vendor control panel)."""
 
 
@@ -55,7 +55,7 @@ def gl_report() -> dict:
 
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "histo_to_ccf.gui.gl_diagnostics"],
+            [sys.executable, "-m", "atlastrack.gui.gl_diagnostics"],
             capture_output=True, text=True, timeout=60,
         )
     except Exception as exc:  # noqa: BLE001
@@ -129,7 +129,7 @@ def _interpret(report: dict) -> str:
     if report.get("error") or not report.get("ok"):
         return (
             "-> No usable OpenGL context could be created at all. This is a GPU /"
-            " driver / session problem, not a histo2ccf bug."
+            " driver / session problem, not a atlastrack bug."
         )
     software_markers = ("basic render", "gdi generic", "llvmpipe", "software", "swiftshader")
     if any(m in renderer for m in software_markers):
@@ -165,7 +165,7 @@ def format_gl_report(report: dict | None = None) -> str:
 
 def report_launch_failure(exc: BaseException) -> None:
     """Print an actionable message when the napari Viewer can't be created."""
-    print("\nhisto2ccf: the GUI failed to start - the GPU/OpenGL context is unusable.\n")
+    print("\natlastrack: the GUI failed to start - the GPU/OpenGL context is unusable.\n")
     print(f"Underlying error: {type(exc).__name__}: {str(exc).splitlines()[0][:200]}\n")
     print(format_gl_report())
 

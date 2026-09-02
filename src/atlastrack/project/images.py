@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from histo_to_ccf.io.image import crop, load_image, merge_images, slide_bands
+from atlastrack.io.image import crop, load_image, merge_images, slide_bands
 
 if TYPE_CHECKING:
-    from histo_to_ccf.project.schema import Project, Slide
+    from atlastrack.project.schema import Project, Slide
 
 
 def deepslice_rotation_deg(anchoring: list[float] | tuple[float, ...]) -> float:

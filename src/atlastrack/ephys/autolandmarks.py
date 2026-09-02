@@ -148,7 +148,7 @@ def step_profile(depths_um, values, *, window_um: float = 250.0,
     say. Each feature is standardised first so a loud band cannot outvote a quiet one,
     and the per-feature contrasts are averaged.
     """
-    from histo_to_ccf.ephys.features import boundary_contrast
+    from atlastrack.ephys.features import boundary_contrast
 
     depths = np.asarray(depths_um, dtype=float).ravel()
     mat = np.asarray(values, dtype=float)

@@ -297,7 +297,7 @@ def load_probe_map(path: str | Path) -> ProbeMap:
     except ImportError as exc:  # pragma: no cover - needs the ephys extra
         raise ImportError(
             "probeinterface is required to read .json/.prb/.imro probe maps. "
-            'Install the extra: pip install "histo-to-ccf[ephys]"'
+            'Install the extra: pip install "atlastrack[ephys]"'
         ) from exc
 
     if suffix == ".json":
@@ -329,14 +329,14 @@ def load_probe_map(path: str | Path) -> ProbeMap:
 
 
 def map_from_catalog(probe_name: str) -> ProbeMap:
-    """Build a map from a probe model in :mod:`histo_to_ccf.probes.catalog`.
+    """Build a map from a probe model in :mod:`atlastrack.probes.catalog`.
 
     This covers the *site layout* only. For a recording system that stores no wiring
     - Intan - a catalog layout still assumes the headstage channel order matches the
     site order tip-to-base, which is a property of the adapter, not of the probe. Load
     an explicit map when the adapter reorders channels.
     """
-    from histo_to_ccf.probes.catalog import CATALOG
+    from atlastrack.probes.catalog import CATALOG
 
     if probe_name not in CATALOG:
         raise KeyError(

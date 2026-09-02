@@ -16,10 +16,10 @@ import pytest
 import SimpleITK as sitk
 from skimage.draw import disk, ellipse
 
-from histo_to_ccf.atlas.planes import Anchoring, resample_atlas_at_plane
-from histo_to_ccf.registration import elastix_bspline as eb
-from histo_to_ccf.registration.bspline import warp_moving_to_fixed
-from histo_to_ccf.registration.pipeline import _resolve_engine, register_section_image
+from atlastrack.atlas.planes import Anchoring, resample_atlas_at_plane
+from atlastrack.registration import elastix_bspline as eb
+from atlastrack.registration.bspline import warp_moving_to_fixed
+from atlastrack.registration.pipeline import _resolve_engine, register_section_image
 
 pytestmark = pytest.mark.skipif(
     not eb.ELASTIX_AVAILABLE, reason="itk-elastix not installed"

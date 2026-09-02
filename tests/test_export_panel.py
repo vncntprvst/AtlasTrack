@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from histo_to_ccf.io.ccf_coords import PAXINOS_ALIGNMENTS
+from atlastrack.io.ccf_coords import PAXINOS_ALIGNMENTS
 
 pytestmark = pytest.mark.qt
 
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.qt
 def _panel(qtbot):
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     panel, viz_panel = _build_panel(viewer)
@@ -173,7 +173,7 @@ def test_the_labels_lead_with_the_effect_not_the_citation(qtbot):
 
 
 def test_the_help_text_covers_every_preset_and_states_the_uncertainty(qtbot):
-    from histo_to_ccf.gui.widgets.viz_export_panel import _PAXINOS_HELP
+    from atlastrack.gui.widgets.viz_export_panel import _PAXINOS_HELP
 
     for name in ("Qiu 2018", "Dorr 2008", "Allen community", "No correction"):
         assert name in _PAXINOS_HELP
@@ -202,7 +202,7 @@ def test_the_standing_paxinos_paragraph_is_gone_from_the_panel(qtbot):
 def _capture_export(qtbot, monkeypatch, tmp_path, *, fmt_index, paxinos):
     from qtpy.QtWidgets import QFileDialog
 
-    from histo_to_ccf.probes import channels
+    from atlastrack.probes import channels
 
     viz, viewer = _panel(qtbot)
     out = tmp_path / "out"
@@ -276,7 +276,7 @@ def test_outlines_are_on_by_default_and_gate_the_burnt_in_copy(qtbot):
 def test_the_series_export_passes_the_checkboxes_through(qtbot, monkeypatch, tmp_path):
     from qtpy.QtWidgets import QFileDialog
 
-    from histo_to_ccf.io import series_export
+    from atlastrack.io import series_export
 
     viz, viewer = _panel(qtbot)
     try:
@@ -309,7 +309,7 @@ def test_straightening_is_on_by_default_and_passed_through(qtbot, monkeypatch,
     """The whole point of the series export: a set of sections you can flick through."""
     from qtpy.QtWidgets import QFileDialog
 
-    from histo_to_ccf.io import series_export
+    from atlastrack.io import series_export
 
     viz, viewer = _panel(qtbot)
     try:
@@ -356,7 +356,7 @@ def test_the_paxinos_labelled_atlas_is_offered_and_says_so(qtbot):
 
 def test_the_help_distinguishes_paxinos_labels_from_paxinos_coordinates(qtbot):
     """The coordinates are published estimates; the labels are just a relabelling."""
-    from histo_to_ccf.gui.widgets.viz_export_panel import _PAXINOS_HELP
+    from atlastrack.gui.widgets.viz_export_panel import _PAXINOS_HELP
 
     assert "Chon/Kim" in _PAXINOS_HELP
     assert "relabelling, not a transform" in _PAXINOS_HELP
@@ -366,7 +366,7 @@ def test_the_isotropic_v2_atlas_is_offered_with_its_offset_stated(qtbot):
     """It samples the same volume at 20 µm, so the export restates each anchoring
     on its grid; its annotation also sits ~102 µm posterior of the 25 µm release,
     which is the atlas's own property and is surfaced rather than corrected."""
-    from histo_to_ccf.gui.widgets.viz_export_panel import _REGION_ATLAS_CAVEATS
+    from atlastrack.gui.widgets.viz_export_panel import _REGION_ATLAS_CAVEATS
 
     viz, viewer = _panel(qtbot)
     try:

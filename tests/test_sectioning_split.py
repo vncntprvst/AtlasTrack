@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from skimage.draw import ellipse
 
-from histo_to_ccf.sectioning.ordering import geometric_order, order_sections
-from histo_to_ccf.sectioning.split import detect_sections
+from atlastrack.sectioning.ordering import geometric_order, order_sections
+from atlastrack.sectioning.split import detect_sections
 
 
 def _synth_composite(
@@ -86,7 +86,7 @@ def test_order_sections_column_first_default() -> None:
 
 def test_order_sections_slide_aware_keeps_columns_within_a_slide() -> None:
     """With per-source bands, a column never runs across two stacked slides."""
-    from histo_to_ccf.sectioning.split import DetectedSection
+    from atlastrack.sectioning.split import DetectedSection
 
     def sec(cx, cy):
         bbox = (cx - 15, cy - 15, cx + 15, cy + 15)
@@ -120,7 +120,7 @@ def test_order_sections_slide_aware_keeps_columns_within_a_slide() -> None:
 
 
 def test_equalize_box_sizes_expands_undersized() -> None:
-    from histo_to_ccf.sectioning.split import DetectedSection, _equalize_box_sizes
+    from atlastrack.sectioning.split import DetectedSection, _equalize_box_sizes
 
     def _sec(x0, y0, x1, y1):
         return DetectedSection(
@@ -148,7 +148,7 @@ def test_equalize_box_sizes_expands_undersized() -> None:
 
 
 def test_equalize_box_sizes_noop_when_few_sections() -> None:
-    from histo_to_ccf.sectioning.split import DetectedSection, _equalize_box_sizes
+    from atlastrack.sectioning.split import DetectedSection, _equalize_box_sizes
 
     secs = [
         DetectedSection((0, 0, 10, 10), np.zeros((20, 20), bool), 100, (5, 5), 1.0),
@@ -181,7 +181,7 @@ def test_expected_count_keeps_top_n() -> None:
     reason="real example slide not present (example data/ is gitignored)",
 )
 def test_real_slide_yields_expected_sections() -> None:
-    from histo_to_ccf.io.image import load_image
+    from atlastrack.io.image import load_image
 
     slide = (
         Path(__file__).parent.parent

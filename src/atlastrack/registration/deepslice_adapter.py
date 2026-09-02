@@ -6,7 +6,7 @@ the base package installs without TensorFlow.
 
 Install via the optional extra::
 
-    pip install histo-to-ccf[deepslice]
+    pip install atlastrack[deepslice]
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from histo_to_ccf.io.quicknii import QuickNiiDocument, load_quicknii
-from histo_to_ccf.project.schema import PlaneParams
+from atlastrack.io.quicknii import QuickNiiDocument, load_quicknii
+from atlastrack.project.schema import PlaneParams
 
 if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
@@ -127,7 +127,7 @@ def _quicknii_to_atlas_anchoring(
     Three transforms are applied:
 
     1. **Axis permutation.** QuickNII ABA voxels are ordered ``(ML, AP, DV)``;
-       our :class:`~histo_to_ccf.atlas.planes.Anchoring` / ``sample_plane`` use
+       our :class:`~atlastrack.atlas.planes.Anchoring` / ``sample_plane`` use
        ``(AP, DV, ML)`` (brainglobe ASR order). Each origin/u/v triplet is
        reordered ``(x, y, z) -> (y, z, x)``.
     2. **Resolution scaling.** QuickNII predicts in the 25 µm grid; components
@@ -206,7 +206,7 @@ def predict_anchorings(
     # Inherit stdout/stderr so DeepSlice's progress bar still shows in the
     # console; TensorFlow lives and dies inside this child process.
     result = subprocess.run(
-        [sys.executable, "-m", "histo_to_ccf.registration.deepslice_run",
+        [sys.executable, "-m", "atlastrack.registration.deepslice_run",
          str(workdir), species],
     )
     pred_json = workdir / "deepslice_predictions.json"

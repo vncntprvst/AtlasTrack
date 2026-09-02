@@ -26,7 +26,7 @@ from typing import TypedDict
 
 import numpy as np
 
-from histo_to_ccf.io.ccf_coords import AP_UM, DV_UM, ML_UM
+from atlastrack.io.ccf_coords import AP_UM, DV_UM, ML_UM
 
 # Default HERBS voxel grid. HERBS itself uses 10 µm regardless of the BrainGlobe
 # atlas resolution the downstream code uses for visualization.

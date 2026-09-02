@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.atlas.planes import Anchoring, rescale_atlas_anchoring
+from atlastrack.atlas.planes import Anchoring, rescale_atlas_anchoring
 
 ALLEN_SHAPE = (528, 320, 456)
 KIM_ISO_SHAPE = (660, 400, 570)
@@ -71,7 +71,7 @@ def test_it_matches_building_the_anchoring_on_the_target_grid():
     Rescaling a plane from grid A must give the same plane as constructing it on
     grid B directly - otherwise the region atlas draws a different slice.
     """
-    from histo_to_ccf.atlas.planes import coronal_anchoring
+    from atlastrack.atlas.planes import coronal_anchoring
 
     class _Atlas:
         def __init__(self, shape, res):

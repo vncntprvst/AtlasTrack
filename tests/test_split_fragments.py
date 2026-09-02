@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.sectioning.split import DetectedSection, group_fragmented_sections
+from atlastrack.sectioning.split import DetectedSection, group_fragmented_sections
 
 SHAPE = (400, 400)
 

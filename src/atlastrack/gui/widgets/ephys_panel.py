@@ -23,12 +23,12 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
+    from atlastrack.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
 
 
 #: Combo entries that are not probe maps: no map, and the file browser.
@@ -286,8 +286,8 @@ class EphysPanelWidget(QWidget):
         puts each site on the right channel; a catalog layout only says where the
         sites are, and still assumes the adapter does not permute them.
         """
-        from histo_to_ccf.ephys.probemap import BUILTIN_MAPS
-        from histo_to_ccf.probes.catalog import CATALOG
+        from atlastrack.ephys.probemap import BUILTIN_MAPS
+        from atlastrack.probes.catalog import CATALOG
 
         self._map_combo.addItem(MAP_FROM_RECORDING, None)
         for name in sorted(BUILTIN_MAPS):
@@ -327,7 +327,7 @@ class EphysPanelWidget(QWidget):
         if not path:
             return
         try:
-            from histo_to_ccf.ephys.loader import list_streams
+            from atlastrack.ephys.loader import list_streams
 
             streams = list_streams(path)
         except Exception as exc:
@@ -374,7 +374,7 @@ class EphysPanelWidget(QWidget):
             "(nothing is cached - this re-reads the recording each time; deriving "
             "LFP from an AP stream is slower)."
         )
-        from histo_to_ccf.gui.workers import lfp_power_worker
+        from atlastrack.gui.workers import lfp_power_worker
 
         # No user-set duration: the excerpt reader spreads windows across the
         # recording and rejects the artifact-dominated ones, which is strictly better
@@ -433,7 +433,7 @@ class EphysPanelWidget(QWidget):
             f"Reading {len(refs)} recording(s) for {probe.label} - nothing is cached, "
             "so each one is read from disk."
         )
-        from histo_to_ccf.gui.workers import multi_lfp_power_worker
+        from atlastrack.gui.workers import multi_lfp_power_worker
 
         worker = multi_lfp_power_worker(refs, shanks)
         worker.yielded.connect(
@@ -495,7 +495,7 @@ class EphysPanelWidget(QWidget):
         """
         import numpy as np
 
-        from histo_to_ccf.ephys.export import ShankFeatureExport
+        from atlastrack.ephys.export import ShankFeatureExport
 
         out = []
         for shank in probe.shanks:
@@ -525,8 +525,8 @@ class EphysPanelWidget(QWidget):
         """
         import numpy as np
 
-        from histo_to_ccf.ephys.export import ShankFeatureExport
-        from histo_to_ccf.probes.geometry import SHANK_TIP_LENGTH_UM
+        from atlastrack.ephys.export import ShankFeatureExport
+        from atlastrack.probes.geometry import SHANK_TIP_LENGTH_UM
 
         if self._stacks:
             return self._stack_exports(probe)
@@ -536,7 +536,7 @@ class EphysPanelWidget(QWidget):
         freqs = np.asarray(result.get("freqs", []), dtype=float)
         if y.size == 0 or psd.ndim != 2:
             return []
-        from histo_to_ccf.ephys.recordings import channels_for_shank
+        from atlastrack.ephys.recordings import channels_for_shank
 
         out = []
         for shank in probe.shanks:
@@ -566,7 +566,7 @@ class EphysPanelWidget(QWidget):
         return out
 
     def _save_features(self) -> None:
-        from histo_to_ccf.ephys.export import default_export_path, save_feature_export
+        from atlastrack.ephys.export import default_export_path, save_feature_export
 
         if self._lfp_result is None and not self._stacks:
             QMessageBox.information(
@@ -607,7 +607,7 @@ class EphysPanelWidget(QWidget):
 
     def _load_features(self) -> None:
         """Reload a saved depth-features file - measurements only, never landmarks."""
-        from histo_to_ccf.ephys.export import default_export_path, load_shank_features
+        from atlastrack.ephys.export import default_export_path, load_shank_features
 
         probe_idx = self._probe_combo.currentIndex()
         probes = self._state.project.probes
@@ -649,7 +649,7 @@ class EphysPanelWidget(QWidget):
     # -- discovery -------------------------------------------------------
 
     def _open_discovery(self) -> EphysDiscoveryDialog:
-        from histo_to_ccf.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
+        from atlastrack.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
 
         start = self._path_edit.text().strip() or None
         idx0 = self._probe_combo.currentIndex()
@@ -695,7 +695,7 @@ class EphysPanelWidget(QWidget):
             return
         rec_path = self._path_edit.text().strip() or None
 
-        from histo_to_ccf.gui.widgets.ephys_alignment_panel import (
+        from atlastrack.gui.widgets.ephys_alignment_panel import (
             EphysProbeAlignmentDialog,
         )
 
@@ -750,7 +750,7 @@ class EphysPanelWidget(QWidget):
         self._fit_btn.setEnabled(False)
         self._status.setText("Fitting the probe trajectory to the LFP boundaries…")
 
-        from histo_to_ccf.gui.workers import trajectory_fit_worker
+        from atlastrack.gui.workers import trajectory_fit_worker
 
         self._fit_inputs = (tips, entries)
         worker = trajectory_fit_worker(features, tips, entries, self._state.atlas)
@@ -767,8 +767,8 @@ class EphysPanelWidget(QWidget):
         like a fresh answer rather than a stale one - so a mismatch simply refits,
         silently and correctly.
         """
-        from histo_to_ccf.probes.trajectory_fit import evidence_from_features
-        from histo_to_ccf.probes.trajectory_fit_io import (
+        from atlastrack.probes.trajectory_fit import evidence_from_features
+        from atlastrack.probes.trajectory_fit_io import (
             default_fit_path,
             load_fit,
             matches_current,
@@ -794,7 +794,7 @@ class EphysPanelWidget(QWidget):
 
     def _autosave_fit(self, probe, result: dict) -> None:
         """Write the fit beside the features so the next click is instant."""
-        from histo_to_ccf.probes.trajectory_fit_io import default_fit_path, save_fit
+        from atlastrack.probes.trajectory_fit_io import default_fit_path, save_fit
 
         tips, entries = getattr(self, "_fit_inputs", (None, None))
         try:
@@ -827,7 +827,7 @@ class EphysPanelWidget(QWidget):
         )
         if not result.get("from_cache"):
             self._autosave_fit(self._state.project.probes[probe_idx], result)
-        from histo_to_ccf.gui.widgets.trajectory_preview_dialog import (
+        from atlastrack.gui.widgets.trajectory_preview_dialog import (
             TrajectoryPreviewDialog,
         )
 
@@ -879,7 +879,7 @@ class EphysPanelWidget(QWidget):
         path = self._state.project_path
         if path is not None:
             try:
-                from histo_to_ccf.project.io import save_project
+                from atlastrack.project.io import save_project
 
                 save_project(self._state.project, path)
                 msg += f"  ·  saved → {path.name}"

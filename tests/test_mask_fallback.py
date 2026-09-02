@@ -9,8 +9,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.registration import pipeline
-from histo_to_ccf.registration.bspline import RegisterResult
+from atlastrack.registration import pipeline
+from atlastrack.registration.bspline import RegisterResult
 
 
 class _FakeAtlas:
@@ -126,6 +126,6 @@ def test_failure_classification(message, retryable):
 
 
 def _anchoring():
-    from histo_to_ccf.io.quicknii import Anchoring
+    from atlastrack.io.quicknii import Anchoring
 
     return Anchoring.from_iterable([0, 0, 0, 1, 0, 0, 0, 1, 0])

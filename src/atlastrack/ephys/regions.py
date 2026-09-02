@@ -1,6 +1,6 @@
 """Atlas region lookup along a probe shank (per channel / per depth).
 
-Unlike :func:`histo_to_ccf.atlas.meshes.region_acronyms_at_points` (which
+Unlike :func:`atlastrack.atlas.meshes.region_acronyms_at_points` (which
 de-duplicates for 3D mesh selection), the ephys alignment view needs the region
 at *every* sample point along the track, in order, to draw a depth-resolved
 colour strip beside the LFP features. Pure-core (no Qt).
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from histo_to_ccf.atlas.meshes import structure_rgb
+from atlastrack.atlas.meshes import structure_rgb
 
 RegionHit = tuple[str, tuple[int, int, int]]
 
@@ -63,7 +63,7 @@ class RegionBand:
 
     Depths are **below the brain surface** (0 at the entry point, increasing to the
     tip), the axis every recording is put on by
-    :mod:`histo_to_ccf.ephys.penetration`, so a band can be drawn straight onto the
+    :mod:`atlastrack.ephys.penetration`, so a band can be drawn straight onto the
     feature panels without a further flip.
     """
 
@@ -185,7 +185,7 @@ def band_colours(bands: list[RegionBand], *, shared: dict | None = None,
     two lobules is invisible - which defeats the point of drawing the column.
 
     Uses the palette the 3D views already use
-    (:data:`histo_to_ccf.viz.plotly3d.REGION_STYLE` plus its qualitative fallbacks),
+    (:data:`atlastrack.viz.plotly3d.REGION_STYLE` plus its qualitative fallbacks),
     so a region is the same colour wherever it appears in the app. One acronym always
     gets one colour; when a region needs a fallback, the next one that differs from the
     band immediately above is chosen, so adjacent bands never collide even past the end
@@ -280,7 +280,7 @@ def region_colour(acronym: str, *, offset: int = 0) -> tuple[int, int, int]:
     """The colour for a region, **stable everywhere it appears**.
 
     Curated regions take their fixed colour from
-    :data:`histo_to_ccf.viz.plotly3d.REGION_STYLE`; everything else is hashed onto the
+    :data:`atlastrack.viz.plotly3d.REGION_STYLE`; everything else is hashed onto the
     fallback palette. Hashing rather than cycling in encounter order is the point: a
     counter gives a region a different colour on every shank, because each shank
     crosses a different set of structures - so FN came out blue on one tab and orange
@@ -291,7 +291,7 @@ def region_colour(acronym: str, *, offset: int = 0) -> tuple[int, int, int]:
     """
     from zlib import crc32
 
-    from histo_to_ccf.viz.plotly3d import REGION_STYLE, hex_to_rgb
+    from atlastrack.viz.plotly3d import REGION_STYLE, hex_to_rgb
 
     if acronym in REGION_STYLE:
         return hex_to_rgb(REGION_STYLE[acronym][0])

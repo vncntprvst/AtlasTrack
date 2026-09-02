@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
-from histo_to_ccf.project.schema import PlaneParams, Section
-from histo_to_ccf.sectioning.ap_series import ap_offsets, assign_section_ap
+from atlastrack.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+from atlastrack.project.schema import PlaneParams, Section
+from atlastrack.sectioning.ap_series import ap_offsets, assign_section_ap
 
 
 def _sections(slide_numbers, *, with_plane_ap=None):

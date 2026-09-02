@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from histo_to_ccf.project.schema import Section
+    from atlastrack.project.schema import Section
 
 Mode = Literal["ordinal", "slide_number"]
 
@@ -94,14 +94,14 @@ def assign_section_ap(
     it has no plane yet).
 
     ``bregma_ap_um`` is that fallback bregma position, which differs between atlases
-    (see :data:`histo_to_ccf.io.ccf_coords.BREGMA_AP_BY_ATLAS`). It defaults to the
+    (see :data:`atlastrack.io.ccf_coords.BREGMA_AP_BY_ATLAS`). It defaults to the
     Allen anchor, which is right for Allen and Kim but 346 µm off for the BBP
     augmented CCFv3.
 
     Returns ``(n_sections_updated, mode)`` - see the module docstring for modes.
     """
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
-    from histo_to_ccf.project.schema import PlaneParams
+    from atlastrack.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+    from atlastrack.project.schema import PlaneParams
 
     if not sections:
         return 0, "ordinal"

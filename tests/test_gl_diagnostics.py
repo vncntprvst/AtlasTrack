@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from histo_to_ccf.gui import gl_diagnostics
+from atlastrack.gui import gl_diagnostics
 
 pytestmark = pytest.mark.qt
 
@@ -34,7 +34,7 @@ def test_probe_subprocess_does_not_crash() -> None:
     all' - a message that blames the user's driver - on healthy hardware.
     """
     result = subprocess.run(
-        [sys.executable, "-m", "histo_to_ccf.gui.gl_diagnostics"],
+        [sys.executable, "-m", "atlastrack.gui.gl_diagnostics"],
         capture_output=True, text=True, timeout=120,
     )
 

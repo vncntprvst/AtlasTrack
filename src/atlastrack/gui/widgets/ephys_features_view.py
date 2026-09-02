@@ -12,8 +12,8 @@ zoomed - a problem when the interesting structure is a few tens of µm across a
 Depth increases **downwards** (the surface at the top, the tip at the bottom), which
 is how the probe actually sits and how every ephys depth plot in the field is drawn.
 
-pyqtgraph lives only under ``histo_to_ccf.gui``; the maths it draws is all in the
-headless :mod:`histo_to_ccf.ephys` package.
+pyqtgraph lives only under ``atlastrack.gui``; the maths it draws is all in the
+headless :mod:`atlastrack.ephys` package.
 """
 from __future__ import annotations
 
@@ -23,12 +23,12 @@ import numpy as np
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from histo_to_ccf.ephys.regions import band_colours, white_matter_acronyms
+from atlastrack.ephys.regions import band_colours, white_matter_acronyms
 
 if TYPE_CHECKING:
-    from histo_to_ccf.ephys.landmarks import Landmarks
-    from histo_to_ccf.ephys.penetration import PenetrationProfile
-    from histo_to_ccf.ephys.regions import RegionBand
+    from atlastrack.ephys.landmarks import Landmarks
+    from atlastrack.ephys.penetration import PenetrationProfile
+    from atlastrack.ephys.regions import RegionBand
 
 # Grey wash over depths no recording covers, so a blind stretch never looks as
 # well constrained as a measured one.
@@ -90,7 +90,7 @@ def _with_coverage_alpha(psd, img):
     Fully covered maps (every single-recording one) get no alpha channel at all, so
     the common path is unchanged.
     """
-    from histo_to_ccf.ephys.features import covered_rows
+    from atlastrack.ephys.features import covered_rows
 
     covered = covered_rows(psd)
     if covered.size != img.shape[0] or covered.all():
@@ -164,7 +164,7 @@ class EphysFeaturesView(QWidget):
             layout.addWidget(
                 QLabel(
                     "pyqtgraph is not installed - the ephys feature panels need it.\n"
-                    'Install with: pip install "histo-to-ccf[ephys]"'
+                    'Install with: pip install "atlastrack[ephys]"'
                 )
             )
             self._status = QLabel("")
@@ -288,7 +288,7 @@ class EphysFeaturesView(QWidget):
     def _draw_raster(self) -> None:
         import pyqtgraph as pg
 
-        from histo_to_ccf.ephys.features import raster_points
+        from atlastrack.ephys.features import raster_points
 
         profile = self._profile
         if profile is None:
@@ -309,7 +309,7 @@ class EphysFeaturesView(QWidget):
     def _draw_rate(self) -> None:
         import pyqtgraph as pg
 
-        from histo_to_ccf.ephys.features import depth_profiles
+        from atlastrack.ephys.features import depth_profiles
 
         profile = self._profile
         if profile is None:
@@ -407,7 +407,7 @@ class EphysFeaturesView(QWidget):
     def _draw_lfp_image(self) -> None:
         import pyqtgraph as pg
 
-        from histo_to_ccf.ephys.features import power_image
+        from atlastrack.ephys.features import power_image
 
         if self._lfp_data is None:
             return
@@ -528,7 +528,7 @@ class EphysFeaturesView(QWidget):
         """The atlas-region panel, so landmark handles can be attached to it.
 
         The alignment controls live outside this widget (see
-        :class:`~histo_to_ccf.gui.widgets.ephys_alignment_panel.EphysAlignmentPanel`),
+        :class:`~atlastrack.gui.widgets.ephys_alignment_panel.EphysAlignmentPanel`),
         which keeps this view usable, and testable, with no alignment state at all.
         """
         return getattr(self, "_regions", None)
@@ -543,7 +543,7 @@ class EphysFeaturesView(QWidget):
         they should - that disagreement is exactly what the alignment is for, so it
         must be visible rather than clipped away.
         """
-        from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+        from atlastrack.ephys.regions import region_bands, regions_along_track
 
         self._bands = []
         if atlas is None or tip_ccf_um is None or entry_ccf_um is None:

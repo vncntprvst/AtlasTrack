@@ -114,7 +114,7 @@ def _neuronexus_a1x32_poly3() -> ProbeLayout:
     left -> right, matching the channel convention used elsewhere in the catalog.
 
     This is the *site layout* only. Which recording channel each site lands on
-    depends on the adapter; see :mod:`histo_to_ccf.ephys.probemap`.
+    depends on the adapter; see :mod:`atlastrack.ephys.probemap`.
     """
     pitch = 25.0
     tip_to_lowest_site = 62.0

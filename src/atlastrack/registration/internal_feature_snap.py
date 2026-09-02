@@ -170,7 +170,7 @@ def ventricle_correspondences(
     Samples the atlas-ventricle boundary and maps each point (plus the centroid)
     through the clamped region-affine. Returns ``(src, dst)`` (N, 2) in (x, y).
     """
-    from histo_to_ccf.registration.transforms import annotation_boundaries
+    from atlastrack.registration.transforms import annotation_boundaries
 
     av = np.asarray(atlas_ventricle, dtype=bool)
     apply, cs, ct = _clamped_region_affine(av, np.asarray(cavity, dtype=bool))
@@ -205,7 +205,7 @@ def midline_correspondences(
     judged biased and the whole midline term is dropped (returns ``None``) - this is
     the guard against over-correcting an asymmetric section.
     """
-    from histo_to_ccf.landmarks.midline import estimate_midline
+    from atlastrack.landmarks.midline import estimate_midline
 
     am = np.asarray(atlas_midline, dtype=bool)
     if int(am.sum()) < 10:
@@ -278,7 +278,7 @@ def internal_feature_snap_transform(
     :func:`boundary_snap.compose_snap`) or ``None`` when no gated feature yields a
     correction, or when every smoothing level still folds.
     """
-    from histo_to_ccf.registration.boundary_snap import fit_foldproof_tps
+    from atlastrack.registration.boundary_snap import fit_foldproof_tps
 
     tissue = np.asarray(tissue, dtype=bool)
     shape = tissue.shape

@@ -49,10 +49,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui import crashlog
-from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.io.ccf_coords import (
+from atlastrack.gui import crashlog
+from atlastrack.gui.widgets.tooltips import wrap_tooltips
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.io.ccf_coords import (
     BREGMA_AP_FROM_ORIGIN_UM,
     bregma_ap_for_display,
 )
@@ -67,7 +67,7 @@ _AP_SOURCE_LABELS = {
 }
 
 if TYPE_CHECKING:
-    from histo_to_ccf.project.schema import ChannelLevels, Section
+    from atlastrack.project.schema import ChannelLevels, Section
 
 _EDGE_COLOR = (0, 255, 0)  # atlas region boundaries drawn in green
 
@@ -138,7 +138,7 @@ def _display_reference(ref: np.ndarray) -> np.ndarray:
 
 def _edges_pixmap(annotation: np.ndarray) -> QPixmap:
     """Green RGBA edge map where atlas region labels meet (transparent elsewhere)."""
-    from histo_to_ccf.registration.transforms import annotation_boundaries
+    from atlastrack.registration.transforms import annotation_boundaries
 
     mask = annotation_boundaries(annotation)
     h, w = mask.shape
@@ -424,7 +424,7 @@ class AtlasMatcherDialog(QDialog):
         self._thumb_cache: dict[tuple, QPixmap] = {}
         self._build_ui()
         # Long explanatory tooltips would otherwise render as one screen-wide
-        # line; see histo_to_ccf.gui.widgets.tooltips.
+        # line; see atlastrack.gui.widgets.tooltips.
         wrap_tooltips(self)
         self._init_ap_range()
         self._sync_from_tab()
@@ -722,7 +722,7 @@ class AtlasMatcherDialog(QDialog):
     # -- atlas sampling --------------------------------------------------
 
     def _atlas_slice(self, ap_abs: float, out_shape: tuple[int, int]):
-        from histo_to_ccf.atlas.planes import coronal_anchoring, resample_atlas_at_plane
+        from atlastrack.atlas.planes import coronal_anchoring, resample_atlas_at_plane
 
         atlas = self._state.atlas
         anchoring = coronal_anchoring(atlas, ap_abs)
@@ -858,7 +858,7 @@ class AtlasMatcherDialog(QDialog):
         gets the AP progression it actually has. Falls back to even steps when
         slide numbers are absent, which reproduces the original behaviour exactly.
         """
-        from histo_to_ccf.sectioning.ap_series import ap_offsets
+        from atlastrack.sectioning.ap_series import ap_offsets
 
         ordered = self._ordered_sections()
         anchor_pos, anchor_ap = self._anchor or (self._pos, self._ap_spin.value())
@@ -916,7 +916,7 @@ class AtlasMatcherDialog(QDialog):
 
     @staticmethod
     def _write_ap(section: "Section", ap_abs: float, source: str) -> None:
-        from histo_to_ccf.project.schema import PlaneParams
+        from atlastrack.project.schema import PlaneParams
 
         if section.plane is not None:
             section.plane = section.plane.model_copy(update={"ap_um": ap_abs})
@@ -932,7 +932,7 @@ class AtlasMatcherDialog(QDialog):
         Built with the same ``io.image.crop`` the Register step uses, so the cached
         crop fingerprints line up and Register can reuse this pre-match.
         """
-        from histo_to_ccf.io.image import crop
+        from atlastrack.io.image import crop
 
         out: dict[int, np.ndarray] = {}
         for section in self._ordered_sections():
@@ -1014,10 +1014,10 @@ class AtlasMatcherDialog(QDialog):
             Path(pp).parent if pp is not None else Path(tempfile.mkdtemp())
         ) / "deepslice"
 
-        from histo_to_ccf.gui.workers import deepslice_worker
+        from atlastrack.gui.workers import deepslice_worker
 
         self._prematch_btn.setEnabled(False)
-        from histo_to_ccf.registration.deepslice_adapter import deepslice_run_note
+        from atlastrack.registration.deepslice_adapter import deepslice_run_note
 
         self._status.setText(
             f"Running DeepSlice on {len(section_images)} section(s)"
@@ -1046,9 +1046,9 @@ class AtlasMatcherDialog(QDialog):
         stored on the section, so reloading the project does not silently throw the
         obliquity away and leave a re-register to flatten the plane.
         """
-        from histo_to_ccf.gui.workflow import crop_fingerprint
-        from histo_to_ccf.io.ccf_coords import atlas_resolution_um
-        from histo_to_ccf.registration.pipeline import anchoring_center_ap_um
+        from atlastrack.gui.workflow import crop_fingerprint
+        from atlastrack.io.ccf_coords import atlas_resolution_um
+        from atlastrack.registration.pipeline import anchoring_center_ap_um
 
         self._prematch_btn.setEnabled(True)
         if not anchorings:
@@ -1141,7 +1141,7 @@ class AtlasMatcherDialog(QDialog):
         APs afterwards breaks the series just as easily, and that used to go
         unreported because the check only ran once, right after a pre-match.
         """
-        from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+        from atlastrack.registration.pipeline import prematch_ap_order_issues
 
         ordered = [s for s in self._ordered_sections() if s.plane is not None]
         aps = [(s.index, s.plane.ap_um) for s in ordered]

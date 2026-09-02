@@ -6,7 +6,7 @@ enough to matter (346 µm and 102 µm). Those numbers were measured for this app
 than published anywhere, so this is the one place a user can see them, next to the
 paper that describes each atlas.
 
-The bregma column is read from :data:`histo_to_ccf.io.ccf_coords.BREGMA_AP_BY_ATLAS`
+The bregma column is read from :data:`atlastrack.io.ccf_coords.BREGMA_AP_BY_ATLAS`
 rather than written out again here, so the sheet cannot drift from the value the
 exports actually use.
 """
@@ -130,7 +130,7 @@ def link_colour_for(widget: QWidget | None) -> str:
 
 def atlas_reference_html(link_colour: str = LINK_ON_DARK) -> str:
     """The reference sheet, with each bregma read from the live anchor table."""
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_BY_ATLAS
+    from atlastrack.io.ccf_coords import BREGMA_AP_BY_ATLAS
 
     parts = ["<html><body style='font-size: 10pt;'>"]
     for name, prefix, description, links, note in _ATLASES:

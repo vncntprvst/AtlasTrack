@@ -9,10 +9,10 @@ pytest.importorskip("qtpy")
 
 from qtpy.QtWidgets import QGroupBox, QLabel, QPushButton, QWidget
 
-from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
-from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
-from histo_to_ccf.gui.widgets.separators import hline, section_header
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+from atlastrack.gui.widgets.image_tools import ImageToolsWidget
+from atlastrack.gui.widgets.separators import hline, section_header
+from atlastrack.gui.workflow import WorkflowState
 
 pytestmark = pytest.mark.qt
 
@@ -86,7 +86,7 @@ def test_landmark_preview_matches_the_normal_overlay_width() -> None:
     Thickening the splat was the old fix for the holes the warp opens; it hid
     the anatomy. Gaps are closed instead.
     """
-    from histo_to_ccf.gui.widgets.register_panel import (
+    from atlastrack.gui.widgets.register_panel import (
         _LANDMARK_CONTOUR_CLOSE_GAPS,
         _LANDMARK_CONTOUR_THICKNESS,
     )
@@ -100,7 +100,7 @@ def test_closing_mends_the_warped_contour_without_widening_it() -> None:
     import numpy as np
     from scipy import ndimage as ndi
 
-    from histo_to_ccf.registration.landmarks_warp import warp_contour_image
+    from atlastrack.registration.landmarks_warp import warp_contour_image
 
     # A dense ring, warped by a mild stretch that pulls its pixels apart.
     theta = np.linspace(0, 2 * np.pi, 900, endpoint=False)

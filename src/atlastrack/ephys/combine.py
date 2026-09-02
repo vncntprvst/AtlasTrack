@@ -26,7 +26,7 @@ tip actually reached, and the one the histology track is measured in.
 
 **Reference level.** Two recordings that referenced over different sets of channels
 report different absolute power for the same tissue. The per-shank reference in
-:func:`~histo_to_ccf.ephys.epochs.common_median_reference` removes most of it; what
+:func:`~atlastrack.ephys.epochs.common_median_reference` removes most of it; what
 is left is measured **in the depth range where the recordings overlap** and removed,
 which is only possible because they overlap. :attr:`Contribution.level_offset_dec`
 reports it, and a large value means the recordings disagree about tissue they both
@@ -45,12 +45,12 @@ from itertools import pairwise
 
 import numpy as np
 
-from histo_to_ccf.ephys.recordings import (
+from atlastrack.ephys.recordings import (
     NP2_ROW_PITCH_UM,
     channels_for_shank,
     resolve_bank_offset,
 )
-from histo_to_ccf.probes.geometry import SHANK_TIP_LENGTH_UM
+from atlastrack.probes.geometry import SHANK_TIP_LENGTH_UM
 
 
 @dataclass

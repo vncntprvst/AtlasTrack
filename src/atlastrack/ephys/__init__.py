@@ -1,18 +1,18 @@
 """Ephys alignment: refine probe shank locations from LFP features.
 
 Pure-core package (no napari / Qt). The SpikeInterface-dependent loader lives in
-:mod:`histo_to_ccf.ephys.loader` and gates its import so the base install stays
+:mod:`atlastrack.ephys.loader` and gates its import so the base install stays
 light; the depth-warping math (:mod:`alignment`) and LFP feature computation
 (:mod:`features`) are plain numpy/scipy and fully testable on their own.
 """
 from __future__ import annotations
 
-from histo_to_ccf.ephys.alignment import (
+from atlastrack.ephys.alignment import (
     apply_depth_alignment,
     channel_ccf_um,
     invert_anchors,
 )
-from histo_to_ccf.ephys.epochs import (
+from atlastrack.ephys.epochs import (
     activity_score,
     artifact_score,
     candidate_windows,
@@ -20,14 +20,14 @@ from histo_to_ccf.ephys.epochs import (
     rank_epochs,
     screen_window,
 )
-from histo_to_ccf.ephys.features import (
+from atlastrack.ephys.features import (
     depth_profiles,
     lfp_band_power,
     lfp_psd,
     power_image,
     raster_points,
 )
-from histo_to_ccf.ephys.recordings import (
+from atlastrack.ephys.recordings import (
     bank_offset_um,
     coverage_gaps_um,
     depth_below_surface_um,

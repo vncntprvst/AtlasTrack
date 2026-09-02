@@ -12,7 +12,7 @@ That difference is invisible in text and obvious in a picture, so the centre of 
 dialog is a coverage plot: one row per shank, µm from the tip, the histology region
 bands drawn behind and the recorded spans over them.
 
-Everything derivable is derived (see :mod:`histo_to_ccf.ephys.discovery`); the table
+Everything derivable is derived (see :mod:`atlastrack.ephys.discovery`); the table
 asks only for what is left, which in practice is an insertion depth for penetrations
 recorded at more than one depth.
 """
@@ -42,17 +42,17 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.ephys.discovery import (
+from atlastrack.ephys.discovery import (
     Penetration,
     coverage_from_tip,
     derive_electrode_range,
     grouping_warnings,
 )
-from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.widgets.tooltips import wrap_tooltips
+from atlastrack.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
-    from histo_to_ccf.ephys.discovery import RecordingCandidate
+    from atlastrack.ephys.discovery import RecordingCandidate
 
 _COLUMNS = ("Use", "Recording", "Coverage", "Insertion depth (µm)", "From", "Check")
 _ROW_H_PX = 62
@@ -80,7 +80,7 @@ class EphysDiscoveryDialog(QDialog):
         self._plot_ok = False
         self._build_ui()
         # Long explanatory tooltips would otherwise render as one screen-wide
-        # line; see histo_to_ccf.gui.widgets.tooltips.
+        # line; see atlastrack.gui.widgets.tooltips.
         wrap_tooltips(self)
         if start_dir:
             self._folder_edit.setText(start_dir)
@@ -158,7 +158,7 @@ class EphysDiscoveryDialog(QDialog):
         else:
             self._coverage_layout.addWidget(
                 QLabel("Install the ephys extra for the coverage plot "
-                       "(pip install 'histo-to-ccf[ephys]').")
+                       "(pip install 'atlastrack[ephys]').")
             )
         split.addWidget(cov_box)
         split.setStretchFactor(0, 0)
@@ -220,7 +220,7 @@ class EphysDiscoveryDialog(QDialog):
         self._scan_btn.setEnabled(False)
         self._status.setText(f"Scanning {root} …")
 
-        from histo_to_ccf.gui.workers import discover_recordings_worker
+        from atlastrack.gui.workers import discover_recordings_worker
 
         worker = discover_recordings_worker(root, sidecar)
         worker.returned.connect(self._on_scan_done)
@@ -496,7 +496,7 @@ class EphysDiscoveryDialog(QDialog):
         tips = [(s.index, s.tip_ccf_um) for s in probe.shanks if s.tip_ccf_um is not None]
         if len(tips) < 2:
             return ""
-        # CCF AP increases posteriorly (histo_to_ccf.io.ccf_coords).
+        # CCF AP increases posteriorly (atlastrack.io.ccf_coords).
         order = sorted(tips, key=lambda it: float(it[1][0]))
         if shank == order[-1][0]:
             return "post"
@@ -585,7 +585,7 @@ class EphysDiscoveryDialog(QDialog):
             return {}
         import numpy as np
 
-        from histo_to_ccf.ephys.regions import (
+        from atlastrack.ephys.regions import (
             band_colours,
             region_bands,
             region_colour_map,
@@ -653,7 +653,7 @@ class EphysDiscoveryDialog(QDialog):
             )
             return -1
 
-        from histo_to_ccf.project.schema import EphysRecordingRef
+        from atlastrack.project.schema import EphysRecordingRef
 
         existing = {(r.path, r.stream_name) for r in probe.recordings}
         added = 0

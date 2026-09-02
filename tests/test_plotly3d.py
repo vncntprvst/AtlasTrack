@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from histo_to_ccf.project.schema import (
+from atlastrack.project.schema import (
     AtlasRef,
     PlaneParams,
     Point2D,
@@ -17,7 +17,7 @@ from histo_to_ccf.project.schema import (
     Shank,
     Slide,
 )
-from histo_to_ccf.viz.plotly3d import add_probe_traces, build_figure, save_html
+from atlastrack.viz.plotly3d import add_probe_traces, build_figure, save_html
 
 
 def _project_with_coords() -> Project:

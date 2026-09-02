@@ -16,7 +16,7 @@ describing it, in the two views that can each catch a failure the other cannot.
   row.
 
 Nothing is written until Apply, and Apply records a
-:class:`~histo_to_ccf.project.schema.TrajectoryAdjustment` rather than overwriting the
+:class:`~atlastrack.project.schema.TrajectoryAdjustment` rather than overwriting the
 registered tip and entry - the histology placement is a measurement and this is a
 hypothesis about it.
 """
@@ -40,11 +40,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
-from histo_to_ccf.probes.trajectory_refine import array_axes, transformed_array
+from atlastrack.gui.widgets.tooltips import wrap_tooltips
+from atlastrack.probes.trajectory_refine import array_axes, transformed_array
 
 if TYPE_CHECKING:
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.workflow import WorkflowState
 
 #: Before is drawn muted, after at full strength - the eye should go to the proposal.
 _BEFORE_RGB = (150, 150, 150)
@@ -156,7 +156,7 @@ class TrajectoryPreviewDialog(QDialog):
             self._after_tips, self._after_entries = self._tips, self._entries
         self._build_ui()
         # Long explanatory tooltips would otherwise render as one screen-wide
-        # line; see histo_to_ccf.gui.widgets.tooltips.
+        # line; see atlastrack.gui.widgets.tooltips.
         wrap_tooltips(self)
         self.refresh()
 
@@ -307,7 +307,7 @@ class TrajectoryPreviewDialog(QDialog):
 
     def _bands_for(self, tip, entry):
         """Region bands along one track, in µm from the tip, with colours."""
-        from histo_to_ccf.ephys.regions import (
+        from atlastrack.ephys.regions import (
             band_colours,
             region_bands,
             regions_along_track,
@@ -493,7 +493,7 @@ class TrajectoryPreviewDialog(QDialog):
         """The record this dialog would write. Separated so it is testable."""
         from datetime import datetime, timezone
 
-        from histo_to_ccf.project.schema import TrajectoryAdjustment
+        from atlastrack.project.schema import TrajectoryAdjustment
 
         fit = self._fit
         identifiable = fit.identifiable() if hasattr(fit, "identifiable") else {}
@@ -542,7 +542,7 @@ class TrajectoryPreviewDialog(QDialog):
 
     def registration_suggestion(self):
         """The same fit expressed as a registration change. Headless-testable."""
-        from histo_to_ccf.probes.registration_suggestion import (
+        from atlastrack.probes.registration_suggestion import (
             suggest_registration_change,
         )
 
@@ -562,7 +562,7 @@ class TrajectoryPreviewDialog(QDialog):
 
     def save_fit_to(self, path):
         """Write the fit beside the features. Returns the path; headless-testable."""
-        from histo_to_ccf.probes.trajectory_fit_io import save_fit
+        from atlastrack.probes.trajectory_fit_io import save_fit
 
         return save_fit(path, self._fit, self._evidence,
                         probe_label=self.probe.label, notes=self._extra_notes,
@@ -571,7 +571,7 @@ class TrajectoryPreviewDialog(QDialog):
     def _on_save(self) -> None:
         import contextlib
 
-        from histo_to_ccf.probes.trajectory_fit_io import default_fit_path
+        from atlastrack.probes.trajectory_fit_io import default_fit_path
 
         suggested = default_fit_path(
             getattr(self._state, "project_path", None), self.probe.label

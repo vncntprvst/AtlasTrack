@@ -10,17 +10,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from histo_to_ccf.io.ccf_coords import ccf_um_to_paxinos_mm
-from histo_to_ccf.probes.catalog import CATALOG, get_layout
-from histo_to_ccf.probes.channels import (
+from atlastrack.io.ccf_coords import ccf_um_to_paxinos_mm
+from atlastrack.probes.catalog import CATALOG, get_layout
+from atlastrack.probes.channels import (
     channel_ccf_coords,
     export_channel_csv,
     export_paxinos_csv,
     project_channel_coords,
     shank_channel_coords,
 )
-from histo_to_ccf.probes.geometry import ELECTRODE_COLUMN_CENTER_UM
-from histo_to_ccf.project.schema import (
+from atlastrack.probes.geometry import ELECTRODE_COLUMN_CENTER_UM
+from atlastrack.project.schema import (
     AtlasRef,
     Point2D,
     ProbeSpec,
@@ -172,7 +172,7 @@ def _legacy_single_channel_ccf(
 
     This mirrors what probe_visualization.py does so we can cross-check.
     """
-    from histo_to_ccf.probes.geometry import SHANK_THICKNESS_UM
+    from atlastrack.probes.geometry import SHANK_THICKNESS_UM
 
     # Legacy ccf array is (AP, ML, DV); legacy surface = ccf[0] = entry point.
     entry = np.array(entry_aml, dtype=float)  # (AP, ML, DV)

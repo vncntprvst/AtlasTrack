@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.workflow import WorkflowState
 
 
 def test_reset_clears_project_but_keeps_atlas() -> None:

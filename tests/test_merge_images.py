@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.io.image import merge_images, slide_bands
+from atlastrack.io.image import merge_images, slide_bands
 
 
 def test_single_image_returned_unchanged() -> None:

@@ -17,8 +17,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.widgets.separators import section_header
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.widgets.separators import section_header
+from atlastrack.gui.workflow import WorkflowState
 
 _CHANNELS = ("R", "G", "B")
 
@@ -283,7 +283,7 @@ class ImageToolsWidget(QWidget):
         )
         if not anchoring or len(anchoring) < 6:
             return
-        from histo_to_ccf.project.images import deepslice_rotation_deg
+        from atlastrack.project.images import deepslice_rotation_deg
 
         self._rotation_spin.setValue(round(deepslice_rotation_deg(anchoring), 2))
 
@@ -373,7 +373,7 @@ class ImageToolsWidget(QWidget):
         return self._state.slide_images.get(idx)
 
     def _save_levels(self) -> None:
-        from histo_to_ccf.project.schema import ChannelLevels
+        from atlastrack.project.schema import ChannelLevels
 
         low = [s.value() for s in self._low_spins]
         high = [s.value() for s in self._high_spins]

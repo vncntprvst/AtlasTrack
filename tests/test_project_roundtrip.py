@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from histo_to_ccf.project.io import load_project, save_project
-from histo_to_ccf.project.schema import (
+from atlastrack.project.io import load_project, save_project
+from atlastrack.project.schema import (
     AtlasRef,
     PlaneParams,
     Point2D,

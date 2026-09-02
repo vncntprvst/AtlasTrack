@@ -26,7 +26,7 @@ the rotation of the shank row about that axis. So:
   a visible deviation readout is the honest treatment.
 
 Pure numpy - no atlas, no Qt. The scoring that needs an atlas composes these with
-:mod:`histo_to_ccf.ephys.regions`.
+:mod:`atlastrack.ephys.regions`.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ import numpy as np
 # the array's own position instead of assumed - the same +45° describes mirror-image
 # arrangements on the two sides, and hard-coding one would silently mirror the other.
 #
-# CCF axis directions, from histo_to_ccf.io.ccf_coords: AP *increases posteriorly*,
+# CCF axis directions, from atlastrack.io.ccf_coords: AP *increases posteriorly*,
 # so anterior is -AP; the ML midline sits at 5700 µm.
 _AP_AXIS = np.array([1.0, 0.0, 0.0])
 _ML_AXIS = np.array([0.0, 1.0, 0.0])
@@ -65,7 +65,7 @@ def array_axes(tips, entries) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Insertion direction ``u``, row axis ``r`` (perpendicular to ``u``), and centre.
 
     ``r`` is the principal axis of the tips *after projecting out* ``u``, matching
-    :func:`histo_to_ccf.probes.fitting.fit_rigid_array`: without that projection the
+    :func:`atlastrack.probes.fitting.fit_rigid_array`: without that projection the
     millimetre-scale spread in insertion depth would dominate the sub-millimetre row
     and hijack the axis.
     """
@@ -247,15 +247,15 @@ def score_trajectory(tips, entries, shank_profiles, atlas, *, min_band_um: float
     """How well a probe placement's atlas boundaries land on measured feature steps.
 
     ``shank_profiles`` maps shank index -> ``(depth_from_tip_grid, step_score)``, the
-    output of :func:`histo_to_ccf.ephys.autolandmarks.step_profile` expressed in µm
+    output of :func:`atlastrack.ephys.autolandmarks.step_profile` expressed in µm
     **from the tip** - the one axis that does not move when the probe does, since the
     electrodes are fixed to the shank.
 
     Returns ``(total_score, n_boundaries)``. Summed across shanks: a placement has to
     explain all four at once, which is what makes roll and pitch identifiable at all.
     """
-    from histo_to_ccf.ephys.autolandmarks import candidate_boundaries
-    from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+    from atlastrack.ephys.autolandmarks import candidate_boundaries
+    from atlastrack.ephys.regions import region_bands, regions_along_track
 
     tips = np.asarray(tips, dtype=float)
     entries = np.asarray(entries, dtype=float)

@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from histo_to_ccf.probes.trajectory_fit import (
+from atlastrack.probes.trajectory_fit import (
     Match,
     ParameterScan,
     PlacementScore,
@@ -40,7 +40,7 @@ def default_fit_path(project_path, probe_label: str) -> Path:
 
     Outputs go next to the data they describe, never the working directory.
     """
-    from histo_to_ccf.ephys.export import default_export_path
+    from atlastrack.ephys.export import default_export_path
 
     features = default_export_path(project_path, probe_label)
     return features.with_name(features.stem + "_fit.npz")

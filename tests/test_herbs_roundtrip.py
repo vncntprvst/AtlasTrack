@@ -6,13 +6,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from histo_to_ccf.io.herbs import (
+from atlastrack.io.herbs import (
     DEFAULT_HERBS_GRID_UM,
     ccf_um_to_herbs_voxel,
     herbs_voxel_to_ccf_um,
     load_herbs_pkl,
 )
-from histo_to_ccf.io.herbs_writer import write_herbs_pkl
+from atlastrack.io.herbs_writer import write_herbs_pkl
 
 
 @pytest.fixture

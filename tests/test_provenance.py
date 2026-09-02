@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from histo_to_ccf.project.provenance import describe_staleness, write_export_provenance
+from atlastrack.project.provenance import describe_staleness, write_export_provenance
 
 
 def _project_file(tmp_path, text: str = '{"version": 1}'):
@@ -23,7 +23,7 @@ def test_records_source_and_options(tmp_path) -> None:
     )
 
     record = json.loads(prov.read_text(encoding="utf-8"))
-    assert record["tool"] == "histo2ccf"
+    assert record["tool"] == "atlastrack"
     assert record["n_channel_rows"] == 3072
     assert record["source_project"] == str(project)
     assert record["outputs"] == ["out.csv", "out - Paxinos.csv"]

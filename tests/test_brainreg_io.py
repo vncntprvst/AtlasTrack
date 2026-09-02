@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from histo_to_ccf.io.brainreg import BrainregRegistration
+from atlastrack.io.brainreg import BrainregRegistration
 
 SHAPE = (12, 10, 8)
 

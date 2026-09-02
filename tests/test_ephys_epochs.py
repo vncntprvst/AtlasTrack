@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.epochs import (
+from atlastrack.ephys.epochs import (
     EpochVerdict,
     activity_score,
     artifact_score,

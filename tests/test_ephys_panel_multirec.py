@@ -9,8 +9,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.combine import RecordingFeatures, stack_penetration
-from histo_to_ccf.project.schema import (
+from atlastrack.ephys.combine import RecordingFeatures, stack_penetration
+from atlastrack.project.schema import (
     EphysRecordingRef,
     ProbeSpec,
     ProbeType,
@@ -25,7 +25,7 @@ FREQS = np.linspace(0.0, 300.0, 16)
 
 
 def _state_with_probe(n_shanks=4):
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.workflow import WorkflowState
 
     state = WorkflowState()
     state.project.probes.append(ProbeSpec(
@@ -40,7 +40,7 @@ def _state_with_probe(n_shanks=4):
 def _panel(qtbot, state):
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
 
     viewer = napari.Viewer(show=False)
     panel = EphysPanelWidget(state, viewer)
@@ -90,7 +90,7 @@ def test_compute_uses_the_attached_recordings_not_the_path_box(qtbot, monkeypatc
             raise RuntimeError("stop here")
 
         monkeypatch.setattr(
-            "histo_to_ccf.gui.workers.multi_lfp_power_worker", fake_multi
+            "atlastrack.gui.workers.multi_lfp_power_worker", fake_multi
         )
         with pytest.raises(RuntimeError, match="stop here"):
             panel._compute()
@@ -179,7 +179,7 @@ def test_saving_exports_every_stacked_shank(qtbot):
 
 def test_mixed_insertion_depths_with_one_missing_are_refused(qtbot, monkeypatch):
     """Without every depth the recordings cannot be placed relative to each other."""
-    from histo_to_ccf.gui.widgets import ephys_panel as mod
+    from atlastrack.gui.widgets import ephys_panel as mod
 
     state = _state_with_probe()
     state.project.probes[0].recordings = [
@@ -192,7 +192,7 @@ def test_mixed_insertion_depths_with_one_missing_are_refused(qtbot, monkeypatch)
         monkeypatch.setattr(mod.QMessageBox, "warning",
                             lambda *a, **k: warned.setdefault("msg", a[2]))
         monkeypatch.setattr(
-            "histo_to_ccf.gui.workers.multi_lfp_power_worker",
+            "atlastrack.gui.workers.multi_lfp_power_worker",
             lambda *a, **k: pytest.fail("must not compute with a missing depth"),
         )
         panel._compute()
@@ -261,7 +261,7 @@ def _fake_worker(*_args, **_kwargs) -> _FakeWorker:
 
 def test_the_default_is_to_take_geometry_from_the_recording(qtbot):
     """Open Ephys and SpikeGLX store the probe; overriding that would be a step back."""
-    from histo_to_ccf.gui.widgets.ephys_panel import MAP_FROM_RECORDING
+    from atlastrack.gui.widgets.ephys_panel import MAP_FROM_RECORDING
 
     panel, _ = _panel(qtbot, _state_with_probe())
 
@@ -270,7 +270,7 @@ def test_the_default_is_to_take_geometry_from_the_recording(qtbot):
 
 
 def test_the_wired_poly3_map_is_offered_and_resolves_to_real_micrometres(qtbot):
-    from histo_to_ccf.ephys.probemap import (
+    from atlastrack.ephys.probemap import (
         NEURONEXUS_POLY3_A32_RHD2132,
         resolve_probe_map,
     )
@@ -285,7 +285,7 @@ def test_the_wired_poly3_map_is_offered_and_resolves_to_real_micrometres(qtbot):
 
 def test_the_file_browser_entry_is_not_itself_a_probe_map(qtbot):
     """Selecting it opens a dialog; it must never be handed on as a map name."""
-    from histo_to_ccf.gui.widgets.ephys_panel import MAP_CHOOSE_FILE
+    from atlastrack.gui.widgets.ephys_panel import MAP_CHOOSE_FILE
 
     panel, _ = _panel(qtbot, _state_with_probe())
     index = panel._map_combo.findText(MAP_CHOOSE_FILE)
@@ -297,7 +297,7 @@ def test_the_file_browser_entry_is_not_itself_a_probe_map(qtbot):
 
 def test_a_catalog_layout_is_offered_but_labelled_as_layout_only(qtbot):
     """It says where the sites are, not which channel each one is on."""
-    from histo_to_ccf.probes.catalog import NEURONEXUS_A1X32_POLY3
+    from atlastrack.probes.catalog import NEURONEXUS_A1X32_POLY3
 
     panel, _ = _panel(qtbot, _state_with_probe())
     texts = _map_entries(panel)
@@ -310,8 +310,8 @@ def test_a_catalog_layout_is_offered_but_labelled_as_layout_only(qtbot):
 
 def test_the_chosen_map_reaches_recordings_that_have_none(qtbot, monkeypatch):
     """The panel's choice is the penetration's default, applied at compute time."""
-    from histo_to_ccf.ephys.probemap import NEURONEXUS_POLY3_A32_RHD2132
-    from histo_to_ccf.gui import workers
+    from atlastrack.ephys.probemap import NEURONEXUS_POLY3_A32_RHD2132
+    from atlastrack.gui import workers
 
     state = _state_with_probe(n_shanks=1)
     probe = state.project.probes[0]

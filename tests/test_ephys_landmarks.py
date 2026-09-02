@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.landmarks import (
+from atlastrack.ephys.landmarks import (
     AlignmentHistory,
     LandmarkCrossingError,
     Landmarks,

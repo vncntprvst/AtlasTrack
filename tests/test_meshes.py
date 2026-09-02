@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from histo_to_ccf.atlas.meshes import mesh_vertices_faces
+from atlastrack.atlas.meshes import mesh_vertices_faces
 
 
 class _FakeMeshio:
@@ -63,7 +63,7 @@ class _FakeAtlas:
 
 
 def test_region_acronyms_at_points() -> None:
-    from histo_to_ccf.atlas.meshes import region_acronyms_at_points
+    from atlastrack.atlas.meshes import region_acronyms_at_points
 
     # points are (AP, ML, DV); the deep one (DV=6000) is in IRN.
     pts = [(5000, 5700, 6000), (5000, 5700, 100), (-1, 0, 0), (5000, 5700, 6000)]
@@ -72,15 +72,15 @@ def test_region_acronyms_at_points() -> None:
 
 
 def test_structure_rgb() -> None:
-    from histo_to_ccf.atlas.meshes import structure_rgb
+    from atlastrack.atlas.meshes import structure_rgb
 
     assert structure_rgb(_FakeAtlas(), "IRN") == (10, 20, 30)
     assert structure_rgb(_FakeAtlas(), "nonexistent") == (180, 180, 180)
 
 
 def test_resolve_regions_tips_plus_extra_minus_context() -> None:
-    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Project, Shank
-    from histo_to_ccf.viz.plotly3d import resolve_regions
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Project, Shank
+    from atlastrack.viz.plotly3d import resolve_regions
 
     project = Project(
         probes=[
@@ -101,7 +101,7 @@ def test_resolve_regions_tips_plus_extra_minus_context() -> None:
 def test_deepslice_anchoring_permutation_and_flips() -> None:
     import pytest
 
-    from histo_to_ccf.registration.deepslice_adapter import _quicknii_to_atlas_anchoring
+    from atlastrack.registration.deepslice_adapter import _quicknii_to_atlas_anchoring
 
     # Real DeepSlice section-0 anchoring (QuickNII (ML, AP, DV) order).
     a = [379.03, 107.44, 270.03, -320.33, -29.73, -10.68, -6.81, 19.19, -231.72]
@@ -119,7 +119,7 @@ def test_deepslice_anchoring_permutation_and_flips() -> None:
 
 
 def test_sample_plane_out_dtype_matches_float_cast() -> None:
-    from histo_to_ccf.atlas.planes import Anchoring, sample_plane
+    from atlastrack.atlas.planes import Anchoring, sample_plane
 
     vol = np.arange(2 * 3 * 4, dtype=np.uint16).reshape(2, 3, 4)  # (AP, DV, ML)
     anch = Anchoring(0, 0, 0, 0, 0, 3, 0, 2, 0)  # u→ML, v→DV
@@ -132,8 +132,8 @@ def test_sample_plane_out_dtype_matches_float_cast() -> None:
 def test_predict_anchorings_runs_subprocess_and_parses(tmp_path, monkeypatch) -> None:
     import subprocess
 
-    from histo_to_ccf.io.quicknii import QuickNiiDocument, QuickNiiSlice, save_quicknii
-    from histo_to_ccf.registration import deepslice_adapter as ds
+    from atlastrack.io.quicknii import QuickNiiDocument, QuickNiiSlice, save_quicknii
+    from atlastrack.registration import deepslice_adapter as ds
 
     class _Annot:
         shape = (528, 320, 456)
@@ -172,8 +172,8 @@ def test_predict_anchorings_orders_by_ap_sequence(tmp_path, monkeypatch) -> None
     """`order` numbers the DeepSlice files by AP rank; results map back to index."""
     import subprocess
 
-    from histo_to_ccf.io.quicknii import QuickNiiDocument, QuickNiiSlice, save_quicknii
-    from histo_to_ccf.registration import deepslice_adapter as ds
+    from atlastrack.io.quicknii import QuickNiiDocument, QuickNiiSlice, save_quicknii
+    from atlastrack.registration import deepslice_adapter as ds
 
     class _Atlas:
         class annotation:
@@ -217,7 +217,7 @@ def test_predict_anchorings_orders_by_ap_sequence(tmp_path, monkeypatch) -> None
 
 
 def test_deepslice_anchoring_scales_with_resolution() -> None:
-    from histo_to_ccf.registration.deepslice_adapter import _quicknii_to_atlas_anchoring
+    from atlastrack.registration.deepslice_adapter import _quicknii_to_atlas_anchoring
 
     a = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]
     # u/v components scale linearly with resolution (origin has a flip offset,
@@ -228,7 +228,7 @@ def test_deepslice_anchoring_scales_with_resolution() -> None:
 
 
 def test_deepslice_parse_section_index() -> None:
-    from histo_to_ccf.registration.deepslice_adapter import (
+    from atlastrack.registration.deepslice_adapter import (
         _parse_section_index,
         _section_filename,
     )
@@ -241,7 +241,7 @@ def test_deepslice_parse_section_index() -> None:
 
 
 def test_region_styling_palette_and_distinct_fallbacks() -> None:
-    from histo_to_ccf.viz.plotly3d import hex_to_rgb, region_style, styled_regions
+    from atlastrack.viz.plotly3d import hex_to_rgb, region_style, styled_regions
 
     assert hex_to_rgb("#d4c8a8") == (0xD4, 0xC8, 0xA8)
     # Curated palette entries keep their fixed colour/opacity.
@@ -259,7 +259,7 @@ def test_region_styling_palette_and_distinct_fallbacks() -> None:
 
 
 def test_annotation_boundaries() -> None:
-    from histo_to_ccf.registration.transforms import annotation_boundaries
+    from atlastrack.registration.transforms import annotation_boundaries
 
     labels = np.zeros((5, 5), dtype=int)
     labels[:, 3:] = 7  # vertical region boundary between col 2 and 3

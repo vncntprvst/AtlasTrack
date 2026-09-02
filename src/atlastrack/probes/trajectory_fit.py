@@ -1,7 +1,7 @@
 """Fitting a probe placement to detected LFP boundaries, by matched assignment.
 
 **Why this exists alongside**
-:func:`~histo_to_ccf.probes.trajectory_refine.score_trajectory`. That scorer sums the
+:func:`~atlastrack.probes.trajectory_refine.score_trajectory`. That scorer sums the
 continuous step profile at every atlas boundary. Run on real LO_07 data it does not
 converge, and the reasons are structural rather than a matter of tuning:
 
@@ -22,7 +22,7 @@ and the score is a fraction in ``[0, 1]``.
 
 Matching is an order-preserving assignment, not nearest-neighbour: boundaries that
 cross cannot both be right, and a greedy pairing produces exactly that. The same
-argument is made at length in :mod:`histo_to_ccf.ephys.autolandmarks`, whose dynamic
+argument is made at length in :mod:`atlastrack.ephys.autolandmarks`, whose dynamic
 programme this mirrors.
 
 Pure numpy plus an atlas lookup. No Qt.
@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from histo_to_ccf.probes.trajectory_refine import shift_along_track, transformed_array
+from atlastrack.probes.trajectory_refine import shift_along_track, transformed_array
 
 #: How far a detected boundary may sit from an atlas boundary and still be called the
 #: same transition. Beyond this the pairing is refused outright rather than scored low:
@@ -70,7 +70,7 @@ class ShankEvidence:
 
     @classmethod
     def from_boundaries(cls, shank_index: int, boundaries) -> ShankEvidence:
-        """Build from :class:`~histo_to_ccf.ephys.autolandmarks.DetectedBoundary`."""
+        """Build from :class:`~atlastrack.ephys.autolandmarks.DetectedBoundary`."""
         ordered = sorted(boundaries, key=lambda b: float(b.depth_um))
         return cls(
             shank_index=int(shank_index),
@@ -83,7 +83,7 @@ def evidence_from_features(features) -> dict:
     """Detected boundaries per shank from saved/computed depth features.
 
     ``features`` maps shank index to
-    :class:`~histo_to_ccf.ephys.export.ShankFeatureExport`, which is what both the
+    :class:`~atlastrack.ephys.export.ShankFeatureExport`, which is what both the
     compute step and the saved ``.npz`` produce. Shanks whose LFP yields no boundary
     above its own null are **left out entirely** rather than contributing an empty
     entry: a shank that saw nothing must not dilute the denominator, or a placement
@@ -92,11 +92,11 @@ def evidence_from_features(features) -> dict:
     Band powers rather than the raw PSD, because the detector standardises per feature
     and five bands give it something to agree across.
     """
-    from histo_to_ccf.ephys.autolandmarks import (
+    from atlastrack.ephys.autolandmarks import (
         detect_boundaries,
         multiscale_step_profile,
     )
-    from histo_to_ccf.ephys.features import lfp_band_power
+    from atlastrack.ephys.features import lfp_band_power
 
     out: dict = {}
     for index, export in sorted((features or {}).items()):
@@ -187,8 +187,8 @@ def atlas_boundaries_from_tip(
     still claim a feature - which is the situation whenever the placement is wrong,
     i.e. exactly when this is being used.
     """
-    from histo_to_ccf.ephys.autolandmarks import candidate_boundaries
-    from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+    from atlastrack.ephys.autolandmarks import candidate_boundaries
+    from atlastrack.ephys.regions import region_bands, regions_along_track
 
     tip = np.asarray(tip_ccf_um, dtype=float)
     entry = np.asarray(entry_ccf_um, dtype=float)

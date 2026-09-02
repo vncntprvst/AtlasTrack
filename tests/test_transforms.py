@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.io.ccf_coords import MIDLINE_ML_UM
-from histo_to_ccf.project.schema import PlaneParams
-from histo_to_ccf.registration.transforms import SectionTransform
+from atlastrack.io.ccf_coords import MIDLINE_ML_UM
+from atlastrack.project.schema import PlaneParams
+from atlastrack.registration.transforms import SectionTransform
 
 
 def _plane(**kw: float) -> PlaneParams:

@@ -1,8 +1,8 @@
 """End-to-end pipeline test: project + ManualPredictor → filled CCF coords."""
 from __future__ import annotations
 
-from histo_to_ccf.io.ccf_coords import MIDLINE_ML_UM
-from histo_to_ccf.project.schema import (
+from atlastrack.io.ccf_coords import MIDLINE_ML_UM
+from atlastrack.project.schema import (
     AtlasRef,
     PlaneParams,
     Point2D,
@@ -13,8 +13,8 @@ from histo_to_ccf.project.schema import (
     Shank,
     Slide,
 )
-from histo_to_ccf.registration.pipeline import register_project
-from histo_to_ccf.registration.predictor import ManualPredictor
+from atlastrack.registration.pipeline import register_project
+from atlastrack.registration.predictor import ManualPredictor
 
 
 def test_register_one_section() -> None:
@@ -72,7 +72,7 @@ def test_registered_shank_uses_section_local_coords() -> None:
     A regression guard for the bug where probes rendered tens of mm outside the
     brain because slide-global pixels were fed to a section-crop transform.
     """
-    from histo_to_ccf.registration.pipeline import _apply_to_shank_registered
+    from atlastrack.registration.pipeline import _apply_to_shank_registered
 
     seen: list[tuple[float, float]] = []
 

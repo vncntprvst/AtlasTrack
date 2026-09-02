@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from histo_to_ccf.atlas.planes import Anchoring, sample_plane
+from atlastrack.atlas.planes import Anchoring, sample_plane
 
 if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
@@ -54,12 +54,12 @@ def tilt_proxy_score(
     """Cheap tilt-quality score: MI of the atlas plane vs the section after a
     closed-form silhouette pre-align (no B-spline). Higher = better tilt.
     """
-    from histo_to_ccf.registration.elastix_bspline import (
+    from atlastrack.registration.elastix_bspline import (
         _affine_xy_to_sitk,
         _resample,
         atlas_foreground_mask,
     )
-    from histo_to_ccf.registration.masks import moment_similarity, section_tissue_mask
+    from atlastrack.registration.masks import moment_similarity, section_tissue_mask
 
     import SimpleITK as sitk
 
@@ -116,7 +116,7 @@ def refine_tilt(
     candidate - pass the pipeline's settings so the residual is comparable. Returns
     the input anchoring unchanged when nothing clears the bar.
     """
-    from histo_to_ccf.registration.pipeline import register_section_image
+    from atlastrack.registration.pipeline import register_section_image
 
     ref_vol = reference_volume if reference_volume is not None else atlas.reference
     rk = dict(register_kwargs or {})

@@ -16,8 +16,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.widgets.separators import section_header
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.widgets.separators import section_header
+from atlastrack.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
     import napari
@@ -239,7 +239,7 @@ class SlideLoaderWidget(QWidget):
             self._merge_slide(p)
 
     def _load_first_slide(self, p) -> None:
-        from histo_to_ccf.io.image import load_image
+        from atlastrack.io.image import load_image
 
         img = load_image(p)
         slide_idx = self._state.add_slide(p, img)
@@ -258,7 +258,7 @@ class SlideLoaderWidget(QWidget):
         changes pixel coordinates, so any existing detected sections are cleared
         and the user is told to re-detect.
         """
-        from histo_to_ccf.io.image import load_image, merge_images, slide_bands
+        from atlastrack.io.image import load_image, merge_images, slide_bands
 
         slide_idx = self._state.active_slide_idx
         slide = self._state.project.slides[slide_idx]
@@ -311,7 +311,7 @@ class SlideLoaderWidget(QWidget):
         """
         from pathlib import Path
 
-        from histo_to_ccf.io.image import load_image, merge_images, slide_bands
+        from atlastrack.io.image import load_image, merge_images, slide_bands
 
         slide_idx = self._state.active_slide_idx
         slide = self._state.project.slides[slide_idx]
@@ -435,7 +435,7 @@ class SlideLoaderWidget(QWidget):
 
         @thread_worker
         def _run():
-            from histo_to_ccf.sectioning.split import estimate_min_area
+            from atlastrack.sectioning.split import estimate_min_area
             return estimate_min_area(img)
 
         return _run()
@@ -452,7 +452,7 @@ class SlideLoaderWidget(QWidget):
         img = self._state.slide_images[slide_idx]
         self._status.setText("Detecting ...")
 
-        from histo_to_ccf.gui.workers import detect_sections_worker
+        from atlastrack.gui.workers import detect_sections_worker
 
         worker = detect_sections_worker(
             img,
@@ -466,13 +466,13 @@ class SlideLoaderWidget(QWidget):
         worker.start()
 
     def _on_detected(self, sections) -> None:
-        from histo_to_ccf.gui import crashlog
+        from atlastrack.gui import crashlog
 
         crashlog.note(f"detected {len(sections)} sections")
         slide_idx = self._state.active_slide_idx
         if slide_idx is None:
             return
-        from histo_to_ccf.project.schema import Section
+        from atlastrack.project.schema import Section
 
         slide = self._state.project.slides[slide_idx]
         slide.sections.clear()
@@ -539,7 +539,7 @@ class SlideLoaderWidget(QWidget):
         if slide_idx is None:
             return
 
-        from histo_to_ccf.project.schema import Section
+        from atlastrack.project.schema import Section
 
         self._committing_drawn = True
         try:
@@ -673,7 +673,7 @@ class SlideLoaderWidget(QWidget):
             return
         self._syncing_boxes = True
         try:
-            from histo_to_ccf.project.schema import Section
+            from atlastrack.project.schema import Section
 
             slide = self._state.project.slides[slide_idx]
             data = list(self._box_layer.data)
@@ -742,8 +742,8 @@ class SlideLoaderWidget(QWidget):
         if img is None:
             return
 
-        from histo_to_ccf.gui.app import _update_section_numbers
-        from histo_to_ccf.gui.section_display import sections_to_outline_labels
+        from atlastrack.gui.app import _update_section_numbers
+        from atlastrack.gui.section_display import sections_to_outline_labels
         labels = sections_to_outline_labels(img.shape[:2], slide.sections)
         layer_name = _SECTION_LAYER.format(slide_idx)
         if layer_name in self._viewer.layers:

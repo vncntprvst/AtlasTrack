@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from histo_to_ccf.sectioning.split import DetectedSection
+from atlastrack.sectioning.split import DetectedSection
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ def order_sections(
       order).
 
     When ``band_bounds`` is given (the per-source vertical bands from
-    :func:`histo_to_ccf.io.image.slide_bands` for a merged multi-slide canvas),
+    :func:`atlastrack.io.image.slide_bands` for a merged multi-slide canvas),
     ordering is **slide-aware**: each source's sections are gridded and numbered
     independently, then concatenated top band first - so a column never runs
     across two stacked slides. Row/col tags are local to each band.

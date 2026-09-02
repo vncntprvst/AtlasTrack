@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys import loader as loader_module
-from histo_to_ccf.ephys.loader import LfpExcerpts, excerpt_psd, load_lfp_excerpts
+from atlastrack.ephys import loader as loader_module
+from atlastrack.ephys.loader import LfpExcerpts, excerpt_psd, load_lfp_excerpts
 
 FS = 2500.0
 N_CH = 8
@@ -190,7 +190,7 @@ def test_excerpt_psd_averages_windows_without_a_seam(fake_open) -> None:
 
 def test_normalise_band_power_removes_a_recording_level_offset():
     """The measured failure: two recordings of the same tissue, one 8x louder."""
-    from histo_to_ccf.ephys.features import normalise_band_power
+    from atlastrack.ephys.features import normalise_band_power
 
     depth_structure = np.array([1.0, 2.0, 8.0, 3.0, 1.0])[:, None]
     quiet = depth_structure * np.array([[1.0, 10.0]])
@@ -203,7 +203,7 @@ def test_normalise_band_power_removes_a_recording_level_offset():
 
 
 def test_normalise_band_power_keeps_bands_independent():
-    from histo_to_ccf.ephys.features import normalise_band_power
+    from atlastrack.ephys.features import normalise_band_power
 
     out = normalise_band_power(np.array([[1.0, 100.0], [10.0, 100.0], [100.0, 1.0]]))
 
@@ -213,7 +213,7 @@ def test_normalise_band_power_keeps_bands_independent():
 
 
 def test_normalise_band_power_rejects_the_wrong_shape():
-    from histo_to_ccf.ephys.features import normalise_band_power
+    from atlastrack.ephys.features import normalise_band_power
 
     with pytest.raises(ValueError, match="n_channels, n_bands"):
         normalise_band_power(np.array([1.0, 2.0, 3.0]))

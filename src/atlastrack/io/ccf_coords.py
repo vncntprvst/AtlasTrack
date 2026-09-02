@@ -112,7 +112,7 @@ class AtlasAnchors:
                 f"No bregma anchor is known for atlas {self.atlas_name!r}, so "
                 "bregma-relative and Paxinos coordinates cannot be computed for it. "
                 f"Known atlas families: {sorted(BREGMA_AP_BY_ATLAS)}. Register one by "
-                "adding an entry to histo_to_ccf.io.ccf_coords.BREGMA_AP_BY_ATLAS."
+                "adding an entry to atlastrack.io.ccf_coords.BREGMA_AP_BY_ATLAS."
             )
         return float(self.bregma_ap_um)
 

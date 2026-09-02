@@ -17,7 +17,7 @@ import numpy as np
 
 _INSTALL_HINT = (
     "SpikeInterface is required for ephys alignment. Install the extra:\n"
-    "    pip install \"histo-to-ccf[ephys]\"\n"
+    "    pip install \"atlastrack[ephys]\"\n"
     "(or: pip install spikeinterface)"
 )
 
@@ -76,12 +76,12 @@ class LfpExcerpts:
     referenced: bool = False
     #: Where ``channel_depths_um`` came from. ``channel_index`` means the recording
     #: carried no geometry and none was supplied, so the depths are ordinals rather
-    #: than micrometres - see :mod:`histo_to_ccf.ephys.probemap`.
+    #: than micrometres - see :mod:`atlastrack.ephys.probemap`.
     geometry_source: str = "recording"
     #: How many shanks the common median reference was taken within. 1 for a
     #: single-shank recording, 4 for a full bank. Recorded because two recordings are
     #: only comparable if this matched, and a silent mismatch shifts whole decades of
-    #: power - see :func:`histo_to_ccf.ephys.epochs.common_median_reference`.
+    #: power - see :func:`atlastrack.ephys.epochs.common_median_reference`.
     reference_groups: int = 0
 
     def __post_init__(self) -> None:
@@ -105,7 +105,7 @@ def excerpt_psd(excerpts: LfpExcerpts, *, fmin: float = 0.0, fmax: float = 300.0
     traces) is what keeps the seams out of the result, and is also the right
     estimator: each window is an independent sample of the same spectrum.
     """
-    from histo_to_ccf.ephys.features import lfp_psd
+    from atlastrack.ephys.features import lfp_psd
 
     if not excerpts.windows:
         return np.empty(0), np.empty((0, 0))
@@ -118,7 +118,7 @@ def excerpt_psd(excerpts: LfpExcerpts, *, fmin: float = 0.0, fmax: float = 300.0
 
 def _detect(recording_dir: str | Path):
     """Identify the recording, or raise naming what was actually there."""
-    from histo_to_ccf.ephys.formats import detect_format
+    from atlastrack.ephys.formats import detect_format
 
     detected = detect_format(recording_dir)
     if detected is None:
@@ -132,14 +132,14 @@ def _detect(recording_dir: str | Path):
 
 def list_streams(recording_dir: str | Path) -> list[str]:
     """All stream names in a recording folder, whatever wrote it."""
-    from histo_to_ccf.ephys.formats import list_streams as _list
+    from atlastrack.ephys.formats import list_streams as _list
 
     return _list(_detect(recording_dir))
 
 
 def _select_lfp_stream(streams: list[str], detected=None) -> str | None:
-    from histo_to_ccf.ephys.formats import OPEN_EPHYS, DetectedRecording
-    from histo_to_ccf.ephys.formats import select_lfp_stream as _sel
+    from atlastrack.ephys.formats import OPEN_EPHYS, DetectedRecording
+    from atlastrack.ephys.formats import select_lfp_stream as _sel
 
     if detected is None:  # back-compat: bare stream lists are Open Ephys
         detected = DetectedRecording(OPEN_EPHYS, Path("."), Path("."))
@@ -147,8 +147,8 @@ def _select_lfp_stream(streams: list[str], detected=None) -> str | None:
 
 
 def _select_ap_stream(streams: list[str], detected=None) -> str | None:
-    from histo_to_ccf.ephys.formats import OPEN_EPHYS, DetectedRecording
-    from histo_to_ccf.ephys.formats import select_wideband_stream as _sel
+    from atlastrack.ephys.formats import OPEN_EPHYS, DetectedRecording
+    from atlastrack.ephys.formats import select_wideband_stream as _sel
 
     if detected is None:
         detected = DetectedRecording(OPEN_EPHYS, Path("."), Path("."))
@@ -165,8 +165,8 @@ def _open_lfp_recording(recording_dir, stream_name, lfp_fs: float):
     30 kHz would cost about 12x more for the same result.
     """
     si = _require_si()
-    from histo_to_ccf.ephys.formats import list_streams as _list
-    from histo_to_ccf.ephys.formats import open_stream, select_lfp_stream, select_wideband_stream
+    from atlastrack.ephys.formats import list_streams as _list
+    from atlastrack.ephys.formats import open_stream, select_lfp_stream, select_wideband_stream
 
     detected = _detect(recording_dir)
     streams = _list(detected)
@@ -197,7 +197,7 @@ def _channel_geometry(rec, probe_map, n_channels: int | None = None):
 
     Order of preference: geometry stored in the recording, then an explicitly
     supplied probe map, then channel indices. The last is not a silent fallback -
-    it is reported via the returned :class:`~histo_to_ccf.ephys.probemap.GeometrySource`
+    it is reported via the returned :class:`~atlastrack.ephys.probemap.GeometrySource`
     so a caller computing depth-referenced features can refuse rather than treat an
     ordinal as a micrometre.
 
@@ -205,7 +205,7 @@ def _channel_geometry(rec, probe_map, n_channels: int | None = None):
     none; overriding real stored geometry would be a silent way to break a working
     Neuropixels recording.
     """
-    from histo_to_ccf.ephys.probemap import GeometrySource, resolve_probe_map
+    from atlastrack.ephys.probemap import GeometrySource, resolve_probe_map
 
     try:
         locs = np.asarray(rec.get_channel_locations(), dtype=float)
@@ -254,7 +254,7 @@ def _reference_groups(x_um: np.ndarray) -> np.ndarray | None:
     recording is on - but for referencing all that matters is that channels on one
     shank get one label, which the rounded x gives directly and unambiguously.
     """
-    from histo_to_ccf.ephys.recordings import SHANK_PITCH_UM
+    from atlastrack.ephys.recordings import SHANK_PITCH_UM
 
     x = np.asarray(x_um, dtype=float).ravel()
     if x.size == 0:
@@ -281,7 +281,7 @@ def load_lfp_excerpts(
     once, against 52-61 GB for the whole recording. SpikeInterface's preprocessing is
     lazy, so the decimation and filtering are paid only on the windows actually read.
 
-    Windows are screened as they are read (:mod:`histo_to_ccf.ephys.epochs`): those
+    Windows are screened as they are read (:mod:`atlastrack.ephys.epochs`): those
     dominated by cross-channel transients - which is what a lick artifact is - are
     rejected and reported, never silently averaged in. With ``reference`` the kept
     windows get a common median reference, the standard defence against whatever is
@@ -289,7 +289,7 @@ def load_lfp_excerpts(
 
     ``keep`` trims to the most informative N windows; ``None`` keeps all that pass.
     """
-    from histo_to_ccf.ephys.epochs import (
+    from atlastrack.ephys.epochs import (
         candidate_windows,
         common_median_reference,
         rank_epochs,
@@ -363,7 +363,7 @@ def load_lfp(
 ) -> LfpData:
     """Load an LFP segment + channel geometry from one recording.
 
-    Reads Open Ephys, Intan and SpikeGLX (see :mod:`histo_to_ccf.ephys.formats`).
+    Reads Open Ephys, Intan and SpikeGLX (see :mod:`atlastrack.ephys.formats`).
     Picks a dedicated LFP stream automatically when ``stream_name`` is omitted; where
     the format has none - Neuropixels 2.0, and every Intan recording - LFP is derived
     from the wideband stream. A central ``max_seconds`` window is read to keep memory

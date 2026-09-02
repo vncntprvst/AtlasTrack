@@ -37,14 +37,14 @@ def write_export_provenance(
     options: dict[str, Any] | None = None,
 ) -> Path:
     """Write the sidecar describing one export. Returns the path written."""
-    from histo_to_ccf import __version__
+    from atlastrack import __version__
 
     project_json = Path(project_json)
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     record = {
-        "tool": "histo2ccf",
+        "tool": "atlastrack",
         "tool_version": __version__,
         "exported_at": datetime.now(tz=timezone.utc).isoformat(),
         "source_project": str(project_json),
@@ -80,5 +80,5 @@ def describe_staleness(provenance_path: str | Path) -> tuple[bool, str]:
         return False, f"up to date with {project_json.name}"
     return True, (
         f"STALE: {project_json.name} has changed since this export "
-        f"(exported {record.get('exported_at', 'unknown')}); re-run `histo2ccf export`"
+        f"(exported {record.get('exported_at', 'unknown')}); re-run `atlastrack export`"
     )

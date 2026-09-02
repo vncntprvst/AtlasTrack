@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.probes.fitting import (
+from atlastrack.probes.fitting import (
     fit_rigid_array,
     fit_trajectory,
     line_point_distances,

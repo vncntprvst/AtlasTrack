@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from histo_to_ccf.atlas.planes import (
+from atlastrack.atlas.planes import (
     Anchoring,
     coronal_anchoring,
     resample_atlas_at_plane,

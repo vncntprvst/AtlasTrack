@@ -16,8 +16,8 @@ job is to define what happens in the tails, and the two ``adjust_extremes_*``
 functions set them. ``n_user`` is therefore ``len(feature_um) - 2``.
 
 Both axes here are **depth below the brain surface, increasing downwards** - the
-axis :mod:`histo_to_ccf.ephys.penetration` puts every recording on. That differs
-from the older :mod:`histo_to_ccf.ephys.alignment` anchors, which are µm *from the
+axis :mod:`atlastrack.ephys.penetration` puts every recording on. That differs
+from the older :mod:`atlastrack.ephys.alignment` anchors, which are µm *from the
 tip*; the maths is identical either way, but mixing the two silently flips the
 track, so keep a whole alignment in one convention.
 

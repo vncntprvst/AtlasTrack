@@ -4,9 +4,9 @@ from __future__ import annotations
 import numpy as np
 from skimage.draw import disk, ellipse
 
-from histo_to_ccf.landmarks.contour import contour_centroid, section_contour
-from histo_to_ccf.landmarks.midline import estimate_midline, estimate_midline_pca
-from histo_to_ccf.landmarks.ventricles import detect_ventricles
+from atlastrack.landmarks.contour import contour_centroid, section_contour
+from atlastrack.landmarks.midline import estimate_midline, estimate_midline_pca
+from atlastrack.landmarks.ventricles import detect_ventricles
 
 
 def _ellipse_mask(h: int = 200, w: int = 300, ry: int = 70, rx: int = 120) -> np.ndarray:

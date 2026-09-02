@@ -7,12 +7,12 @@ import pytest
 pytest.importorskip("qtpy")
 pytest.importorskip("pyqtgraph")
 
-from histo_to_ccf.ephys.penetration import (
+from atlastrack.ephys.penetration import (
     PenetrationProfile,
     RecordingProfile,
 )
-from histo_to_ccf.ephys.recordings import NP2_ROW_PITCH_UM, recording_span
-from histo_to_ccf.gui.widgets.ephys_features_view import (
+from atlastrack.ephys.recordings import NP2_ROW_PITCH_UM, recording_span
+from atlastrack.gui.widgets.ephys_features_view import (
     EphysFeaturesView,
 )
 
@@ -220,7 +220,7 @@ def test_an_unregistered_shank_leaves_the_column_empty(qtbot) -> None:
 
 def test_landmarks_stretch_the_drawn_regions_not_the_ephys(qtbot) -> None:
     """The whole point of the column: anatomy moves, the measured features do not."""
-    from histo_to_ccf.ephys.landmarks import Landmarks
+    from atlastrack.ephys.landmarks import Landmarks
 
     view = _view(qtbot)
     view.set_profile(PenetrationProfile([_rec("001", DEEP, (1, 96), spikes=200)]))
@@ -239,7 +239,7 @@ def test_landmarks_stretch_the_drawn_regions_not_the_ephys(qtbot) -> None:
 
 
 def test_clearing_the_landmarks_puts_the_regions_back(qtbot) -> None:
-    from histo_to_ccf.ephys.landmarks import Landmarks
+    from atlastrack.ephys.landmarks import Landmarks
 
     view = _view(qtbot)
     view.set_track(_DepthAtlas(), TIP, ENTRY)

@@ -13,7 +13,7 @@ import numpy as np
 if TYPE_CHECKING:
     import plotly.graph_objects as go
     from brainglobe_atlasapi import BrainGlobeAtlas
-    from histo_to_ccf.project.schema import Project
+    from atlastrack.project.schema import Project
 
 # Large outer divisions drawn as a faint translucent shell for context.
 CONTEXT_REGIONS = ["Isocortex", "CB", "BS"]
@@ -97,7 +97,7 @@ def _mesh_for_region(
     """Return a Plotly Mesh3d for one brain region in the given hex ``color``."""
     import plotly.graph_objects as go
 
-    from histo_to_ccf.atlas.meshes import mesh_vertices_faces
+    from atlastrack.atlas.meshes import mesh_vertices_faces
 
     try:
         mesh = atlas.mesh_from_structure(acronym)
@@ -159,7 +159,7 @@ def resolve_regions(
     """Internal regions to draw: those at shank tips plus any user extras."""
     if atlas is None:
         return list(extra_regions)
-    from histo_to_ccf.atlas.meshes import region_acronyms_at_points
+    from atlastrack.atlas.meshes import region_acronyms_at_points
 
     internal: list[str] = []
     if show_tip_regions:
@@ -187,7 +187,7 @@ def add_probe_traces(
     Probes without both tip_ccf_um and entry_ccf_um are skipped.
     """
     import plotly.graph_objects as go
-    from histo_to_ccf.probes.geometry import probe_prism_mesh
+    from atlastrack.probes.geometry import probe_prism_mesh
 
     probe_count = 0
     for probe in project.probes:
@@ -246,7 +246,7 @@ def _rereference_traces_to_bregma(
     mirrors L/R (the old bug); flipping ML cancels that mirror, so the scene is
     un-mirrored AND AP reads anterior-positive. The ML sign also matches Paxinos.
     """
-    from histo_to_ccf.io.ccf_coords import MIDLINE_ML_UM, bregma_ap_for_display
+    from atlastrack.io.ccf_coords import MIDLINE_ML_UM, bregma_ap_for_display
 
     bregma_ap = bregma_ap_for_display(atlas_name)
     for tr in fig.data:
@@ -266,7 +266,7 @@ def build_figure(
     extra_regions: "list[str] | tuple[str, ...]" = (),
     show_tip_regions: bool = True,
     style: str = "line",
-    title: str = "Histo-to-CCF: Probe trajectories",
+    title: str = "AtlasTrack: Probe trajectories",
     bregma_relative: bool = True,
 ) -> "go.Figure":
     """Build a Plotly 3D figure with probe trajectories and atlas meshes.

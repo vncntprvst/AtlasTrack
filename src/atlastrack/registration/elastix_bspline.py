@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.registration.bspline import RegisterResult
+from atlastrack.registration.bspline import RegisterResult
 
 try:  # itk-elastix is an optional extra
     import itk
@@ -80,13 +80,13 @@ def histo_foreground_mask(moving_norm: np.ndarray) -> np.ndarray:
 
     Used only when the caller doesn't supply an explicit moving mask. The
     RGB-aware, label-excluding mask lives in
-    :func:`histo_to_ccf.registration.masks.registration_moving_mask` and is what
+    :func:`atlastrack.registration.masks.registration_moving_mask` and is what
     the pipeline passes in; this grayscale version keeps the brain outline (see
     :data:`_MASK_RIM_FRAC`) but can't see labels.
     """
     from scipy import ndimage as ndi
 
-    from histo_to_ccf.registration.masks import section_tissue_mask
+    from atlastrack.registration.masks import section_tissue_mask
 
     finite = moving_norm[np.isfinite(moving_norm)]
     if finite.size == 0 or float(finite.max()) - float(finite.min()) < 1e-6:
@@ -198,7 +198,7 @@ def refine_with_elastix(
     """Register ``moving`` onto ``fixed`` with a masked, bending-penalized B-spline.
 
     Returns the same :class:`RegisterResult` contract as
-    :func:`histo_to_ccf.registration.bspline.refine_with_bspline`: a
+    :func:`atlastrack.registration.bspline.refine_with_bspline`: a
     ``sitk.Transform`` mapping FIXED → MOVING (in pixel coordinates), a residual
     (lower = better), and an iteration count. The transform is a
     ``CompositeTransform`` wrapping a displacement field, so it persists and
@@ -237,7 +237,7 @@ def refine_with_elastix(
         if moving_mask is None:
             moving_mask = histo_foreground_mask(moving_n)
     if prealign and fixed_mask is not None and moving_mask is not None:
-        from histo_to_ccf.registration.masks import moment_similarity
+        from atlastrack.registration.masks import moment_similarity
 
         # Isotropic (area-based) scale is rotation-invariant; an anisotropic
         # per-axis scale would misread a slightly-rotated section as a stretch.
@@ -273,7 +273,7 @@ def refine_with_elastix(
     # dir (an empty OutputDirectory is treated as ".") so it never litters cwd.
     import tempfile
 
-    with tempfile.TemporaryDirectory(prefix="histo2ccf_elx_") as _td:
+    with tempfile.TemporaryDirectory(prefix="atlastrack_elx_") as _td:
         tx = itk.TransformixFilter.New(moving_img)
         tx.SetTransformParameterObject(transform_params)
         tx.SetComputeDeformationField(True)

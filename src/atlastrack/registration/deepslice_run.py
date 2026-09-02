@@ -2,10 +2,10 @@
 
 Usage::
 
-    python -m histo_to_ccf.registration.deepslice_run <workdir> [species]
+    python -m atlastrack.registration.deepslice_run <workdir> [species]
 
 ``<workdir>`` must already contain the section images named ``section_s<idx>.png``
-(written by :func:`histo_to_ccf.registration.deepslice_adapter.predict_anchorings`).
+(written by :func:`atlastrack.registration.deepslice_adapter.predict_anchorings`).
 DeepSlice's QuickNII predictions are written to
 ``<workdir>/deepslice_predictions.json``.
 
@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Imported here (not at module top) so importing this module is cheap and
     # TensorFlow only loads when the subprocess actually runs.
-    from histo_to_ccf.registration.deepslice_adapter import DeepSlicePredictor
+    from atlastrack.registration.deepslice_adapter import DeepSlicePredictor
 
     DeepSlicePredictor(species).predict_folder(workdir)
     return 0

@@ -14,7 +14,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.workflow import WorkflowState
 
 
 class SavePanelWidget(QWidget):
@@ -50,7 +50,7 @@ class SavePanelWidget(QWidget):
         if self._settings is None:
             return
         try:
-            from histo_to_ccf.config import save_app_settings
+            from atlastrack.config import save_app_settings
 
             self._settings.remember_project(path)
             save_app_settings(self._settings)
@@ -64,7 +64,7 @@ class SavePanelWidget(QWidget):
         path_row = QHBoxLayout()
         path_row.addWidget(QLabel("Project JSON:"))
         self._path_edit = QLineEdit()
-        self._path_edit.setPlaceholderText("project.histo2ccf.json")
+        self._path_edit.setPlaceholderText("project.atlastrack.json")
         path_row.addWidget(self._path_edit)
         browse_btn = QPushButton("")
         browse_btn.setFixedWidth(28)
@@ -77,7 +77,8 @@ class SavePanelWidget(QWidget):
         save_btn.clicked.connect(self._save)
         load_btn = QPushButton("Load project")
         load_btn.setToolTip(
-            "Load a saved .histo2ccf.json - restores slides, sections, AP planes "
+            "Load a saved project (.atlastrack.json, or .histo2ccf.json from before "
+            "the rename) - restores slides, sections, AP planes "
             "and the registration result (no need to re-run registration)."
         )
         load_btn.clicked.connect(self._load)
@@ -107,14 +108,14 @@ class SavePanelWidget(QWidget):
             slides = self._state.project.slides
             if slides:
                 img_path = Path(slides[0].image_path)
-                raw = str(img_path.with_suffix(".histo2ccf.json"))
+                raw = str(img_path.with_suffix(".atlastrack.json"))
             else:
                 self._status.setText("No slide loaded - provide a save path.")
                 return
 
         out_path = Path(raw)
         self._state.project_path = out_path
-        from histo_to_ccf.project.io import save_project
+        from atlastrack.project.io import save_project
 
         save_project(self._state.project, out_path)
         self._remember(out_path)
@@ -136,7 +137,7 @@ class SavePanelWidget(QWidget):
         ``on_project_loaded`` callback so the canvas + tabs refresh, exactly like
         the file-dialog load.
         """
-        from histo_to_ccf.project.io import load_project
+        from atlastrack.project.io import load_project
 
         try:
             project = load_project(path)

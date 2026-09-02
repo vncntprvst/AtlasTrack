@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.gui.widgets.welcome_overlay import (
+from atlastrack.gui.widgets.welcome_overlay import (
     APP_TITLE,
     STEPS,
     WelcomeOverlayWidget,
@@ -85,7 +85,7 @@ def test_the_steps_are_the_tabs_in_order(qtbot):
     """Move a tab and this fails - the figure would otherwise teach the wrong path."""
     from qtpy.QtWidgets import QTabWidget
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = _viewer()
     try:
@@ -104,7 +104,7 @@ def test_the_window_title_and_the_figure_use_one_name(qtbot):
     """The queued rename must not leave the title bar and the figure disagreeing."""
     viewer = _viewer()
     try:
-        from histo_to_ccf.gui.app import _install_welcome_overlay
+        from atlastrack.gui.app import _install_welcome_overlay
 
         viewer.title = APP_TITLE
         assert _install_welcome_overlay(viewer) is not None
@@ -122,7 +122,7 @@ def test_it_is_parented_to_the_canvas_not_the_splitter(qtbot):
     """``QtViewer`` is a QSplitter: a child of it becomes a pane, not an overlay."""
     from qtpy.QtWidgets import QSplitter
 
-    from histo_to_ccf.gui.app import _install_welcome_overlay
+    from atlastrack.gui.app import _install_welcome_overlay
 
     viewer = _viewer()
     try:
@@ -138,7 +138,7 @@ def test_it_is_parented_to_the_canvas_not_the_splitter(qtbot):
 
 def test_napari_own_welcome_screen_is_switched_off(qtbot):
     """Two welcome screens on one canvas is a redraw bug waiting to happen."""
-    from histo_to_ccf.gui.app import _install_welcome_overlay
+    from atlastrack.gui.app import _install_welcome_overlay
 
     viewer = _viewer()
     try:
@@ -151,7 +151,7 @@ def test_napari_own_welcome_screen_is_switched_off(qtbot):
 
 def test_it_shows_only_while_the_canvas_is_empty(qtbot):
     """Same rule as napari's, so closing a project brings the figure back."""
-    from histo_to_ccf.gui.app import _install_welcome_overlay
+    from atlastrack.gui.app import _install_welcome_overlay
 
     viewer = _viewer()
     try:
@@ -176,7 +176,7 @@ def test_it_tracks_the_canvas_size(qtbot):
     from qtpy.QtGui import QResizeEvent
     from qtpy.QtWidgets import QApplication
 
-    from histo_to_ccf.gui.app import _install_welcome_overlay
+    from atlastrack.gui.app import _install_welcome_overlay
 
     viewer = _viewer()
     try:
@@ -196,7 +196,7 @@ def test_a_canvas_resized_before_it_is_shown_is_caught_on_show(qtbot):
     from qtpy.QtGui import QShowEvent
     from qtpy.QtWidgets import QApplication
 
-    from histo_to_ccf.gui.app import _install_welcome_overlay
+    from atlastrack.gui.app import _install_welcome_overlay
 
     viewer = _viewer()
     try:

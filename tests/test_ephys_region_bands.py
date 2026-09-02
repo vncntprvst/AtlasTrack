@@ -7,7 +7,7 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.regions import (
+from atlastrack.ephys.regions import (
     RegionBand,
     region_bands,
     regions_along_track,
@@ -120,8 +120,8 @@ def test_empty_input_gives_no_bands():
 
 def test_band_colours_come_from_the_project_palette():
     """Not the Allen rgb_triplet: whole cerebella come back as one wash of yellow."""
-    from histo_to_ccf.ephys.regions import band_colours
-    from histo_to_ccf.viz.plotly3d import hex_to_rgb, region_style
+    from atlastrack.ephys.regions import band_colours
+    from atlastrack.viz.plotly3d import hex_to_rgb, region_style
 
     bands = [
         RegionBand(top_um=0.0, bottom_um=100.0, acronym="IRN", rgb=(1, 1, 1)),
@@ -137,7 +137,7 @@ def test_band_colours_come_from_the_project_palette():
 
 def test_neighbouring_bands_never_share_a_colour():
     """The whole point of the column is that you can see the boundaries."""
-    from histo_to_ccf.ephys.regions import band_colours
+    from atlastrack.ephys.regions import band_colours
 
     bands = [
         RegionBand(top_um=float(i * 100), bottom_um=float((i + 1) * 100),
@@ -158,7 +158,7 @@ def test_a_region_keeps_its_colour_across_shanks():
     colours in encounter order shifts them all. The colour has to be a property of the
     region, not of the list it happens to appear in.
     """
-    from histo_to_ccf.ephys.regions import band_colours
+    from atlastrack.ephys.regions import band_colours
 
     def _bands(acronyms):
         return [
@@ -167,7 +167,7 @@ def test_a_region_keeps_its_colour_across_shanks():
             for i, a in enumerate(acronyms)
         ]
 
-    from histo_to_ccf.ephys.regions import region_colour_map
+    from atlastrack.ephys.regions import region_colour_map
 
     shank0 = _bands(["SIM", "CUL4, 5", "arb", "FN", "NOD", "MV", "PGRNd"])
     shank1 = _bands(["SIM", "CUL4, 5", "CENT3", "arb", "FN", "MV", "GRN", "RM"])
@@ -190,7 +190,7 @@ def test_a_region_keeps_its_colour_across_shanks():
 
 def test_region_colour_is_stable_across_processes():
     """Not the builtin hash: Python salts it per process, so colours would drift."""
-    from histo_to_ccf.ephys.regions import region_colour
+    from atlastrack.ephys.regions import region_colour
 
     # Fixed expectations computed from crc32; if this changes, colours changed.
     assert region_colour("FN") == region_colour("FN")
@@ -198,7 +198,7 @@ def test_region_colour_is_stable_across_processes():
 
 
 def test_one_acronym_always_gets_one_colour():
-    from histo_to_ccf.ephys.regions import band_colours
+    from atlastrack.ephys.regions import band_colours
 
     bands = [
         RegionBand(top_um=0.0, bottom_um=100.0, acronym="A", rgb=(1, 1, 1)),
@@ -213,7 +213,7 @@ def test_one_acronym_always_gets_one_colour():
 
 
 def test_unlabelled_bands_stay_black():
-    from histo_to_ccf.ephys.regions import band_colours
+    from atlastrack.ephys.regions import band_colours
 
     bands = [RegionBand(top_um=0.0, bottom_um=100.0, acronym="", rgb=(9, 9, 9))]
 
@@ -230,7 +230,7 @@ def test_band_geometry_helpers():
 
 
 def _band(acr, top, bottom):
-    from histo_to_ccf.ephys.regions import RegionBand
+    from atlastrack.ephys.regions import RegionBand
 
     return RegionBand(top_um=top, bottom_um=bottom, acronym=acr, rgb=(0, 0, 0))
 
@@ -251,7 +251,7 @@ class _FakeAtlas:
 
 
 def test_fibre_tracts_are_found_through_the_structure_tree():
-    from histo_to_ccf.ephys.regions import white_matter_acronyms
+    from atlastrack.ephys.regions import white_matter_acronyms
 
     found = white_matter_acronyms(_FakeAtlas(), {"arb", "py", "MV", "GRN", "nonsense"})
 
@@ -259,14 +259,14 @@ def test_fibre_tracts_are_found_through_the_structure_tree():
 
 
 def test_no_atlas_means_no_white_matter_rather_than_a_guess():
-    from histo_to_ccf.ephys.regions import white_matter_acronyms
+    from atlastrack.ephys.regions import white_matter_acronyms
 
     assert white_matter_acronyms(None, {"arb"}) == set()
 
 
 def test_every_tract_gets_the_same_white_and_nothing_else_does():
     """Thin tracts often have no room for a label; the colour has to carry it."""
-    from histo_to_ccf.ephys.regions import (
+    from atlastrack.ephys.regions import (
         WHITE_MATTER_RGB,
         region_colour_map,
         white_matter_acronyms,
@@ -286,7 +286,7 @@ def test_every_tract_gets_the_same_white_and_nothing_else_does():
 
 def test_grey_matter_is_kept_clear_of_white_not_just_off_pure_white():
     """A near-white nucleus would read as a tract just as wrongly as a white one."""
-    from histo_to_ccf.ephys.regions import _too_close_to_white, region_colour_map
+    from atlastrack.ephys.regions import _too_close_to_white, region_colour_map
 
     bands = [_band(a, i * 100, (i + 1) * 100)
              for i, a in enumerate(["MV", "GRN", "IRN", "PGRNd", "NR", "XII", "NTS"])]
@@ -298,7 +298,7 @@ def test_grey_matter_is_kept_clear_of_white_not_just_off_pure_white():
 
 def test_two_adjacent_tracts_may_share_white():
     """Deliberate: 'this is white matter' is the reading being supported."""
-    from histo_to_ccf.ephys.regions import WHITE_MATTER_RGB, region_colour_map
+    from atlastrack.ephys.regions import WHITE_MATTER_RGB, region_colour_map
 
     bands = [_band("arb", 0, 100), _band("cbc", 100, 200)]
 
@@ -308,7 +308,7 @@ def test_two_adjacent_tracts_may_share_white():
 
 
 def test_a_tract_keeps_white_and_its_neighbour_moves():
-    from histo_to_ccf.ephys.regions import WHITE_MATTER_RGB, region_colour_map
+    from atlastrack.ephys.regions import WHITE_MATTER_RGB, region_colour_map
 
     bands = [_band("arb", 0, 400), _band("MV", 400, 500)]
 

@@ -13,8 +13,8 @@ import math
 import numpy as np
 import pytest
 
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.project.schema import RegistrationResult, Section
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.project.schema import RegistrationResult, Section
 
 pytestmark = pytest.mark.qt
 
@@ -25,7 +25,7 @@ def _anchoring(degrees):
 
 
 def _tools(qtbot, *, predicted=None, registered=()):
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
 
     state = WorkflowState()
     state.add_slide("s.png", np.zeros((40, 120), dtype=np.uint8))
@@ -171,8 +171,8 @@ def _clickable(qtbot):
     """The full app panel, with a slide of three sections laid out left to right."""
     import napari
 
-    from histo_to_ccf.gui import app as gui_app
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui import app as gui_app
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
 
     viewer = napari.Viewer(show=False)
     panel, viz_panel = gui_app._build_panel(viewer)
@@ -194,7 +194,7 @@ def _clickable(qtbot):
 
 def test_a_click_inside_a_box_finds_its_section(qtbot):
     """The outline layer paints only the border, so this hit-tests the bbox."""
-    from histo_to_ccf.gui.app import _section_at
+    from atlastrack.gui.app import _section_at
 
     viewer, _panel, _tools, state = _clickable(qtbot)
     try:
@@ -206,7 +206,7 @@ def test_a_click_inside_a_box_finds_its_section(qtbot):
 
 
 def test_a_click_outside_every_box_selects_nothing(qtbot):
-    from histo_to_ccf.gui.app import _section_at
+    from atlastrack.gui.app import _section_at
 
     viewer, _panel, _tools, state = _clickable(qtbot)
     try:
@@ -217,7 +217,7 @@ def test_a_click_outside_every_box_selects_nothing(qtbot):
 
 def test_overlapping_boxes_resolve_to_the_smaller_one(qtbot):
     """The small box is the one a click was aimed at; the big one encloses it."""
-    from histo_to_ccf.gui.app import _section_at
+    from atlastrack.gui.app import _section_at
 
     viewer, _panel, _tools, state = _clickable(qtbot)
     try:

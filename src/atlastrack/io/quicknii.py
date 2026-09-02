@@ -30,7 +30,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from histo_to_ccf.atlas.planes import Anchoring
+from atlastrack.atlas.planes import Anchoring
 
 
 class QuickNiiSlice(BaseModel):
@@ -53,7 +53,7 @@ class QuickNiiDocument(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    name: str = "histo2ccf"
+    name: str = "atlastrack"
     target: str = "ABA_Mouse_CCFv3"
     target_resolution: list[int] = Field(
         default_factory=lambda: [528, 320, 456], alias="target-resolution"

@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from histo_to_ccf.ephys.discovery import (
+from atlastrack.ephys.discovery import (
     Penetration,
     RecordingCandidate,
     ShankCoverage,
     StreamInfo,
 )
-from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
 pytest.importorskip("pyqtgraph")
 
@@ -53,7 +53,7 @@ def _lo07_probe_a() -> Penetration:
 
 
 def _state_with_probe(label="ProbeA", n_shanks=4):
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.workflow import WorkflowState
 
     state = WorkflowState()
     state.project.probes.append(
@@ -68,7 +68,7 @@ def _state_with_probe(label="ProbeA", n_shanks=4):
 
 
 def _dialog(qtbot, state=None, pens=None):
-    from histo_to_ccf.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
+    from atlastrack.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
 
     dlg = EphysDiscoveryDialog(state or _state_with_probe())
     qtbot.addWidget(dlg)
@@ -115,7 +115,7 @@ def test_the_deep_recording_is_described_as_one_shank(qtbot):
 
 def test_coverage_is_what_the_plot_shows_not_a_file_count(qtbot):
     """Ticking the shallower pair is what turns 705 µm of shank 1 into 1105."""
-    from histo_to_ccf.ephys.discovery import coverage_from_tip
+    from atlastrack.ephys.discovery import coverage_from_tip
 
     pen = _lo07_probe_a()
     dlg = _dialog(qtbot, pens=[pen])
@@ -133,7 +133,7 @@ def test_unticking_the_shallow_pair_shrinks_the_span(qtbot):
     for row in (0, 1):  # the two 4576 µm recordings
         dlg._table.cellWidget(row, 0).findChild(QCheckBox).setChecked(False)
 
-    from histo_to_ccf.ephys.discovery import coverage_from_tip
+    from atlastrack.ephys.discovery import coverage_from_tip
 
     remaining = dlg.ticked()
     assert len(remaining) == 3
@@ -322,8 +322,8 @@ def test_panel_opens_the_dialog(qtbot, monkeypatch):
     """The Ephys tab's entry point exists and builds without a scan."""
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
 
     monkeypatch.setattr(EphysDiscoveryDialog, "exec", lambda self: 0)
     viewer = napari.Viewer(show=False)
@@ -354,7 +354,7 @@ def test_the_selected_probes_penetration_is_preselected_not_just_the_dye(qtbot):
     dlg = _dialog(qtbot, state=state, pens=[probe_a, probe_b])
     assert dlg.selected_penetration().probe_label == "ProbeA"
 
-    from histo_to_ccf.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
+    from atlastrack.gui.widgets.ephys_discovery_dialog import EphysDiscoveryDialog
 
     for_b = EphysDiscoveryDialog(state, probe_label="ProbeB")
     qtbot.addWidget(for_b)
@@ -372,7 +372,7 @@ def test_shank_rows_carry_both_numbering_schemes(qtbot):
 
 def test_the_end_shanks_are_tagged_anterior_and_posterior(qtbot):
     """'shank 1, most posterior' has to be checkable without opening the 3D view."""
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.workflow import WorkflowState
 
     state = WorkflowState()
     # AP increases posteriorly, so shank 0 here is the posterior end (as on ProbeA).
@@ -391,7 +391,7 @@ def test_the_end_shanks_are_tagged_anterior_and_posterior(qtbot):
 
 
 def test_an_unregistered_probe_still_gets_the_numbers(qtbot):
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.workflow import WorkflowState
 
     state = WorkflowState()
     state.project.probes.append(ProbeSpec(

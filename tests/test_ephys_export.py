@@ -6,7 +6,7 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.export import (
+from atlastrack.ephys.export import (
     ShankFeatureExport,
     build_payload,
     default_export_path,
@@ -242,8 +242,8 @@ class _Atlas:
 
 
 def _probe_state():
-    from histo_to_ccf.gui.workflow import WorkflowState
-    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+    from atlastrack.gui.workflow import WorkflowState
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
     state = WorkflowState()
     state.atlas = _Atlas()
@@ -266,7 +266,7 @@ def test_the_alignment_dialog_loads_landmarks_deliberately(qtbot, tmp_path) -> N
     pytest.importorskip("pyqtgraph")
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+    from atlastrack.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     saved = ShankFeatureExport(
         shank_index=0, track_length_um=4000.0,
@@ -296,7 +296,7 @@ def test_the_dialog_assembles_an_export_for_every_shank(qtbot) -> None:
     pytest.importorskip("pyqtgraph")
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+    from atlastrack.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     state = _probe_state()
     viewer = napari.Viewer(show=False)

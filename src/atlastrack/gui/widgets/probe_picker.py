@@ -14,8 +14,8 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
 _PRESETS: dict[str, dict] = {
     "Neuropixels 1.0": {"n_shanks": 1, "shank_pitch_um": 250.0},

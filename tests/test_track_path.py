@@ -4,13 +4,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.probes.catalog import get_layout
-from histo_to_ccf.probes.channels import (
+from atlastrack.probes.catalog import get_layout
+from atlastrack.probes.channels import (
     channel_ccf_coords,
     curved_channel_ccf_coords,
     shank_channel_coords,
 )
-from histo_to_ccf.probes.track_path import (
+from atlastrack.probes.track_path import (
     arc_lengths,
     max_deviation_um,
     path_length_um,
@@ -18,7 +18,7 @@ from histo_to_ccf.probes.track_path import (
     tangents_at_distance,
     track_polyline,
 )
-from histo_to_ccf.project.schema import Shank
+from atlastrack.project.schema import Shank
 
 TIP = (5000.0, 4000.0, 5000.0)
 ENTRY = (5000.0, 4000.0, 1000.0)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.analyzer import (
+from atlastrack.ephys.analyzer import (
     SpikeFeatures,
     find_shank_analyzers,
     is_analyzer_dir,

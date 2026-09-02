@@ -4,14 +4,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.combine import (
+from atlastrack.ephys.combine import (
     RecordingFeatures,
     depths_from_tip,
     stack_penetration,
     stack_shank,
 )
-from histo_to_ccf.ephys.epochs import common_median_reference
-from histo_to_ccf.ephys.features import covered_rows, power_image
+from atlastrack.ephys.epochs import common_median_reference
+from atlastrack.ephys.features import covered_rows, power_image
 
 FREQS = np.linspace(0.0, 300.0, 31)
 

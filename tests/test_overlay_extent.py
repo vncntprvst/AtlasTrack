@@ -6,7 +6,7 @@ from __future__ import annotations
 import numpy as np
 import SimpleITK as sitk
 
-from histo_to_ccf.registration.transforms import _warped_atlas_extent
+from atlastrack.registration.transforms import _warped_atlas_extent
 
 
 def _disk(h=80, w=80, cy=40, cx=40, r=20) -> np.ndarray:

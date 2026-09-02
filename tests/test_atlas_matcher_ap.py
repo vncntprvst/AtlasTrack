@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.gui.workflow import WorkflowState, crop_fingerprint
-from histo_to_ccf.project.schema import PlaneParams, Section
+from atlastrack.gui.workflow import WorkflowState, crop_fingerprint
+from atlastrack.project.schema import PlaneParams, Section
 
 pytest.importorskip("qtpy")
 
@@ -44,7 +44,7 @@ def _state(aps=None, sources=None, slide_numbers=None, n=8) -> WorkflowState:
 
 
 def _dialog(qtbot, state):
-    from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
+    from atlastrack.gui.widgets.atlas_matcher import AtlasMatcherDialog
 
     dlg = AtlasMatcherDialog(state)
     qtbot.addWidget(dlg)
@@ -205,7 +205,7 @@ def test_seed_deepslice_cache_is_a_noop_without_stored_planes() -> None:
 
 
 def test_deepslice_fields_survive_a_project_round_trip(tmp_path) -> None:
-    from histo_to_ccf.project.io import load_project, save_project
+    from atlastrack.project.io import load_project, save_project
 
     state = _state(aps=[10000.0], sources=["deepslice"], n=1)
     section = state.project.slides[0].sections[0]
@@ -421,7 +421,7 @@ def _prematch_with_dialog(qtbot, monkeypatch, sources, answer):
     """
     from qtpy.QtWidgets import QMessageBox
 
-    from histo_to_ccf.gui import workers
+    from atlastrack.gui import workers
 
     state = _state(aps=[1000.0 * i for i in range(8)], sources=sources)
     dlg = _dialog(qtbot, state)

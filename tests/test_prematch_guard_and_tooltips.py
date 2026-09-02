@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from histo_to_ccf.registration.deepslice_adapter import (
+from atlastrack.registration.deepslice_adapter import (
     deepslice_run_note,
     deepslice_weights_missing,
 )
@@ -30,7 +30,7 @@ def test_the_note_is_empty_once_the_weights_are_cached_and_loaded(monkeypatch):
     import sys
 
     monkeypatch.setattr(
-        "histo_to_ccf.registration.deepslice_adapter.deepslice_weights_missing",
+        "atlastrack.registration.deepslice_adapter.deepslice_weights_missing",
         lambda species="mouse": [],
     )
     monkeypatch.setitem(sys.modules, "DeepSlice", object())
@@ -40,7 +40,7 @@ def test_the_note_is_empty_once_the_weights_are_cached_and_loaded(monkeypatch):
 
 def test_a_pending_download_is_called_a_download(monkeypatch):
     monkeypatch.setattr(
-        "histo_to_ccf.registration.deepslice_adapter.deepslice_weights_missing",
+        "atlastrack.registration.deepslice_adapter.deepslice_weights_missing",
         lambda species="mouse": ["weights/Allen_Mixed_Best.h5"],
     )
 
@@ -55,7 +55,7 @@ def test_cached_weights_but_an_unloaded_model_says_so(monkeypatch):
     import sys
 
     monkeypatch.setattr(
-        "histo_to_ccf.registration.deepslice_adapter.deepslice_weights_missing",
+        "atlastrack.registration.deepslice_adapter.deepslice_weights_missing",
         lambda species="mouse": [],
     )
     monkeypatch.delitem(sys.modules, "DeepSlice", raising=False)
@@ -68,7 +68,7 @@ def test_cached_weights_but_an_unloaded_model_says_so(monkeypatch):
 
 def test_an_unknown_install_does_not_claim_either_way(monkeypatch):
     monkeypatch.setattr(
-        "histo_to_ccf.registration.deepslice_adapter.deepslice_weights_missing",
+        "atlastrack.registration.deepslice_adapter.deepslice_weights_missing",
         lambda species="mouse": None,
     )
 
@@ -85,7 +85,7 @@ def test_checking_the_weights_does_not_import_deepslice():
 
     code = (
         "import sys;"
-        "from histo_to_ccf.registration.deepslice_adapter import"
+        "from atlastrack.registration.deepslice_adapter import"
         " deepslice_weights_missing as f;"
         "f('mouse');"
         "print('DeepSlice' in sys.modules)"
@@ -113,7 +113,7 @@ def test_the_real_install_reports_a_concrete_answer():
 def test_a_long_tooltip_is_wrapped(qtbot):
     from qtpy.QtWidgets import QCheckBox
 
-    from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+    from atlastrack.gui.widgets.tooltips import wrap_tooltips
 
     widget = QCheckBox("Enforce rigid array")
     qtbot.addWidget(widget)
@@ -128,7 +128,7 @@ def test_a_hand_broken_tooltip_is_left_alone(qtbot):
     """Those newlines were chosen to separate a description from its caveat."""
     from qtpy.QtWidgets import QCheckBox
 
-    from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+    from atlastrack.gui.widgets.tooltips import wrap_tooltips
 
     widget = QCheckBox("x")
     qtbot.addWidget(widget)
@@ -142,7 +142,7 @@ def test_a_hand_broken_tooltip_is_left_alone(qtbot):
 def test_a_short_tooltip_is_left_alone(qtbot):
     from qtpy.QtWidgets import QCheckBox
 
-    from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+    from atlastrack.gui.widgets.tooltips import wrap_tooltips
 
     widget = QCheckBox("x")
     qtbot.addWidget(widget)
@@ -154,7 +154,7 @@ def test_a_short_tooltip_is_left_alone(qtbot):
 def test_wrapping_reaches_children_and_is_idempotent(qtbot):
     from qtpy.QtWidgets import QCheckBox, QVBoxLayout, QWidget
 
-    from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+    from atlastrack.gui.widgets.tooltips import wrap_tooltips
 
     root = QWidget()
     qtbot.addWidget(root)
@@ -173,7 +173,7 @@ def test_the_rigid_array_tooltip_comes_out_wrapped_in_the_real_panel(qtbot):
     """The tooltip that prompted this: 343 characters on one line."""
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     try:

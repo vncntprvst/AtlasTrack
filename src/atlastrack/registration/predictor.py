@@ -10,7 +10,7 @@ from typing import Protocol
 
 import numpy as np
 
-from histo_to_ccf.project.schema import PlaneParams
+from atlastrack.project.schema import PlaneParams
 
 
 class PlanePredictor(Protocol):

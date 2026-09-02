@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.atlas.planes import Anchoring
-from histo_to_ccf.registration.manual import (
+from atlastrack.atlas.planes import Anchoring
+from atlastrack.registration.manual import (
     invert_apply,
     is_identity,
     section_to_world,
     world_to_section,
 )
-from histo_to_ccf.registration.transforms import RegisteredSectionTransform
+from atlastrack.registration.transforms import RegisteredSectionTransform
 
 
 def test_world_section_roundtrip() -> None:
@@ -54,8 +54,8 @@ def test_manual_affine_shifts_probe_mapping() -> None:
 
 
 def test_schema_round_trips_manual_affine(tmp_path) -> None:
-    from histo_to_ccf.project.io import load_project, save_project
-    from histo_to_ccf.project.schema import AtlasRef, Project, Section, Slide
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.project.schema import AtlasRef, Project, Section, Slide
 
     a = [[1.2, 0.0, 3.0], [0.0, 0.8, -5.0], [0.0, 0.0, 1.0]]
     sec = Section(index=0, slide_idx=0, bbox_px=(0, 0, 80, 40), manual_affine=a)

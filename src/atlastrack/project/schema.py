@@ -59,7 +59,7 @@ class EphysRecordingRef(BaseModel):
       start),
     * ``insertion_depth_um`` gives how deep the tip was for *this* recording.
 
-    See :func:`histo_to_ccf.ephys.recordings.depth_below_surface_um` - depth below
+    See :func:`atlastrack.ephys.recordings.depth_below_surface_um` - depth below
     the brain surface is the only axis on which recordings taken at different
     insertion depths can be compared.
     """
@@ -81,8 +81,8 @@ class EphysRecordingRef(BaseModel):
     # Channel geometry for formats that store none. Intan writes no probe at all, and
     # the headstage-to-site wiring lives in the adapter, so it has to be supplied:
     # either a path to a .json/.prb/.imro/.csv map or the name of a probe in
-    # histo_to_ccf.probes.catalog. Open Ephys and SpikeGLX carry their own geometry
-    # and ignore this. See histo_to_ccf.ephys.probemap.
+    # atlastrack.probes.catalog. Open Ephys and SpikeGLX carry their own geometry
+    # and ignore this. See atlastrack.ephys.probemap.
     probe_map: str | None = None
 
 

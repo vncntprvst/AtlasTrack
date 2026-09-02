@@ -15,7 +15,7 @@ import dataclasses
 import numpy as np
 import pytest
 
-from histo_to_ccf.io.ccf_coords import (
+from atlastrack.io.ccf_coords import (
     BREGMA_AP_BY_ATLAS,
     BREGMA_AP_FROM_ORIGIN_UM,
     MIDLINE_ML_UM,
@@ -290,7 +290,7 @@ def test_the_isotropic_kim_release_does_not_inherit_the_25um_anchor():
     (volume centroids over 811 structures whose volumes agree within 10%: AP
     +101.8 ± 26.6 µm, and a shift-vs-AP slope of +0.0008 µm/µm, so a pure
     translation). Prefix-matching "kim_mouse" would have silently given it 5400."""
-    from histo_to_ccf.io.ccf_coords import bregma_ap_from_origin_um
+    from atlastrack.io.ccf_coords import bregma_ap_from_origin_um
 
     assert bregma_ap_from_origin_um("kim_mouse_25um") == 5400.0
     assert bregma_ap_from_origin_um("kim_mouse_isotropic_20um") == 5502.0
@@ -298,7 +298,7 @@ def test_the_isotropic_kim_release_does_not_inherit_the_25um_anchor():
 
 def test_the_longer_prefix_wins_over_the_family_prefix():
     """Both "kim_mouse" and "kim_mouse_isotropic" match; the specific one must win."""
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_BY_ATLAS, bregma_ap_from_origin_um
+    from atlastrack.io.ccf_coords import BREGMA_AP_BY_ATLAS, bregma_ap_from_origin_um
 
     assert "kim_mouse" in BREGMA_AP_BY_ATLAS
     assert "kim_mouse_isotropic" in BREGMA_AP_BY_ATLAS
@@ -309,7 +309,7 @@ def test_the_longer_prefix_wins_over_the_family_prefix():
 
 def test_the_isotropic_offset_matches_the_measured_shift():
     """The anchor is the 25 µm one plus the measured translation, not a guess."""
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_BY_ATLAS
+    from atlastrack.io.ccf_coords import BREGMA_AP_BY_ATLAS
 
     shift = BREGMA_AP_BY_ATLAS["kim_mouse_isotropic"] - BREGMA_AP_BY_ATLAS["kim_mouse"]
     assert shift == pytest.approx(102.0, abs=1.0)
@@ -318,7 +318,7 @@ def test_the_isotropic_offset_matches_the_measured_shift():
 def test_paxinos_export_now_works_for_the_isotropic_release():
     """It used to inherit 5400 by accident; now it has a stated value, so the
     export neither refuses nor ships a frame that is 102 µm out."""
-    from histo_to_ccf.io.ccf_coords import anchors_for_atlas_name
+    from atlastrack.io.ccf_coords import anchors_for_atlas_name
 
     anchors = anchors_for_atlas_name("kim_mouse_isotropic_20um")
 
@@ -339,7 +339,7 @@ def test_the_isotropic_kim_offset_matches_the_measurement():
     from brainglobe_atlasapi import BrainGlobeAtlas
     from brainglobe_atlasapi.list_atlases import get_downloaded_atlases
 
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_BY_ATLAS
+    from atlastrack.io.ccf_coords import BREGMA_AP_BY_ATLAS
 
     needed = {"kim_mouse_25um", "kim_mouse_isotropic_20um"}
     have = set(get_downloaded_atlases())

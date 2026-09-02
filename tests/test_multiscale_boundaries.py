@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.autolandmarks import (
+from atlastrack.ephys.autolandmarks import (
     MIN_BOUNDARY_Z,
     WINDOW_LADDER_UM,
     DetectedBoundary,

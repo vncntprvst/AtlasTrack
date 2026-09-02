@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.formats import (
+from atlastrack.ephys.formats import (
     SPIKEGLX,
     detect_format,
     select_lfp_stream,
@@ -93,7 +93,7 @@ def test_a_run_folder_is_detected_through_its_imec_subfolder(spikeglx_run):
 
 def test_the_streams_are_listed_and_the_electrode_stream_chosen(spikeglx_run):
     pytest.importorskip("spikeinterface")
-    from histo_to_ccf.ephys.formats import list_streams
+    from atlastrack.ephys.formats import list_streams
 
     got = detect_format(spikeglx_run)
     streams = list_streams(got)
@@ -106,7 +106,7 @@ def test_the_streams_are_listed_and_the_electrode_stream_chosen(spikeglx_run):
 
 def test_opening_gives_the_electrodes_without_the_sync_word(spikeglx_run):
     pytest.importorskip("spikeinterface")
-    from histo_to_ccf.ephys.formats import open_stream
+    from atlastrack.ephys.formats import open_stream
 
     rec = open_stream(detect_format(spikeglx_run), "imec0.ap")
 
@@ -117,7 +117,7 @@ def test_opening_gives_the_electrodes_without_the_sync_word(spikeglx_run):
 def test_geometry_comes_from_the_meta_rather_than_a_probe_map(spikeglx_run):
     """The contrast with Intan: SpikeGLX stores the imro table, so depths are free."""
     pytest.importorskip("spikeinterface")
-    from histo_to_ccf.ephys.formats import open_stream
+    from atlastrack.ephys.formats import open_stream
 
     rec = open_stream(detect_format(spikeglx_run), "imec0.ap")
     locations = np.asarray(rec.get_channel_locations(), dtype=float)
@@ -131,7 +131,7 @@ def test_geometry_comes_from_the_meta_rather_than_a_probe_map(spikeglx_run):
 def test_the_lfp_path_reports_geometry_from_the_recording(spikeglx_run):
     """End to end: the depth axis must be micrometres, not channel indices."""
     pytest.importorskip("spikeinterface")
-    from histo_to_ccf.ephys.loader import load_lfp
+    from atlastrack.ephys.loader import load_lfp
 
     data = load_lfp(spikeglx_run, max_seconds=0.1)
 

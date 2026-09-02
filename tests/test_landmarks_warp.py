@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.atlas.planes import Anchoring
-from histo_to_ccf.registration.landmarks_warp import (
+from atlastrack.atlas.planes import Anchoring
+from atlastrack.registration.landmarks_warp import (
     auto_landmarks,
     invert_points,
     salient_landmarks,
@@ -12,7 +12,7 @@ from histo_to_ccf.registration.landmarks_warp import (
     warp_label_image,
     warp_points,
 )
-from histo_to_ccf.registration.transforms import RegisteredSectionTransform
+from atlastrack.registration.transforms import RegisteredSectionTransform
 
 
 def _disk(h, w, cy, cx, r) -> np.ndarray:
@@ -163,8 +163,8 @@ def test_landmarks_shift_probe_mapping() -> None:
 
 
 def test_schema_round_trips_landmarks(tmp_path) -> None:
-    from histo_to_ccf.project.io import load_project, save_project
-    from histo_to_ccf.project.schema import (
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.project.schema import (
         AtlasRef,
         ManualLandmarks,
         Project,

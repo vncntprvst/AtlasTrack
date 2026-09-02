@@ -22,7 +22,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
     import napari
@@ -353,7 +353,7 @@ class RegisterPanelWidget(QWidget):
 
     def _display_no(self, section) -> int:
         """What the UI calls this section: its 1-based position in the AP order."""
-        from histo_to_ccf.gui.workflow import section_display_no
+        from atlastrack.gui.workflow import section_display_no
 
         return section_display_no(self._state.project, section)
 
@@ -423,7 +423,7 @@ class RegisterPanelWidget(QWidget):
 
         import numpy as np
 
-        from histo_to_ccf.io.image import crop
+        from atlastrack.io.image import crop
 
         use_deepslice = self._use_deepslice.isChecked()
         section_images: dict[int, np.ndarray] = {}
@@ -468,14 +468,14 @@ class RegisterPanelWidget(QWidget):
                 )
                 self._start_register(section_images, transforms_dir, cached)
                 return
-            from histo_to_ccf.registration.deepslice_adapter import (
+            from atlastrack.registration.deepslice_adapter import (
                 deepslice_run_note,
             )
 
             self._status.setText(
                 f"Running DeepSlice plane prediction{deepslice_run_note()}"
             )
-            from histo_to_ccf.gui.workers import deepslice_worker
+            from atlastrack.gui.workers import deepslice_worker
 
             ds_dir = transforms_dir.parent / "deepslice"
             # Number DeepSlice's input by the user's AP sequence (ap_order), so its
@@ -500,7 +500,7 @@ class RegisterPanelWidget(QWidget):
         dye image (same index, new pixels) or any missing section forces a fresh
         DeepSlice pass instead of silently reusing a stale prediction.
         """
-        from histo_to_ccf.gui.workflow import crop_fingerprint
+        from atlastrack.gui.workflow import crop_fingerprint
 
         anch = self._state.deepslice_anchorings
         fps = self._state.deepslice_fingerprints
@@ -532,7 +532,7 @@ class RegisterPanelWidget(QWidget):
         # Guide DeepSlice with any user-assigned AP: shift its predicted planes so
         # they honour the hand-set AP values (keeping DeepSlice's tilt/spacing).
         if anchorings:
-            from histo_to_ccf.registration.pipeline import guide_anchorings_with_planes
+            from atlastrack.registration.pipeline import guide_anchorings_with_planes
 
             anchorings = guide_anchorings_with_planes(
                 anchorings, self._state.project, atlas
@@ -540,7 +540,7 @@ class RegisterPanelWidget(QWidget):
         n = len(anchorings) if anchorings else len(section_images)
         self._status.setText(f"Starting registration of {n} section(s)")
 
-        from histo_to_ccf.gui.workers import register_worker_progressive
+        from atlastrack.gui.workers import register_worker_progressive
 
         worker = register_worker_progressive(
             self._state.project,
@@ -584,7 +584,7 @@ class RegisterPanelWidget(QWidget):
         slides = self._state.project.slides
         if slides:
             self._state.project_path = Path(slides[0].image_path).with_suffix(
-                ".histo2ccf.json"
+                ".atlastrack.json"
             )
         return self._state.project_path
 
@@ -620,7 +620,7 @@ class RegisterPanelWidget(QWidget):
         path = self._ensure_project_path()
         if path is not None:
             try:
-                from histo_to_ccf.project.io import save_project
+                from atlastrack.project.io import save_project
 
                 save_project(self._state.project, path)
                 msg += f"  ·  auto-saved → {path.name}"
@@ -643,7 +643,7 @@ class RegisterPanelWidget(QWidget):
         not ``plane.ap_um`` (the request), which can differ. Rows are sorted by
         ``ap_order`` so the sequence reads the same as the ordering list.
         """
-        from histo_to_ccf.io.ccf_coords import bregma_ap_for_display
+        from atlastrack.io.ccf_coords import bregma_ap_for_display
 
         ap_res = float(self._state.project.atlas.resolution_um or 25.0)
         bregma_ap = bregma_ap_for_display(self._state.project.atlas.name)
@@ -675,8 +675,8 @@ class RegisterPanelWidget(QWidget):
         import numpy as np
         from napari.utils.transforms import Affine
 
-        from histo_to_ccf.registration.manual import section_to_world
-        from histo_to_ccf.registration.transforms import (
+        from atlastrack.registration.manual import section_to_world
+        from atlastrack.registration.transforms import (
             annotation_boundaries,
             warp_annotation_to_section,
         )
@@ -712,7 +712,7 @@ class RegisterPanelWidget(QWidget):
                 # Landmark TPS warp is baked into the label image; the box-handle
                 # affine rides on the layer's affine (live, free). Mutually exclusive.
                 if section.manual_landmarks is not None:
-                    from histo_to_ccf.registration.landmarks_warp import warp_label_image
+                    from atlastrack.registration.landmarks_warp import warp_label_image
 
                     labels = warp_label_image(
                         labels,
@@ -915,7 +915,7 @@ class RegisterPanelWidget(QWidget):
         """Read the layer's world affine, store it section-local, re-map + save."""
         import numpy as np
 
-        from histo_to_ccf.registration.manual import is_identity, world_to_section
+        from atlastrack.registration.manual import is_identity, world_to_section
 
         try:
             layer.mode = "pan_zoom"
@@ -995,7 +995,7 @@ class RegisterPanelWidget(QWidget):
         """Warped atlas label image for a section (optionally with the TPS)."""
         import numpy as np
 
-        from histo_to_ccf.registration.transforms import warp_annotation_to_section
+        from atlastrack.registration.transforms import warp_annotation_to_section
 
         if self._state.atlas is None:
             return None
@@ -1007,7 +1007,7 @@ class RegisterPanelWidget(QWidget):
             section.registration, self._state.atlas, (y1 - y0, x1 - x0), project_dir=base_dir
         )
         if apply_landmarks and section.manual_landmarks is not None:
-            from histo_to_ccf.registration.landmarks_warp import warp_label_image
+            from atlastrack.registration.landmarks_warp import warp_label_image
 
             labels = warp_label_image(
                 labels,
@@ -1021,7 +1021,7 @@ class RegisterPanelWidget(QWidget):
         import numpy as np
         from napari.utils.transforms import Affine
 
-        from histo_to_ccf.registration.transforms import annotation_boundaries
+        from atlastrack.registration.transforms import annotation_boundaries
 
         labels = self._warp_labels_for(section, apply_landmarks=True)
         if labels is None:
@@ -1033,7 +1033,7 @@ class RegisterPanelWidget(QWidget):
         # section snaps back to the un-nudged plane on any re-render). Mirrors
         # _render_overlay. Landmarks win (mutually exclusive).
         if section.manual_landmarks is None and section.manual_affine is not None:
-            from histo_to_ccf.registration.manual import section_to_world
+            from atlastrack.registration.manual import section_to_world
 
             affine = Affine(affine_matrix=section_to_world(
                 np.asarray(section.manual_affine, dtype=float), (y0, x0)))
@@ -1059,7 +1059,7 @@ class RegisterPanelWidget(QWidget):
     def _place_landmarks(self) -> None:
         import numpy as np
 
-        from histo_to_ccf.registration.landmarks_warp import salient_landmarks
+        from atlastrack.registration.landmarks_warp import salient_landmarks
 
         section = self._adjust_section()
         if section is None or section.registration is None:
@@ -1072,7 +1072,7 @@ class RegisterPanelWidget(QWidget):
         # Cache the un-warped boundary (section-local row/col) so dragging a
         # landmark can re-warp just this contour live (see _preview_landmark_warp).
         # Subsample to keep the per-drag forward-TPS cheap on large sections.
-        from histo_to_ccf.registration.transforms import annotation_boundaries
+        from atlastrack.registration.transforms import annotation_boundaries
 
         # Keep most of the boundary (dense) so the warped preview reads as lines,
         # not dots; the forward-TPS is cheap even at ~20k points.
@@ -1228,7 +1228,7 @@ class RegisterPanelWidget(QWidget):
         target = np.column_stack([data[:, 1] - x0, data[:, 0] - y0])
         if np.allclose(source, target):
             return  # nothing dragged yet (or a pure re-anchor): leave overlay as-is
-        from histo_to_ccf.registration.landmarks_warp import warp_contour_image
+        from atlastrack.registration.landmarks_warp import warp_contour_image
 
         img = warp_contour_image(
             self._lm_base_edge_rc, source, target, self._lm_base_shape,
@@ -1240,7 +1240,7 @@ class RegisterPanelWidget(QWidget):
     def _apply_landmarks(self) -> None:
         import numpy as np
 
-        from histo_to_ccf.project.schema import ManualLandmarks
+        from atlastrack.project.schema import ManualLandmarks
 
         section = self._adjust_section()
         if section is None:
@@ -1279,7 +1279,7 @@ class RegisterPanelWidget(QWidget):
         remapped = False
         if atlas is not None:
             try:
-                from histo_to_ccf.registration.pipeline import (
+                from atlastrack.registration.pipeline import (
                     _apply_to_shank_registered,
                     reload_registered_transforms,
                 )
@@ -1299,7 +1299,7 @@ class RegisterPanelWidget(QWidget):
         path = self._ensure_project_path()
         if path is not None:
             try:
-                from histo_to_ccf.project.io import save_project
+                from atlastrack.project.io import save_project
 
                 save_project(self._state.project, path)
                 msg += f"  ·  saved → {path.name}"
@@ -1331,7 +1331,7 @@ class RegisterPanelWidget(QWidget):
         if self._settings is not None:
             atlas_dir = getattr(self._settings, "atlas_dir", "") or None
         self._status.setText(f"Loading atlas {atlas_id} for 3D view")
-        from histo_to_ccf.gui.workers import load_atlas_worker
+        from atlastrack.gui.workers import load_atlas_worker
 
         worker = load_atlas_worker(atlas_id, brainglobe_dir=atlas_dir)
 

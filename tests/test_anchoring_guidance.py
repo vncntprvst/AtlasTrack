@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-import histo_to_ccf.registration.pipeline as pipeline
-from histo_to_ccf.atlas.planes import Anchoring
-from histo_to_ccf.project.schema import PlaneParams, Project, Section, Slide
+import atlastrack.registration.pipeline as pipeline
+from atlastrack.atlas.planes import Anchoring
+from atlastrack.project.schema import PlaneParams, Project, Section, Slide
 
 
 class _FakeAtlas:

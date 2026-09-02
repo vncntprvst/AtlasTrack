@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.registration.internal_feature_snap import (
+from atlastrack.registration.internal_feature_snap import (
     detect_cavity,
     internal_feature_snap_transform,
     midline_correspondences,
@@ -169,7 +169,7 @@ def test_snap_none_when_no_features() -> None:
 
 
 def test_snap_composes_and_persists(tmp_path) -> None:
-    from histo_to_ccf.registration.boundary_snap import compose_snap
+    from atlastrack.registration.boundary_snap import compose_snap
 
     h, w, tissue, cavity, atlas_vent, lum = _scene()
     section = np.zeros((h, w), dtype=np.float32)

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.atlas.planes import Anchoring
-from histo_to_ccf.registration.tilt_refine import (
+from atlastrack.atlas.planes import Anchoring
+from atlastrack.registration.tilt_refine import (
     _mutual_information,
     _perturbed,
     tilt_proxy_score,
@@ -48,7 +48,7 @@ def test_tilt_proxy_prefers_the_true_plane() -> None:
     # A coronal-ish plane at AP=30 spanning DV and ML.
     anch = Anchoring.from_iterable([30.0, 0.0, 0.0, 0.0, 0.0, float(ml - 1),
                                     0.0, float(dv - 1), 0.0])
-    from histo_to_ccf.atlas.planes import sample_plane
+    from atlastrack.atlas.planes import sample_plane
     section = sample_plane(vol, anch, (dv, ml), order=1)
     section = np.stack([section] * 3, axis=-1)  # RGB-ish
 

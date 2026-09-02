@@ -9,11 +9,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.probes.registration_suggestion import (
+from atlastrack.probes.registration_suggestion import (
     NEGLIGIBLE_UM,
     suggest_registration_change,
 )
-from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
 
 def _probe(label="ProbeA", *, n=4, sections=(1, 4), tip_dv=5000.0, ap=8000.0):

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from histo_to_ccf.io.quicknii import QuickNiiDocument, QuickNiiSlice, load_quicknii, save_quicknii
+from atlastrack.io.quicknii import QuickNiiDocument, QuickNiiSlice, load_quicknii, save_quicknii
 
 
 def test_round_trip(tmp_path: Path) -> None:

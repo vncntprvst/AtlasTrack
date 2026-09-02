@@ -12,8 +12,8 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from histo_to_ccf.probes.catalog import get_layout
-from histo_to_ccf.probes.channels import (
+from atlastrack.probes.catalog import get_layout
+from atlastrack.probes.channels import (
     aligned_site_depths_from_tip,
     export_channel_csv,
     export_ibl_channel_locations,
@@ -21,7 +21,7 @@ from histo_to_ccf.probes.channels import (
     project_channel_coords_with_source,
     shank_channel_coords,
 )
-from histo_to_ccf.project.schema import (
+from atlastrack.project.schema import (
     EphysAlignment,
     ProbeSpec,
     ProbeType,
@@ -134,7 +134,7 @@ def test_moving_one_end_rescales_rather_than_shifts():
 
 def test_a_dragged_surface_marker_matches_the_equivalent_end_move():
     """The GUI turns a dragged end into a user landmark; both must agree."""
-    from histo_to_ccf.ephys.landmarks import Landmarks
+    from atlastrack.ephys.landmarks import Landmarks
 
     dragged = Landmarks.identity(0.0, TRACK_UM).added(300.0, 0.0)
     as_landmark = _project(EphysAlignment(

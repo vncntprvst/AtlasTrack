@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Project, Shank
-from histo_to_ccf.viz.plotly3d import build_figure
+from atlastrack.project.schema import ProbeSpec, ProbeType, Project, Shank
+from atlastrack.viz.plotly3d import build_figure
 
 pytest.importorskip("plotly.graph_objects")
 

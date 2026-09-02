@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from histo_to_ccf.probes.trajectory_refine import transformed_array
+from atlastrack.probes.trajectory_refine import transformed_array
 
 #: Below this, a component is reported as "no meaningful change" rather than as a
 #: number. The registration cannot be steered finer than roughly half a section, and

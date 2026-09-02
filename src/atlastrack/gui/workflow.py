@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from histo_to_ccf.project.schema import Project, Slide
+from atlastrack.project.schema import Project, Slide
 
 if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas

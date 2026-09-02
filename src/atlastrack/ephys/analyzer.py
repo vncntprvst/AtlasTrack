@@ -11,7 +11,7 @@ depth and amplitude the raster and depth profiles need.
 One analyzer per shank: the AIND stores are split ``group0``..``group3``, which for
 a 4-shank NP2.0 probe are the four shanks.
 
-SpikeInterface is imported lazily, as in :mod:`histo_to_ccf.ephys.loader`, so the
+SpikeInterface is imported lazily, as in :mod:`atlastrack.ephys.loader`, so the
 module can be imported without the ``ephys`` extra installed.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ def _require_si():
     except ImportError as exc:  # pragma: no cover - depends on the environment
         raise ImportError(
             "SpikeInterface is required to read sorting analyzers; install it with "
-            'pip install "histo-to-ccf[ephys]"'
+            'pip install "atlastrack[ephys]"'
         ) from exc
     return si
 
@@ -39,7 +39,7 @@ class SpikeFeatures:
 
     ``depth_um`` is the localised depth of each spike in the probe frame (µm from
     the bottom of the recorded bank, *not* from the probe tip) - add the bank offset
-    from :mod:`histo_to_ccf.ephys.recordings` to place it on the shank.
+    from :mod:`atlastrack.ephys.recordings` to place it on the shank.
     """
 
     times_s: np.ndarray  # (n_spikes,)

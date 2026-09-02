@@ -36,11 +36,24 @@ def get_settings() -> Settings:
 
 
 # ---------------------------------------------------------------------------
-# Persisted user preferences (~/.histo2ccf/settings.json)
+# Persisted user preferences (~/.atlastrack/settings.json)
 # ---------------------------------------------------------------------------
 
-_PREFS_DIR = Path.home() / ".histo2ccf"
+#: Where preferences live now, and where they lived when the app was called
+#: Histo-to-CCF. The old directory is still *read* when the new one does not
+#: exist, so the rename does not silently cost an existing user their atlas
+#: folder and last-used atlas. Writes always go to the new one.
+_PREFS_DIR = Path.home() / ".atlastrack"
+_LEGACY_PREFS_DIR = Path.home() / ".histo2ccf"
 _PREFS_FILE = _PREFS_DIR / "settings.json"
+_LEGACY_PREFS_FILE = _LEGACY_PREFS_DIR / "settings.json"
+
+
+def _prefs_file_to_read() -> Path:
+    """The settings file to load: the current one, else the pre-rename one."""
+    if _PREFS_FILE.exists() or not _LEGACY_PREFS_FILE.exists():
+        return _PREFS_FILE
+    return _LEGACY_PREFS_FILE
 
 # How many recent projects to remember in the "Load recent" menu.
 _MAX_RECENT_PROJECTS = 8
@@ -116,10 +129,16 @@ class AppSettings(BaseModel):
 
 
 def load_app_settings() -> AppSettings:
-    """Load persisted preferences; return defaults on any error."""
-    if _PREFS_FILE.exists():
+    """Load persisted preferences; return defaults on any error.
+
+    Falls back to the pre-rename ``~/.histo2ccf`` directory, so upgrading does not
+    quietly reset the atlas folder and last-used atlas. The next save writes to the
+    new location, which then takes precedence.
+    """
+    path = _prefs_file_to_read()
+    if path.exists():
         try:
-            data = json.loads(_PREFS_FILE.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
             return AppSettings.model_validate(data)
         except Exception:
             pass

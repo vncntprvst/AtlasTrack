@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.discovery import (
+from atlastrack.ephys.discovery import (
     Penetration,
     RecordingCandidate,
     ShankCoverage,
@@ -393,7 +393,7 @@ def test_shank_coverage_extent():
 
 def test_derive_electrode_range_inverts_the_bank_offset():
     """LO_06's bank starting 720 um up the shank is electrodes 97-192, as noted."""
-    from histo_to_ccf.ephys.discovery import derive_electrode_range
+    from atlastrack.ephys.discovery import derive_electrode_range
 
     assert derive_electrode_range(_bank(0, 0.0, 705.0)) == (1, 96)
     assert derive_electrode_range(_bank(0, 720.0, 1425.0)) == (97, 192)
@@ -402,7 +402,7 @@ def test_derive_electrode_range_inverts_the_bank_offset():
 
 def test_derive_electrode_range_refuses_a_single_column_scan():
     """384 sites over 5745 um is one per row; '1-768' would claim twice the sites."""
-    from histo_to_ccf.ephys.discovery import derive_electrode_range
+    from atlastrack.ephys.discovery import derive_electrode_range
 
     assert derive_electrode_range(ShankCoverage(0, 384, 0.0, 5745.0, 15.0, 2)) is None
     assert derive_electrode_range(ShankCoverage(0, 96, 0.0, 705.0, 15.0, 1)) is None
@@ -421,7 +421,7 @@ def test_penetration_reports_its_shanks_and_depths():
 
 def test_shank_coverage_from_real_geometry_numbers():
     """The two layouts in this dataset, built from their actual x/y values."""
-    from histo_to_ccf.ephys.discovery import _shank_coverage
+    from atlastrack.ephys.discovery import _shank_coverage
 
     # LO_07_004: 4 shanks, 2 columns, 48 rows.
     x = np.concatenate([np.tile([s * 250.0, s * 250.0 + 32.0], 48) for s in range(4)])

@@ -49,7 +49,7 @@ def _columns(menu):
 
 
 def test_a_menu_is_widened_to_clear_its_shortcuts(qtbot):
-    from histo_to_ccf.gui.app import _fit_menu_width
+    from atlastrack.gui.app import _fit_menu_width
 
     menu, _parent = _menu(
         qtbot,
@@ -68,7 +68,7 @@ def test_a_menu_is_widened_to_clear_its_shortcuts(qtbot):
 
 def test_a_menu_without_shortcuts_is_left_alone(qtbot):
     """Nothing can collide, so widening would only make it look wrong."""
-    from histo_to_ccf.gui.app import _fit_menu_width
+    from atlastrack.gui.app import _fit_menu_width
 
     menu, _parent = _menu(qtbot, [("Registration", None), ("Atlases", None)])
 
@@ -81,7 +81,7 @@ def test_the_real_project_menu_clears_its_shortcuts(qtbot):
     """The reported bug, on the menu it was reported against."""
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     try:
@@ -116,7 +116,7 @@ def _menus(viewer):
 def test_the_menu_bar_is_project_and_settings(qtbot):
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     try:
@@ -133,7 +133,7 @@ def test_settings_holds_only_registration(qtbot):
     """"Parameters" said what they are, not what they configure."""
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     try:
@@ -150,7 +150,7 @@ def test_settings_holds_only_registration(qtbot):
 def test_help_holds_the_three_documents(qtbot):
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     try:
@@ -168,7 +168,7 @@ def test_napari_own_help_menu_is_hidden(qtbot):
     """napari's is "&Help" and ours is "Help": matching by title keeps both."""
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     try:
@@ -190,7 +190,7 @@ def test_menus_are_kept_by_identity_not_by_name(qtbot):
     """A same-named menu we did not build must still be hidden."""
     from qtpy.QtWidgets import QMainWindow, QMenu
 
-    from histo_to_ccf.gui.app import _keep_only_menus
+    from atlastrack.gui.app import _keep_only_menus
 
     window = QMainWindow()
     qtbot.addWidget(window)
@@ -217,7 +217,7 @@ def test_menus_are_kept_by_identity_not_by_name(qtbot):
 
 
 def test_the_sheet_covers_every_atlas_the_app_offers():
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import atlas_reference_html
+    from atlastrack.gui.widgets.atlas_help_dialog import atlas_reference_html
 
     html = atlas_reference_html()
 
@@ -230,8 +230,8 @@ def test_the_sheet_covers_every_atlas_the_app_offers():
 
 def test_each_bregma_is_read_from_the_live_table_not_retyped(monkeypatch):
     """If the sheet repeated the numbers it would drift from what exports use."""
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import atlas_reference_html
-    from histo_to_ccf.io import ccf_coords
+    from atlastrack.gui.widgets.atlas_help_dialog import atlas_reference_html
+    from atlastrack.io import ccf_coords
 
     monkeypatch.setattr(
         ccf_coords, "BREGMA_AP_BY_ATLAS", {**ccf_coords.BREGMA_AP_BY_ATLAS,
@@ -242,8 +242,8 @@ def test_each_bregma_is_read_from_the_live_table_not_retyped(monkeypatch):
 
 
 def test_an_atlas_with_no_anchor_says_so_rather_than_showing_a_number(monkeypatch):
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import atlas_reference_html
-    from histo_to_ccf.io import ccf_coords
+    from atlastrack.gui.widgets.atlas_help_dialog import atlas_reference_html
+    from atlastrack.io import ccf_coords
 
     monkeypatch.setattr(ccf_coords, "BREGMA_AP_BY_ATLAS", {})
 
@@ -254,7 +254,7 @@ def test_the_measured_shifts_are_stated():
     """Both atlases move bregma by amounts big enough to matter, and neither figure
     is published anywhere - the sheet is the only place a user meets them. How they
     were measured is kept as a source comment beside each entry rather than shown."""
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import atlas_reference_html
+    from atlastrack.gui.widgets.atlas_help_dialog import atlas_reference_html
 
     html = atlas_reference_html()
 
@@ -271,7 +271,7 @@ def test_the_link_colour_follows_the_background(qtbot, lightness, expected):
     from qtpy.QtGui import QColor, QPalette
     from qtpy.QtWidgets import QWidget
 
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import (
+    from atlastrack.gui.widgets.atlas_help_dialog import (
         LINK_ON_DARK,
         LINK_ON_LIGHT,
         link_colour_for,
@@ -292,7 +292,7 @@ def test_the_dialog_is_reused_rather_than_stacked(qtbot):
     """Clicking the menu twice must not leave two copies open."""
     from qtpy.QtWidgets import QWidget
 
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import show_atlas_reference
+    from atlastrack.gui.widgets.atlas_help_dialog import show_atlas_reference
 
     parent = QWidget()
     qtbot.addWidget(parent)
@@ -308,8 +308,8 @@ def test_the_atlas_tab_offers_the_same_sheet(qtbot):
     """The "?" beside the atlas picker and Settings ▸ Atlases are one sheet."""
     import napari
 
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     viewer = napari.Viewer(show=False)
     try:
@@ -332,7 +332,7 @@ def test_the_atlas_tab_offers_the_same_sheet(qtbot):
 
 def test_the_panel_renders_the_repository_documents(qtbot):
     """Rendered, not duplicated: a copy in the GUI is a copy that goes stale."""
-    from histo_to_ccf.gui.widgets.help_panel import HelpPanelWidget, find_doc
+    from atlastrack.gui.widgets.help_panel import HelpPanelWidget, find_doc
 
     assert find_doc("MANUAL.md") is not None
     assert find_doc("TUTORIAL.md") is not None
@@ -347,7 +347,7 @@ def test_the_panel_renders_the_repository_documents(qtbot):
 
 def test_a_missing_document_says_which_one(qtbot, monkeypatch):
     """A blank tab would read as "the manual is empty"."""
-    from histo_to_ccf.gui.widgets import help_panel as module
+    from atlastrack.gui.widgets import help_panel as module
 
     monkeypatch.setattr(module, "find_doc", lambda _name: None)
     panel = module.HelpPanelWidget()
@@ -357,7 +357,7 @@ def test_a_missing_document_says_which_one(qtbot, monkeypatch):
 
 
 def test_show_page_selects_the_tab_and_reports_an_unknown_one(qtbot):
-    from histo_to_ccf.gui.widgets.help_panel import ATLASES, HelpPanelWidget
+    from atlastrack.gui.widgets.help_panel import ATLASES, HelpPanelWidget
 
     panel = HelpPanelWidget()
     qtbot.addWidget(panel)
@@ -371,7 +371,7 @@ def _app(qtbot):
     """The app with the help tab installed, as launch() assembles it."""
     import napari
 
-    from histo_to_ccf.gui.app import _build_panel, _install_help_tab
+    from atlastrack.gui.app import _build_panel, _install_help_tab
 
     viewer = napari.Viewer(show=False)
     panel, viz_panel = _build_panel(viewer)
@@ -427,8 +427,8 @@ def test_the_help_panel_is_not_added_as_a_dock(qtbot):
 
 
 def test_the_menu_brings_the_help_tab_to_the_front(qtbot):
-    from histo_to_ccf.gui.app import _show_help_page
-    from histo_to_ccf.gui.widgets.help_panel import TUTORIAL
+    from atlastrack.gui.app import _show_help_page
+    from atlastrack.gui.widgets.help_panel import TUTORIAL
 
     viewer, panel, tabs = _app(qtbot)
     try:
@@ -453,8 +453,8 @@ def test_the_atlas_help_button_is_an_icon_not_a_typed_question_mark(qtbot):
     import napari
     from qtpy.QtWidgets import QToolButton
 
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     viewer = napari.Viewer(show=False)
     try:
@@ -472,8 +472,8 @@ def test_the_atlas_help_button_uses_the_docked_page_when_there_is_one(qtbot):
     """In the app it selects Help ▸ Atlases; standalone it falls back to a window."""
     import napari
 
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     viewer = napari.Viewer(show=False)
     try:
@@ -492,7 +492,7 @@ def test_the_atlas_help_button_uses_the_docked_page_when_there_is_one(qtbot):
 
 def test_custom_id_is_explained_somewhere_the_user_can_reach():
     """The combo entry says "Custom ID" and nothing about what it accepts."""
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import atlas_reference_html
+    from atlastrack.gui.widgets.atlas_help_dialog import atlas_reference_html
 
     html = atlas_reference_html()
 
@@ -501,7 +501,7 @@ def test_custom_id_is_explained_somewhere_the_user_can_reach():
 
 
 def test_the_augmented_zenodo_link_points_at_the_current_record():
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import atlas_reference_html
+    from atlastrack.gui.widgets.atlas_help_dialog import atlas_reference_html
 
     html = atlas_reference_html()
 
@@ -515,7 +515,7 @@ def test_the_augmented_zenodo_link_points_at_the_current_record():
 
 
 def test_a_page_can_be_popped_into_a_window_and_comes_back(qtbot):
-    from histo_to_ccf.gui.widgets.help_panel import TUTORIAL, HelpPanelWidget
+    from atlastrack.gui.widgets.help_panel import TUTORIAL, HelpPanelWidget
 
     panel = HelpPanelWidget()
     qtbot.addWidget(panel)
@@ -546,7 +546,7 @@ def test_a_page_can_be_popped_into_a_window_and_comes_back(qtbot):
 
 def test_a_page_returns_to_the_slot_it_came_from(qtbot):
     """Popping the middle page out and back must not reorder the tabs."""
-    from histo_to_ccf.gui.widgets.help_panel import TUTORIAL, HelpPanelWidget
+    from atlastrack.gui.widgets.help_panel import TUTORIAL, HelpPanelWidget
 
     panel = HelpPanelWidget()
     qtbot.addWidget(panel)
@@ -563,7 +563,7 @@ def test_a_page_returns_to_the_slot_it_came_from(qtbot):
 
 def test_popping_every_page_explains_the_empty_area(qtbot):
     """A blank pane with no tabs would read as a broken panel."""
-    from histo_to_ccf.gui.widgets.help_panel import HelpPanelWidget
+    from atlastrack.gui.widgets.help_panel import HelpPanelWidget
 
     panel = HelpPanelWidget()
     qtbot.addWidget(panel)
@@ -577,7 +577,7 @@ def test_popping_every_page_explains_the_empty_area(qtbot):
 
 def test_asking_for_a_popped_out_page_raises_its_window(qtbot):
     """The user put it there; yanking it back into the tabs would undo that."""
-    from histo_to_ccf.gui.widgets.help_panel import MANUAL, HelpPanelWidget
+    from atlastrack.gui.widgets.help_panel import MANUAL, HelpPanelWidget
 
     panel = HelpPanelWidget()
     qtbot.addWidget(panel)
@@ -589,8 +589,8 @@ def test_asking_for_a_popped_out_page_raises_its_window(qtbot):
 
 def test_loading_a_project_brings_the_project_tab_forward(qtbot):
     """Reading the manual should not hide the project you just opened."""
-    from histo_to_ccf.gui.app import _show_help_page, _show_project_tab
-    from histo_to_ccf.gui.widgets.help_panel import MANUAL
+    from atlastrack.gui.app import _show_help_page, _show_project_tab
+    from atlastrack.gui.widgets.help_panel import MANUAL
 
     viewer, panel, tabs = _app(qtbot)
     try:

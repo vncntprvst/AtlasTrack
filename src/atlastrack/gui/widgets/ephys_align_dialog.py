@@ -34,15 +34,15 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.ephys.alignment import apply_depth_alignment, channel_ccf_um, invert_anchors
-from histo_to_ccf.ephys.features import power_image
-from histo_to_ccf.ephys.regions import region_strip_image, regions_at_ccf
-from histo_to_ccf.gui.widgets.atlas_matcher import _to_pixmap
-from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.ephys.alignment import apply_depth_alignment, channel_ccf_um, invert_anchors
+from atlastrack.ephys.features import power_image
+from atlastrack.ephys.regions import region_strip_image, regions_at_ccf
+from atlastrack.gui.widgets.atlas_matcher import _to_pixmap
+from atlastrack.gui.widgets.tooltips import wrap_tooltips
+from atlastrack.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
-    from histo_to_ccf.project.schema import Shank
+    from atlastrack.project.schema import Shank
 
 _DISPLAY_H = 600  # scene height in pixels (track-depth axis)
 _IMG_W = 320  # LFP map width in pixels
@@ -142,7 +142,7 @@ class EphysAlignmentDialog(QDialog):
         self._prepare_channels(lfp_result)
         self._build_ui()
         # Long explanatory tooltips would otherwise render as one screen-wide
-        # line; see histo_to_ccf.gui.widgets.tooltips.
+        # line; see atlastrack.gui.widgets.tooltips.
         wrap_tooltips(self)
         self._restore_anchors()
         self._render()
@@ -536,7 +536,7 @@ class EphysAlignmentDialog(QDialog):
     # -- apply -----------------------------------------------------------
 
     def _apply(self) -> None:
-        from histo_to_ccf.project.schema import EphysAlignment
+        from atlastrack.project.schema import EphysAlignment
 
         anchors = self.anchors()
         ccf = (

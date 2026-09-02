@@ -9,7 +9,7 @@ pytest.importorskip("qtpy")
 from qtpy.QtCore import QPoint, QPointF, Qt
 from qtpy.QtGui import QWheelEvent
 
-from histo_to_ccf.gui.widgets.atlas_matcher import (
+from atlastrack.gui.widgets.atlas_matcher import (
     _ZOOM_MAX,
     _ZOOM_MIN,
     _ImagePane,

@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.registration.boundary_snap import (
+from atlastrack.registration.boundary_snap import (
     boundary_correspondences,
     boundary_snap_transform,
     compose_snap,

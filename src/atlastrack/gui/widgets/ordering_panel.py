@@ -17,10 +17,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.widgets.separators import section_header
-from histo_to_ccf.io.ccf_coords import bregma_ap_for_display
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.sectioning.ordering import geometric_order
+from atlastrack.gui.widgets.separators import section_header
+from atlastrack.io.ccf_coords import bregma_ap_for_display
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.sectioning.ordering import geometric_order
 
 
 class OrderingPanelWidget(QWidget):
@@ -218,7 +218,7 @@ class OrderingPanelWidget(QWidget):
             self._status.setText("No sections detected.")
             return
 
-        from histo_to_ccf.sectioning.ap_series import assign_section_ap
+        from atlastrack.sectioning.ap_series import assign_section_ap
 
         spacing = self._spacing.value()
         # The spin counts from 1; assign_section_ap wants the stored section id.
@@ -260,7 +260,7 @@ class OrderingPanelWidget(QWidget):
         if slide is None or not slide.sections:
             self._status.setText("No sections.")
             return
-        from histo_to_ccf.project.schema import PlaneParams
+        from atlastrack.project.schema import PlaneParams
 
         sections = sorted(slide.sections, key=lambda s: s.ap_order)
         known = [(i, s.plane.ap_um) for i, s in enumerate(sections) if s.plane is not None]

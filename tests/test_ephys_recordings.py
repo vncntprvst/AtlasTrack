@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.recordings import (
+from atlastrack.ephys.recordings import (
     NP2_ROW_PITCH_UM,
     RecordingSpan,
     bank_offset_um,

@@ -8,11 +8,11 @@ import numpy as np
 
 
 def launch() -> None:
-    """Open the napari viewer with the histo-to-ccf workflow docked."""
+    """Open the napari viewer with the atlastrack workflow docked."""
     import napari
 
-    from histo_to_ccf.gui import crashlog
-    from histo_to_ccf.gui.widgets.welcome_overlay import APP_TITLE
+    from atlastrack.gui import crashlog
+    from atlastrack.gui.widgets.welcome_overlay import APP_TITLE
 
     # Armed before anything else: a fault in Qt/vispy/the GL driver kills the
     # process with no traceback and no dialog, and this is the only thing that
@@ -27,7 +27,7 @@ def launch() -> None:
         # A dead GPU/OpenGL context (bad driver, RDP session, disabled GPU) makes
         # Viewer creation raise - print an actionable GL diagnosis instead of a
         # raw traceback, then exit.
-        from histo_to_ccf.gui.gl_diagnostics import report_launch_failure
+        from atlastrack.gui.gl_diagnostics import report_launch_failure
 
         report_launch_failure(exc)
         raise SystemExit(1) from exc
@@ -58,7 +58,7 @@ def _install_welcome_overlay(viewer: "napari.Viewer"):
     Best-effort: if the private Qt handles are missing (headless, a future napari),
     the app runs with napari's own screen rather than refusing to start.
     """
-    from histo_to_ccf.gui.widgets.welcome_overlay import WelcomeOverlayWidget
+    from atlastrack.gui.widgets.welcome_overlay import WelcomeOverlayWidget
 
     try:
         # Parent to the canvas, NOT to ``_qt_viewer``: that is a QSplitter, so a
@@ -223,19 +223,19 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     """Construct the main dock panel and wire up all sub-widgets."""
     from qtpy.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
-    from histo_to_ccf.config import load_app_settings, save_app_settings
-    from histo_to_ccf.gui.workflow import WorkflowState
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
-    from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
-    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
-    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
-    from histo_to_ccf.gui.widgets.viz_export_panel import VizExportPanelWidget
+    from atlastrack.config import load_app_settings, save_app_settings
+    from atlastrack.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.ordering_panel import OrderingPanelWidget
+    from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
+    from atlastrack.gui.widgets.viz_export_panel import VizExportPanelWidget
 
-    from histo_to_ccf.gui.widgets.help_panel import ATLASES, HelpPanelWidget
+    from atlastrack.gui.widgets.help_panel import ATLASES, HelpPanelWidget
 
     settings = load_app_settings()
     state = WorkflowState()
@@ -391,7 +391,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     # One pass over the finished tree: Qt never wraps a plain-text tooltip, and
     # several here run past 300 characters.
-    from histo_to_ccf.gui.widgets.tooltips import wrap_tooltips
+    from atlastrack.gui.widgets.tooltips import wrap_tooltips
 
     wrap_tooltips(container)
     wrap_tooltips(viz_panel)
@@ -424,7 +424,7 @@ def _install_project_menu(
 
     from qtpy.QtWidgets import QMenu
 
-    from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
+    from atlastrack.gui.widgets.save_panel import SavePanelWidget
 
     try:
         menubar = viewer.window._qt_window.menuBar()
@@ -520,7 +520,7 @@ def _install_project_menu(
             return
         settings.recent_projects = []
         try:
-            from histo_to_ccf.config import save_app_settings
+            from atlastrack.config import save_app_settings
 
             save_app_settings(settings)
         except Exception:  # noqa: BLE001 - best-effort persistence
@@ -612,7 +612,7 @@ def _install_help_menu(viewer: "napari.Viewer", help_panel) -> None:
     except Exception:
         return
 
-    from histo_to_ccf.gui.widgets.help_panel import ATLASES, MANUAL, TUTORIAL
+    from atlastrack.gui.widgets.help_panel import ATLASES, MANUAL, TUTORIAL
 
     menu = QMenu("Help", menubar)
     menubar.addMenu(menu)
@@ -685,7 +685,7 @@ def _show_help_page(viewer: "napari.Viewer", help_panel, page: str) -> None:
 
 def _show_atlas_reference(viewer: "napari.Viewer"):
     """Open the atlas reference sheet, parented to the main window."""
-    from histo_to_ccf.gui.widgets.atlas_help_dialog import show_atlas_reference
+    from atlastrack.gui.widgets.atlas_help_dialog import show_atlas_reference
 
     try:
         parent = viewer.window._qt_window
@@ -762,7 +762,7 @@ def _on_slide_loaded(viewer: "napari.Viewer", state: "WorkflowState", slide_idx:
 
 def _on_sections_detected(viewer: "napari.Viewer", state: "WorkflowState", sections) -> None:
     """Render section outlines + index labels for the detected sections."""
-    from histo_to_ccf.gui.section_display import sections_to_outline_labels
+    from atlastrack.gui.section_display import sections_to_outline_labels
 
     slide_idx = state.active_slide_idx
     if slide_idx is None:
@@ -832,8 +832,8 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
     (click *Load atlas* if you want the overlay or the 3D brain); the atlas-overlay
     transform sidecars are resolved from the project folder when needed.
     """
-    from histo_to_ccf.gui.section_display import sections_to_outline_labels
-    from histo_to_ccf.project.images import rebuild_slide_image
+    from atlastrack.gui.section_display import sections_to_outline_labels
+    from atlastrack.project.images import rebuild_slide_image
 
     for slide_idx, slide in enumerate(state.project.slides):
         try:

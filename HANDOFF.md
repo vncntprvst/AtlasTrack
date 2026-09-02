@@ -1,4 +1,4 @@
-# Histo_to_CCF - Handoff
+# AtlasTrack - Handoff
 
 _Last updated: 2026-08-10 · version **0.2.69** · branch **dev**_
 
@@ -2133,7 +2133,7 @@ fragile across versions; the wheel-pan covers the need.
 
 ## Architecture notes / hard rules
 
-- `src/histo_to_ccf/` layered: `io/`, `atlas/`, `sectioning/`, `landmarks/`,
+- `src/atlastrack/` layered: `io/`, `atlas/`, `sectioning/`, `landmarks/`,
   `registration/`, `probes/`, `viz/`, `gui/`. **Only `gui/` and `viz/napari3d.py`
   may import napari/Qt/magicgui** (import-linter contract). Core stays headless-
   testable.

@@ -11,10 +11,10 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from histo_to_ccf.cli import app
-from histo_to_ccf.probes.fitting import enforce_rigid_arrays
-from histo_to_ccf.project.io import save_project
-from histo_to_ccf.project.schema import (
+from atlastrack.cli import app
+from atlastrack.probes.fitting import enforce_rigid_arrays
+from atlastrack.project.io import save_project
+from atlastrack.project.schema import (
     AtlasRef,
     Point2D,
     ProbeSpec,
@@ -122,7 +122,7 @@ def test_export_save_project_to_persists_regularized_coords(tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
 
-    from histo_to_ccf.project.io import load_project
+    from atlastrack.project.io import load_project
 
     saved = load_project(out_json)
     tips = np.array([s.tip_ccf_um for s in saved.probes[0].shanks], dtype=float)

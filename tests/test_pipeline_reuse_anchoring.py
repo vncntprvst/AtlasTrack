@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.project.schema import (
+from atlastrack.project.schema import (
     AtlasRef,
     PlaneParams,
     Project,
@@ -19,7 +19,7 @@ from histo_to_ccf.project.schema import (
     Section,
     Slide,
 )
-from histo_to_ccf.registration import pipeline
+from atlastrack.registration import pipeline
 
 # A plane that is genuinely oblique - no coronal PlaneParams can reproduce it.
 OBLIQUE = [

@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from histo_to_ccf.gui import crashlog
+from atlastrack.gui import crashlog
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def test_install_writes_a_session_header(fresh_crashlog):
     assert path == fresh_crashlog
     text = path.read_text(encoding="utf-8")
     assert "session start" in text
-    assert "histo2ccf" in text
+    assert "atlastrack" in text
     # Without the interpreter and Qt binding a report is not actionable.
     assert "python" in text
     assert "qt " in text
@@ -161,7 +161,7 @@ def test_native_crash_leaves_the_python_stack(tmp_path):
     script = textwrap.dedent(
         f"""
         import ctypes
-        from histo_to_ccf.gui import crashlog
+        from atlastrack.gui import crashlog
 
         crashlog.install(log_file=r"{log}")
 

@@ -5,7 +5,7 @@ import numpy as np
 import SimpleITK as sitk
 from skimage.draw import disk, ellipse
 
-from histo_to_ccf.registration.bspline import refine_with_bspline, warp_moving_to_fixed
+from atlastrack.registration.bspline import refine_with_bspline, warp_moving_to_fixed
 
 
 def _make_fixed(h: int = 128, w: int = 192) -> np.ndarray:

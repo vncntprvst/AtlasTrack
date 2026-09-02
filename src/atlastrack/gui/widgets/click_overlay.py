@@ -40,9 +40,9 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.widgets.separators import section_header
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.project.schema import Point2D
+from atlastrack.gui.widgets.separators import section_header
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.project.schema import Point2D
 
 if TYPE_CHECKING:
     import napari
@@ -505,7 +505,7 @@ class ClickOverlayWidget(QWidget):
             else:
                 p_idx[-1], s_idx[-1] = probe_pos, shank_pos
 
-        from histo_to_ccf.project.schema import TrackPick
+        from atlastrack.project.schema import TrackPick
 
         probes = self._state.project.probes
         for probe in probes:
@@ -666,7 +666,7 @@ class ClickOverlayWidget(QWidget):
             return None
         if self._mask_cache is not None and self._mask_cache[0] == slide_idx:
             return self._mask_cache[1]
-        from histo_to_ccf.sectioning.split import _binarize, _to_gray
+        from atlastrack.sectioning.split import _binarize, _to_gray
 
         mask = _binarize(_to_gray(img))
         self._mask_cache = (slide_idx, mask)

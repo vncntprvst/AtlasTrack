@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.features import (
+from atlastrack.ephys.features import (
     LFP_BANDS_HZ,
     depth_profiles,
     lfp_band_power,

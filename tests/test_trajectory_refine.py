@@ -6,8 +6,8 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.features import boundary_contrast, contrast_null
-from histo_to_ccf.probes.trajectory_refine import (
+from atlastrack.ephys.features import boundary_contrast, contrast_null
+from atlastrack.probes.trajectory_refine import (
     array_axes,
     lateral_sign,
     pitch_deg,
@@ -260,8 +260,8 @@ class _SlabAtlas:
 
 def _profile_for(tips, entries, shank: int = 0, *, offset_um: float = 0.0):
     """A step profile peaking where this placement's atlas boundaries actually fall."""
-    from histo_to_ccf.ephys.autolandmarks import candidate_boundaries
-    from histo_to_ccf.ephys.regions import region_bands, regions_along_track
+    from atlastrack.ephys.autolandmarks import candidate_boundaries
+    from atlastrack.ephys.regions import region_bands, regions_along_track
 
     tip, entry = np.asarray(tips)[shank], np.asarray(entries)[shank]
     track = float(np.linalg.norm(tip - entry))

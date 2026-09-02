@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.project.schema import PlaneParams, Section, Slide
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.project.schema import PlaneParams, Section, Slide
 
 pytestmark = pytest.mark.qt
 
@@ -47,7 +47,7 @@ def _state(*, atlas_name=ALLEN, n_assigned=0, n_sections=3):
 def _browser(qtbot, state):
     import napari
 
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
 
     viewer = napari.Viewer(show=False)
     widget = AtlasBrowserWidget(state, viewer)
@@ -57,7 +57,7 @@ def _browser(qtbot, state):
 
 def _load(widget, atlas_id, n_ap):
     """Drive the widget the way the load worker does when it returns."""
-    from histo_to_ccf.gui.widgets.atlas_browser import _QUICK_PICKS
+    from atlastrack.gui.widgets.atlas_browser import _QUICK_PICKS
 
     widget._atlas_combo.setCurrentIndex(
         next(i for i, (_, aid) in enumerate(_QUICK_PICKS) if aid == atlas_id)

@@ -15,13 +15,13 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from histo_to_ccf.io.series_export import export_section_series
-from histo_to_ccf.project.images import (
+from atlastrack.io.series_export import export_section_series
+from atlastrack.project.images import (
     deepslice_rotation_deg,
     rebuild_slide_image,
     rotate_in_bbox,
 )
-from histo_to_ccf.project.schema import Project, Section, Slide
+from atlastrack.project.schema import Project, Section, Slide
 
 
 def _anchoring(degrees):
@@ -210,7 +210,7 @@ def test_outlines_are_not_requested_when_switched_off(tmp_path):
 
 def test_with_nothing_set_by_hand_the_whole_deepslice_angle_is_removed():
     """The common case: the user never opens the rotation control at all."""
-    from histo_to_ccf.io.series_export import straighten_angle_deg
+    from atlastrack.io.series_export import straighten_angle_deg
 
     section = Section(index=0, slide_idx=0, bbox_px=(0, 0, 4, 4))
     section.deepslice_anchoring = _anchoring(9.0)
@@ -220,7 +220,7 @@ def test_with_nothing_set_by_hand_the_whole_deepslice_angle_is_removed():
 
 def test_a_baked_rotation_is_not_applied_a_second_time():
     """Pressing 'From DeepSlice' bakes the angle in; the export must then add none."""
-    from histo_to_ccf.io.series_export import straighten_angle_deg
+    from atlastrack.io.series_export import straighten_angle_deg
 
     section = Section(index=0, slide_idx=0, bbox_px=(0, 0, 4, 4))
     section.deepslice_anchoring = _anchoring(9.0)
@@ -230,7 +230,7 @@ def test_a_baked_rotation_is_not_applied_a_second_time():
 
 
 def test_only_the_remaining_tilt_is_straightened():
-    from histo_to_ccf.io.series_export import straighten_angle_deg
+    from atlastrack.io.series_export import straighten_angle_deg
 
     section = Section(index=0, slide_idx=0, bbox_px=(0, 0, 4, 4))
     section.deepslice_anchoring = _anchoring(9.0)
@@ -240,7 +240,7 @@ def test_only_the_remaining_tilt_is_straightened():
 
 
 def test_a_section_deepslice_never_saw_is_left_alone():
-    from histo_to_ccf.io.series_export import straighten_angle_deg
+    from atlastrack.io.series_export import straighten_angle_deg
 
     assert straighten_angle_deg(Section(index=0, slide_idx=0, bbox_px=(0, 0, 4, 4))) == 0.0
 
@@ -297,8 +297,8 @@ class _FakeAtlas:
 
 def _with_registration(monkeypatch, tmp_path):
     """A one-section project whose warped labels are two known regions."""
-    from histo_to_ccf.io import series_export
-    from histo_to_ccf.project.schema import RegistrationResult
+    from atlastrack.io import series_export
+    from atlastrack.project.schema import RegistrationResult
 
     def _labels(_section, _atlas, shape, _project_dir, _source_shape=None):
         lab = np.zeros(shape, dtype=np.int32)
@@ -384,7 +384,7 @@ def test_svg_and_regions_are_off_unless_asked_for(tmp_path, monkeypatch):
 
 def test_an_unknown_region_id_still_gets_a_row(tmp_path, monkeypatch):
     """An atlas that does not know an id is not a reason to drop the region."""
-    from histo_to_ccf.io.series_export import _region_names
+    from atlastrack.io.series_export import _region_names
 
     assert _region_names(_FakeAtlas(), 999) == ("999", "")
 

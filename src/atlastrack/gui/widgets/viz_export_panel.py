@@ -27,7 +27,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from histo_to_ccf.gui.workflow import WorkflowState
+from atlastrack.gui.workflow import WorkflowState
 
 #: What a single Export button can write (label, key). Both are the same registered
 #: coordinates in different containers, which is why one button and a selector beat
@@ -400,7 +400,7 @@ class VizExportPanelWidget(QWidget):
         if self._settings is not None:
             atlas_dir = getattr(self._settings, "atlas_dir", "") or None
         self._status.setText(f"Loading atlas {atlas_id} for 3D view")
-        from histo_to_ccf.gui.workers import load_atlas_worker
+        from atlastrack.gui.workers import load_atlas_worker
 
         worker = load_atlas_worker(atlas_id, brainglobe_dir=atlas_dir)
 
@@ -439,7 +439,7 @@ class VizExportPanelWidget(QWidget):
             if self._settings is not None:
                 atlas_dir = getattr(self._settings, "atlas_dir", "") or None
             self._status.setText(f"Loading region atlas {chosen}")
-            from histo_to_ccf.gui.workers import load_atlas_worker
+            from atlastrack.gui.workers import load_atlas_worker
 
             worker = load_atlas_worker(chosen, brainglobe_dir=atlas_dir)
 
@@ -471,7 +471,7 @@ class VizExportPanelWidget(QWidget):
 
     def _do_export_plotly(self, path: str) -> None:
         try:
-            from histo_to_ccf.viz.plotly3d import build_figure, save_html
+            from atlastrack.viz.plotly3d import build_figure, save_html
 
             fig = build_figure(
                 self._state.project, self._display_atlas,
@@ -493,7 +493,7 @@ class VizExportPanelWidget(QWidget):
         atlas = self._state.atlas
         if atlas is None or not self._state.project.probes:
             return 0
-        from histo_to_ccf.registration.pipeline import (
+        from atlastrack.registration.pipeline import (
             _apply_to_shank_registered,
             reload_registered_transforms,
         )
@@ -519,7 +519,7 @@ class VizExportPanelWidget(QWidget):
         Applied after re-mapping so it isn't overwritten by the pixel→CCF pass. Only
         shanks with both tip and entry CCF participate; probes with <3 are skipped.
         """
-        from histo_to_ccf.probes.fitting import enforce_rigid_arrays
+        from atlastrack.probes.fitting import enforce_rigid_arrays
 
         enforce_rigid_arrays(
             self._state.project, tolerance=float(self._rigid_tol.value())
@@ -543,7 +543,7 @@ class VizExportPanelWidget(QWidget):
         msg = f"Updated {n} shank coordinate(s) from the current registration"
         if self._state.project_path is not None:
             try:
-                from histo_to_ccf.project.io import save_project
+                from atlastrack.project.io import save_project
 
                 save_project(self._state.project, self._state.project_path)
                 msg += f"  ·  saved → {self._state.project_path.name}"
@@ -571,7 +571,7 @@ class VizExportPanelWidget(QWidget):
         try:
             import napari
 
-            from histo_to_ccf.viz.napari3d import show_3d_scene
+            from atlastrack.viz.napari3d import show_3d_scene
 
             if self._viewer3d is None or not _viewer_alive(self._viewer3d):
                 self._viewer3d = napari.Viewer(title="Histo→CCF - 3D")
@@ -672,7 +672,7 @@ class VizExportPanelWidget(QWidget):
         if not directory:
             return
         try:
-            from histo_to_ccf.io.series_export import export_section_series
+            from atlastrack.io.series_export import export_section_series
 
             project_path = self._state.project_path
             result = export_section_series(
@@ -733,7 +733,7 @@ class VizExportPanelWidget(QWidget):
         try:
             import numpy as np
 
-            from histo_to_ccf.io.herbs_writer import write_herbs_pkl
+            from atlastrack.io.herbs_writer import write_herbs_pkl
 
             all_ccf: list[np.ndarray] = []
             for probe in self._state.project.probes:
@@ -757,7 +757,7 @@ class VizExportPanelWidget(QWidget):
 
     def _write_channel_csv(self, path: str, *, paxinos: bool) -> None:
         try:
-            from histo_to_ccf.probes.channels import (
+            from atlastrack.probes.channels import (
                 export_channel_csv,
                 export_paxinos_csv,
             )

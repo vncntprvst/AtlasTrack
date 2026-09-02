@@ -26,16 +26,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 from loguru import logger
 
-from histo_to_ccf.atlas.planes import (
+from atlastrack.atlas.planes import (
     Anchoring,
     anchoring_from_plane_params,
     resample_atlas_at_plane,
 )
-from histo_to_ccf.io.ccf_coords import atlas_resolution_um
-from histo_to_ccf.project.schema import Project, RegistrationResult, Section, Shank
-from histo_to_ccf.registration.bspline import refine_with_bspline
-from histo_to_ccf.registration.predictor import PlanePredictor
-from histo_to_ccf.registration.transforms import (
+from atlastrack.io.ccf_coords import atlas_resolution_um
+from atlastrack.project.schema import Project, RegistrationResult, Section, Shank
+from atlastrack.registration.bspline import refine_with_bspline
+from atlastrack.registration.predictor import PlanePredictor
+from atlastrack.registration.transforms import (
     ManualSectionTransform,
     RegisteredSectionTransform,
     build_registered_transform,
@@ -221,7 +221,7 @@ def guide_anchorings_with_planes(
 
 def _resolve_engine(engine: str) -> str:
     """Map ``"auto"`` to the best available engine; validate explicit choices."""
-    from histo_to_ccf.registration.elastix_bspline import ELASTIX_AVAILABLE
+    from atlastrack.registration.elastix_bspline import ELASTIX_AVAILABLE
 
     if engine == "auto":
         return "elastix" if ELASTIX_AVAILABLE else "sitk"
@@ -248,7 +248,7 @@ def _refine(
     """Run the chosen refinement engine, returning a ``RegisterResult``."""
     resolved = _resolve_engine(engine)
     if resolved == "elastix":
-        from histo_to_ccf.registration.elastix_bspline import refine_with_elastix
+        from atlastrack.registration.elastix_bspline import refine_with_elastix
 
         return refine_with_elastix(
             reference,
@@ -326,7 +326,7 @@ def register_section_image(
     h, w = section_image.shape[:2]
     out_shape = (int(h), int(w))
     if reference_volume is not None:
-        from histo_to_ccf.atlas.planes import sample_plane
+        from atlastrack.atlas.planes import sample_plane
 
         reference = sample_plane(
             reference_volume, anchoring, out_shape, order=1, out_dtype=np.float32
@@ -350,7 +350,7 @@ def register_section_image(
         # so the bright fluorescent labels can be excluded (they have no atlas
         # counterpart and otherwise pull the fit).
         if use_masks:
-            from histo_to_ccf.registration.masks import registration_moving_mask
+            from atlastrack.registration.masks import registration_moving_mask
 
             moving_mask = registration_moving_mask(section_image)
         # Use luminance for registration; preserves brain outline.
@@ -429,12 +429,12 @@ def _apply_boundary_snap(
     transform is kept.
     """
     try:
-        from histo_to_ccf.registration.boundary_snap import (
+        from atlastrack.registration.boundary_snap import (
             boundary_snap_transform,
             compose_snap,
         )
-        from histo_to_ccf.registration.masks import section_tissue_mask
-        from histo_to_ccf.registration.transforms import _warped_atlas_extent
+        from atlastrack.registration.masks import section_tissue_mask
+        from atlastrack.registration.transforms import _warped_atlas_extent
 
         ref = np.asarray(reference, dtype=np.float32)
         lo, hi = float(ref.min()), float(ref.max())

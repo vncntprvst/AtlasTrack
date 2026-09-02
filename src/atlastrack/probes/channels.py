@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from histo_to_ccf.probes.catalog import ProbeLayout, get_layout
-from histo_to_ccf.probes.geometry import ELECTRODE_COLUMN_CENTER_UM
+from atlastrack.probes.catalog import ProbeLayout, get_layout
+from atlastrack.probes.geometry import ELECTRODE_COLUMN_CENTER_UM
 
 if TYPE_CHECKING:
-    from histo_to_ccf.project.schema import Project, Shank
+    from atlastrack.project.schema import Project, Shank
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ def aligned_site_depths_from_tip(
     depths come back untouched, so callers get the geometric placement and can say so.
 
     The landmark arrays live on the **depth-below-surface** axis (see
-    :mod:`histo_to_ccf.ephys.landmarks`) while probe geometry is µm **from the tip**,
+    :mod:`atlastrack.ephys.landmarks`) while probe geometry is µm **from the tip**,
     so the conversion happens here and only here:
 
     * feature depth below surface = ``insertion_depth - depth_from_tip``, where the
@@ -117,7 +117,7 @@ def aligned_site_depths_from_tip(
     track = list(eph.track_um or [])
     if len(feature) < 2 or len(feature) != len(track):
         return depths, False
-    from histo_to_ccf.ephys.landmarks import Landmarks
+    from atlastrack.ephys.landmarks import Landmarks
 
     reference = eph.insertion_depth_um
     if reference is None or reference <= 0:
@@ -181,7 +181,7 @@ def shank_channel_coords_with_source(
         # Alignment depths are referenced to the *track*, which is the path length
         # when the shank curves - a curved shank is longer than tip-to-entry.
         if waypoints:
-            from histo_to_ccf.probes.track_path import path_length_um, track_polyline
+            from atlastrack.probes.track_path import path_length_um, track_polyline
 
             track_length_um = path_length_um(
                 track_polyline(shank.tip_ccf_um, shank.entry_ccf_um, waypoints)
@@ -227,7 +227,7 @@ def curved_channel_ccf_coords(
     that, because a curvature feature that quietly perturbs every existing straight
     track would be worse than no feature.
     """
-    from histo_to_ccf.probes.track_path import (
+    from atlastrack.probes.track_path import (
         points_at_distance,
         tangents_at_distance,
         track_polyline,
@@ -355,7 +355,7 @@ def export_channel_csv(
 
 def _region_acronyms(atlas, coords: np.ndarray) -> list[str]:
     """Atlas acronym at each ``(AP, ML, DV)`` µm point, ``""`` outside the atlas."""
-    from histo_to_ccf.ephys.regions import regions_at_ccf
+    from atlastrack.ephys.regions import regions_at_ccf
 
     return [acr for acr, _rgb in regions_at_ccf(atlas, coords)]
 
@@ -471,9 +471,9 @@ def export_paxinos_csv(
     Columns: ``probe, shank, channel, ap_mm, ml_mm, dv_mm`` where AP is
     anterior-positive, ML 0 at the midline, DV depth below bregma. ``alignment``
     selects the CCF→stereotaxic transform (5° pitch + scaling); see
-    :data:`histo_to_ccf.io.ccf_coords.PAXINOS_ALIGNMENTS`. Returns the row count.
+    :data:`atlastrack.io.ccf_coords.PAXINOS_ALIGNMENTS`. Returns the row count.
     """
-    from histo_to_ccf.io.ccf_coords import (
+    from atlastrack.io.ccf_coords import (
         DEFAULT_PAXINOS_ALIGNMENT,
         anchors_for_atlas_name,
         ccf_um_to_paxinos_mm,

@@ -20,9 +20,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from histo_to_ccf.atlas.planes import Anchoring
-from histo_to_ccf.io.ccf_coords import MIDLINE_ML_UM
-from histo_to_ccf.project.schema import PlaneParams, RegistrationResult
+from atlastrack.atlas.planes import Anchoring
+from atlastrack.io.ccf_coords import MIDLINE_ML_UM
+from atlastrack.project.schema import PlaneParams, RegistrationResult
 
 if TYPE_CHECKING:
     import SimpleITK as sitk
@@ -100,12 +100,12 @@ class RegisteredSectionTransform:
         # the registered frame before the registration inverse. Landmarks (TPS)
         # take precedence over the box-handle affine.
         if self.manual_landmarks is not None:
-            from histo_to_ccf.registration.landmarks_warp import invert_points
+            from atlastrack.registration.landmarks_warp import invert_points
 
             src, dst = self.manual_landmarks
             x_px, y_px = invert_points(src, dst, [(x_px, y_px)])[0]
         elif self.manual_affine is not None:
-            from histo_to_ccf.registration.manual import invert_apply
+            from atlastrack.registration.manual import invert_apply
 
             x_px, y_px = invert_apply(self.manual_affine, x_px, y_px)
         sx, sy = self._section_px_to_slice_px(x_px, y_px)
@@ -171,7 +171,7 @@ def warp_annotation_to_section(
     B-spline was stored the plane annotation is returned resized to the section
     (i.e. the un-refined plane), which is still a useful sanity overlay.
     """
-    from histo_to_ccf.atlas.planes import resample_atlas_at_plane, rescale_atlas_anchoring
+    from atlastrack.atlas.planes import resample_atlas_at_plane, rescale_atlas_anchoring
 
     anchoring = Anchoring.from_iterable(result.anchoring)
     # ``result.anchoring`` counts voxels of the atlas the fit was computed on. When
@@ -278,7 +278,7 @@ def build_registered_transform(
     ``manual_landmarks`` is a ``Section.manual_landmarks``-like object (with
     ``source``/``target`` lists) or ``None``.
     """
-    from histo_to_ccf.io.ccf_coords import atlas_resolution_um
+    from atlastrack.io.ccf_coords import atlas_resolution_um
 
     anchoring = Anchoring.from_iterable(result.anchoring)
     bspline = None

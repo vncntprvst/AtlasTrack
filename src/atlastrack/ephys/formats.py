@@ -14,7 +14,7 @@ Three formats, distinguished by what they leave on disk:
     An ``info.rhd`` (or ``.rhs``) beside ``amplifier.dat`` and friends, or a single
     ``.rhd`` in the traditional layout. One wideband amplifier stream at 20-30 kHz -
     there is no LFP stream, so LFP is always derived. **Carries no geometry**: see
-    :mod:`histo_to_ccf.ephys.probemap`.
+    :mod:`atlastrack.ephys.probemap`.
 ``spikeglx``
     A run folder of ``*.imec0.ap.bin`` / ``.meta`` pairs, optionally with ``.lf``
     (Neuropixels 1.0) and a ``.nidq`` sync stream. The ``.meta`` carries the imro
@@ -52,7 +52,7 @@ class RecordingFormat:
     wants_file: bool = False
     #: Whether the format stores probe geometry. When False, a probe map has to be
     #: supplied before channel depths mean anything - see
-    #: :func:`histo_to_ccf.ephys.probemap.resolve_probe`.
+    #: :func:`atlastrack.ephys.probemap.resolve_probe`.
     carries_geometry: bool = True
 
     def __str__(self) -> str:  # pragma: no cover - trivial
@@ -202,7 +202,7 @@ def detect_format(path: str | Path) -> DetectedRecording | None:
 
 _INSTALL_HINT = (
     "SpikeInterface is required for ephys alignment. Install the extra:\n"
-    '    pip install "histo-to-ccf[ephys]"\n'
+    '    pip install "atlastrack[ephys]"\n'
     "(or: pip install spikeinterface)"
 )
 

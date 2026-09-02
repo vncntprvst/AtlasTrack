@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.recordings import channels_for_shank, shank_index_from_x
+from atlastrack.ephys.recordings import channels_for_shank, shank_index_from_x
 
 PITCH = 250.0
 
@@ -103,9 +103,9 @@ def test_the_dialog_leaves_unrecorded_shanks_empty(qtbot) -> None:
     pytest.importorskip("pyqtgraph")
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
-    from histo_to_ccf.gui.workflow import WorkflowState
-    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+    from atlastrack.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+    from atlastrack.gui.workflow import WorkflowState
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
     state = WorkflowState()
     state.project.probes.append(

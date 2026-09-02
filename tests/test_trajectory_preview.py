@@ -6,7 +6,7 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
 pytest.importorskip("pyqtgraph")
 
@@ -27,7 +27,7 @@ class _StripedAtlas:
 
 
 def _state():
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.workflow import WorkflowState
 
     state = WorkflowState()
     state.atlas = _StripedAtlas()
@@ -68,7 +68,7 @@ class _Fit:
 
 
 def _dialog(qtbot, state=None, fit=None, evidence=None):
-    from histo_to_ccf.gui.widgets.trajectory_preview_dialog import (
+    from atlastrack.gui.widgets.trajectory_preview_dialog import (
         TrajectoryPreviewDialog,
     )
 
@@ -190,7 +190,7 @@ def test_the_adjustment_records_what_was_identifiable(qtbot):
 
 
 def test_an_unidentifiable_fit_asks_before_applying(qtbot, monkeypatch):
-    from histo_to_ccf.gui.widgets import trajectory_preview_dialog as mod
+    from atlastrack.gui.widgets import trajectory_preview_dialog as mod
 
     dlg = _dialog(qtbot, fit=_Fit(ok=False))
     asked = {}
@@ -206,7 +206,7 @@ def test_an_unidentifiable_fit_asks_before_applying(qtbot, monkeypatch):
 
 
 def test_the_adjustment_survives_a_save_and_reload(qtbot, tmp_path):
-    from histo_to_ccf.project.io import load_project, save_project
+    from atlastrack.project.io import load_project, save_project
 
     state = _state()
     dlg = _dialog(qtbot, state=state)
@@ -224,7 +224,7 @@ def test_the_adjustment_survives_a_save_and_reload(qtbot, tmp_path):
 
 def test_an_old_project_without_an_adjustment_still_loads(tmp_path):
     """Additive schema: nothing that predates this may break."""
-    from histo_to_ccf.project.io import load_project, save_project
+    from atlastrack.project.io import load_project, save_project
 
     state = _state()
     path = tmp_path / "p.json"
@@ -239,7 +239,7 @@ def test_an_old_project_without_an_adjustment_still_loads(tmp_path):
 def _panel(qtbot, state):
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
 
     viewer = napari.Viewer(show=False)
     panel = EphysPanelWidget(state, viewer)
@@ -249,7 +249,7 @@ def _panel(qtbot, state):
 
 
 def _export(shank_index, n=60):
-    from histo_to_ccf.ephys.export import ShankFeatureExport
+    from atlastrack.ephys.export import ShankFeatureExport
 
     rng = np.random.default_rng(shank_index)
     from_tip = np.arange(n, dtype=float) * 15.0 + 175.0
@@ -264,7 +264,7 @@ def _export(shank_index, n=60):
 
 
 def test_the_fit_button_refuses_without_features(qtbot, monkeypatch):
-    from histo_to_ccf.gui.widgets import ephys_panel as mod
+    from atlastrack.gui.widgets import ephys_panel as mod
 
     state = _state()
     panel, viewer = _panel(qtbot, state)
@@ -273,7 +273,7 @@ def test_the_fit_button_refuses_without_features(qtbot, monkeypatch):
         monkeypatch.setattr(mod.QMessageBox, "information",
                             lambda *a, **k: told.setdefault("msg", a[2]))
         monkeypatch.setattr(
-            "histo_to_ccf.gui.workers.trajectory_fit_worker",
+            "atlastrack.gui.workers.trajectory_fit_worker",
             lambda *a, **k: pytest.fail("must not fit with nothing to fit to"),
         )
         panel._fit_trajectory()
@@ -285,7 +285,7 @@ def test_the_fit_button_refuses_without_features(qtbot, monkeypatch):
 
 def test_the_fit_button_refuses_a_probe_with_one_registered_shank(qtbot, monkeypatch):
     """Roll is only identifiable from shanks disagreeing, so one shank cannot do it."""
-    from histo_to_ccf.gui.widgets import ephys_panel as mod
+    from atlastrack.gui.widgets import ephys_panel as mod
 
     state = _state()
     for shank in state.project.probes[0].shanks[1:]:
@@ -316,7 +316,7 @@ def test_the_fit_button_passes_the_loaded_features_to_the_worker(qtbot, monkeypa
             seen["tips"] = np.asarray(tips)
             raise RuntimeError("stop here")
 
-        monkeypatch.setattr("histo_to_ccf.gui.workers.trajectory_fit_worker", fake)
+        monkeypatch.setattr("atlastrack.gui.workers.trajectory_fit_worker", fake)
         with pytest.raises(RuntimeError, match="stop here"):
             panel._fit_trajectory()
 
@@ -340,7 +340,7 @@ def test_a_fit_with_nothing_to_fit_reports_instead_of_opening_a_preview(qtbot):
 
 
 def test_a_successful_fit_opens_the_preview(qtbot, monkeypatch):
-    from histo_to_ccf.gui.widgets import trajectory_preview_dialog as mod
+    from atlastrack.gui.widgets import trajectory_preview_dialog as mod
 
     state = _state()
     panel, viewer = _panel(qtbot, state)
@@ -386,14 +386,14 @@ def test_the_outline_is_off_by_default_and_toggles(qtbot):
 
 def test_an_atlas_without_an_annotation_yields_no_outline(qtbot):
     """The outline is orientation, never evidence; its absence must not break the view."""
-    from histo_to_ccf.gui.widgets.trajectory_preview_dialog import brain_outline
+    from atlastrack.gui.widgets.trajectory_preview_dialog import brain_outline
 
     assert brain_outline(_StripedAtlas(), 1, row_is_x=False) == []
 
 
 def test_the_outline_is_computed_from_the_projected_silhouette(qtbot):
     """A silhouette, not a slice: the shanks are drawn through the whole volume."""
-    from histo_to_ccf.gui.widgets import trajectory_preview_dialog as mod
+    from atlastrack.gui.widgets import trajectory_preview_dialog as mod
 
     class _Blob:
         atlas_name = "test-blob"
@@ -415,7 +415,7 @@ def test_the_outline_is_computed_from_the_projected_silhouette(qtbot):
 
 
 def test_the_outline_is_cached_per_projection(qtbot):
-    from histo_to_ccf.gui.widgets import trajectory_preview_dialog as mod
+    from atlastrack.gui.widgets import trajectory_preview_dialog as mod
 
     class _Counting:
         atlas_name = "counting"
@@ -443,7 +443,7 @@ def test_the_outline_is_cached_per_projection(qtbot):
 
 def _real_fit(tmp_path):
     """A small but genuine TrajectoryFit over the striped atlas."""
-    from histo_to_ccf.probes.trajectory_fit import ShankEvidence, fit_trajectory
+    from atlastrack.probes.trajectory_fit import ShankEvidence, fit_trajectory
 
     atlas = _StripedAtlas()
     tips = np.array([[8000.0, 5000.0 + 250.0 * i, 5000.0] for i in range(4)])
@@ -457,7 +457,7 @@ def _real_fit(tmp_path):
 
 
 def test_a_saved_fit_round_trips_with_its_scans_and_matches(tmp_path):
-    from histo_to_ccf.probes.trajectory_fit_io import load_fit, save_fit
+    from atlastrack.probes.trajectory_fit_io import load_fit, save_fit
 
     fit, ev, tips, entries = _real_fit(tmp_path)
     out = save_fit(tmp_path / "f.npz", fit, ev, probe_label="ProbeA",
@@ -478,8 +478,8 @@ def test_a_saved_fit_round_trips_with_its_scans_and_matches(tmp_path):
 
 def test_a_saved_fit_knows_when_its_evidence_has_changed(tmp_path):
     """A cache that outlives its data would read as a fresh answer."""
-    from histo_to_ccf.probes.trajectory_fit import ShankEvidence
-    from histo_to_ccf.probes.trajectory_fit_io import matches_current, save_fit
+    from atlastrack.probes.trajectory_fit import ShankEvidence
+    from atlastrack.probes.trajectory_fit_io import matches_current, save_fit
 
     fit, ev, tips, entries = _real_fit(tmp_path)
     out = save_fit(tmp_path / "f.npz", fit, ev, tips=tips, entries=entries)
@@ -493,7 +493,7 @@ def test_a_saved_fit_knows_when_its_evidence_has_changed(tmp_path):
 
 
 def test_a_missing_or_unreadable_cache_is_not_a_match(tmp_path):
-    from histo_to_ccf.probes.trajectory_fit_io import matches_current
+    from atlastrack.probes.trajectory_fit_io import matches_current
 
     _fit, ev, _t, _e = _real_fit(tmp_path)
     junk = tmp_path / "junk.npz"
@@ -504,8 +504,8 @@ def test_a_missing_or_unreadable_cache_is_not_a_match(tmp_path):
 
 
 def test_the_default_fit_path_sits_beside_the_features(tmp_path):
-    from histo_to_ccf.ephys.export import default_export_path
-    from histo_to_ccf.probes.trajectory_fit_io import default_fit_path
+    from atlastrack.ephys.export import default_export_path
+    from atlastrack.probes.trajectory_fit_io import default_fit_path
 
     project = tmp_path / "proj.json"
 
@@ -515,7 +515,7 @@ def test_the_default_fit_path_sits_beside_the_features(tmp_path):
 
 
 def test_the_dialog_can_write_a_fit(qtbot, tmp_path):
-    from histo_to_ccf.probes.trajectory_fit_io import load_fit
+    from atlastrack.probes.trajectory_fit_io import load_fit
 
     fit, ev, _t, _e = _real_fit(tmp_path)
     dlg = _dialog(qtbot, fit=fit, evidence=ev)
@@ -529,8 +529,8 @@ def test_the_dialog_can_write_a_fit(qtbot, tmp_path):
 
 
 def test_the_panel_reuses_a_matching_saved_fit_instead_of_refitting(qtbot, tmp_path):
-    from histo_to_ccf.probes.trajectory_fit import evidence_from_features
-    from histo_to_ccf.probes.trajectory_fit_io import default_fit_path, save_fit
+    from atlastrack.probes.trajectory_fit import evidence_from_features
+    from atlastrack.probes.trajectory_fit_io import default_fit_path, save_fit
 
     state = _state()
     state.project_path = tmp_path / "proj.json"
@@ -556,8 +556,8 @@ def test_the_panel_reuses_a_matching_saved_fit_instead_of_refitting(qtbot, tmp_p
 
 
 def test_the_panel_refits_when_the_cache_no_longer_matches(qtbot, tmp_path):
-    from histo_to_ccf.probes.trajectory_fit import ShankEvidence
-    from histo_to_ccf.probes.trajectory_fit_io import default_fit_path, save_fit
+    from atlastrack.probes.trajectory_fit import ShankEvidence
+    from atlastrack.probes.trajectory_fit_io import default_fit_path, save_fit
 
     state = _state()
     state.project_path = tmp_path / "proj.json"

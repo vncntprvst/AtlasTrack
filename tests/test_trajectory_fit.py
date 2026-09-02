@@ -14,7 +14,7 @@ from typing import ClassVar
 import numpy as np
 import pytest
 
-from histo_to_ccf.probes.trajectory_fit import (
+from atlastrack.probes.trajectory_fit import (
     ParameterScan,
     PlacementScore,
     ShankEvidence,
@@ -55,7 +55,7 @@ def _vertical_array(n=4, tip_dv=5000.0, track=4000.0, pitch=250.0):
 def _evidence_at(atlas, tips, entries, *, shanks=(0, 1, 2, 3), weight=5.0,
                  shift_um=0.0):
     """Detected boundaries placed exactly on this array's atlas boundaries, shifted."""
-    from histo_to_ccf.probes.trajectory_fit import atlas_boundaries_from_tip
+    from atlastrack.probes.trajectory_fit import atlas_boundaries_from_tip
 
     out = {}
     for s in shanks:
@@ -116,7 +116,7 @@ def test_empty_input_matches_nothing():
 
 
 def test_evidence_is_sorted_and_weighted_from_detections():
-    from histo_to_ccf.ephys.autolandmarks import DetectedBoundary
+    from atlastrack.ephys.autolandmarks import DetectedBoundary
 
     ev = ShankEvidence.from_boundaries(2, [
         DetectedBoundary(900.0, 5.0, 4.0, 60.0),

@@ -8,8 +8,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.gui.workflow import WorkflowState
-from histo_to_ccf.project.schema import (
+from atlastrack.gui.workflow import WorkflowState
+from atlastrack.project.schema import (
     AtlasRef,
     ChannelLevels,
     PlaneParams,
@@ -43,7 +43,7 @@ def test_section_flip_fields() -> None:
 
 
 def test_project_roundtrip_with_flip_levels(tmp_path) -> None:
-    from histo_to_ccf.project.io import load_project, save_project
+    from atlastrack.project.io import load_project, save_project
 
     sec = Section(
         index=0, slide_idx=0, bbox_px=(0, 0, 100, 80),
@@ -87,7 +87,7 @@ def test_workflow_state_atlas_property() -> None:
 
 @pytest.mark.qt
 def test_slide_loader_widget_creates(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
 
     state = WorkflowState()
     widget = SlideLoaderWidget(state)
@@ -104,7 +104,7 @@ def test_matcher_display_does_not_saturate_empty_channel() -> None:
     """
     import numpy as np
 
-    from histo_to_ccf.gui.widgets.atlas_matcher import _display_histology
+    from atlastrack.gui.widgets.atlas_matcher import _display_histology
 
     crop = np.zeros((40, 50, 3), dtype=np.float32)
     crop[..., 2] = 5.0           # faint blue background floor
@@ -119,7 +119,7 @@ def test_matcher_display_does_not_saturate_empty_channel() -> None:
 
 @pytest.mark.qt
 def test_probe_picker_rename(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
+    from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
 
     state = WorkflowState()
     widget = ProbePickerWidget(state)
@@ -156,7 +156,7 @@ def test_register_panel_exit_landmark_edit(qtbot) -> None:
     import napari
     import numpy as np
 
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -184,8 +184,8 @@ def test_click_overlay_probe_highlight(qtbot) -> None:
     import napari
     import numpy as np
 
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
-    from histo_to_ccf.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.project.schema import Point2D, ProbeSpec, ProbeType, Shank
 
     viewer = napari.Viewer(show=False)
     try:
@@ -221,8 +221,8 @@ def test_register_panel_region_hover(qtbot) -> None:
     import napari
     import numpy as np
 
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     class _FakeAtlas:
         structures = {5: {"acronym": "IC", "name": "Inferior colliculus"}}
@@ -252,9 +252,9 @@ def test_viz_panel_enforce_rigid_array(qtbot) -> None:
     import napari
     import numpy as np
 
-    from histo_to_ccf.config import AppSettings
-    from histo_to_ccf.gui.widgets.viz_export_panel import VizExportPanelWidget
-    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+    from atlastrack.config import AppSettings
+    from atlastrack.gui.widgets.viz_export_panel import VizExportPanelWidget
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
     viewer = napari.Viewer(show=False)
     try:
@@ -291,9 +291,9 @@ def test_viz_panel_enforce_rigid_array(qtbot) -> None:
 @pytest.mark.qt
 def test_save_panel_load_path_records_recent(qtbot, tmp_path) -> None:
     """load_path loads a project, fires the callback, and records it as recent."""
-    from histo_to_ccf.config import AppSettings
-    from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
-    from histo_to_ccf.project.io import save_project
+    from atlastrack.config import AppSettings
+    from atlastrack.gui.widgets.save_panel import SavePanelWidget
+    from atlastrack.project.io import save_project
 
     # Write a real project to disk.
     proj_path = tmp_path / "proj" / "demo.histo2ccf.json"
@@ -324,7 +324,7 @@ def test_save_panel_load_path_records_recent(qtbot, tmp_path) -> None:
 
 @pytest.mark.qt
 def test_image_tools_widget_creates(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
 
     state = WorkflowState()
     widget = ImageToolsWidget(state)
@@ -335,7 +335,7 @@ def test_image_tools_widget_creates(qtbot) -> None:
 
 @pytest.mark.qt
 def test_probe_picker_adds_probe(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
+    from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
 
     state = WorkflowState()
     widget = ProbePickerWidget(state)
@@ -348,7 +348,7 @@ def test_probe_picker_adds_probe(qtbot) -> None:
 
 @pytest.mark.qt
 def test_ordering_panel_creates(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
+    from atlastrack.gui.widgets.ordering_panel import OrderingPanelWidget
 
     state = WorkflowState()
     widget = OrderingPanelWidget(state)
@@ -359,7 +359,7 @@ def test_ordering_panel_creates(qtbot) -> None:
 
 @pytest.mark.qt
 def test_save_panel_creates(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
+    from atlastrack.gui.widgets.save_panel import SavePanelWidget
 
     state = WorkflowState()
     widget = SavePanelWidget(state)
@@ -371,7 +371,7 @@ def test_save_panel_creates(qtbot) -> None:
 @pytest.mark.qt
 def test_image_tools_section_scope_flip(qtbot) -> None:
     """Selecting a section in the dropdown makes section-scoped flips apply to it."""
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
 
     state = WorkflowState()
     state.add_slide("fake.png", np.zeros((40, 40), dtype=np.uint8))
@@ -392,7 +392,7 @@ def test_image_tools_section_scope_flip(qtbot) -> None:
 
 @pytest.mark.qt
 def test_image_tools_flip_h_updates_state(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.image_tools import ImageToolsWidget
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
 
     state = WorkflowState()
     img = np.arange(6, dtype=np.uint8).reshape(2, 3)
@@ -409,8 +409,8 @@ def test_image_tools_flip_h_updates_state(qtbot) -> None:
 
 @pytest.mark.qt
 def test_save_panel_saves_json(qtbot, tmp_path) -> None:
-    from histo_to_ccf.gui.widgets.save_panel import SavePanelWidget
-    from histo_to_ccf.project.io import load_project
+    from atlastrack.gui.widgets.save_panel import SavePanelWidget
+    from atlastrack.project.io import load_project
 
     state = WorkflowState()
     out_path = tmp_path / "out.json"
@@ -430,9 +430,9 @@ def test_save_panel_saves_json(qtbot, tmp_path) -> None:
 @pytest.mark.qt
 def test_atlas_browser_ap_is_bregma_relative(qtbot) -> None:
     import napari
-    from histo_to_ccf.config import AppSettings
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+    from atlastrack.config import AppSettings
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
 
     viewer = napari.Viewer(show=False)
     try:
@@ -452,9 +452,9 @@ def test_atlas_browser_ap_is_bregma_relative(qtbot) -> None:
 @pytest.mark.qt
 def test_atlas_browser_assign_stores_absolute_ap(qtbot) -> None:
     import napari
-    from histo_to_ccf.config import AppSettings
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+    from atlastrack.config import AppSettings
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
 
     viewer = napari.Viewer(show=False)
     try:
@@ -492,8 +492,8 @@ class _FakeAtlas:
 
 @pytest.mark.qt
 def test_atlas_matcher_navigate_and_assign(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+    from atlastrack.gui.widgets.atlas_matcher import AtlasMatcherDialog
+    from atlastrack.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
 
     state = WorkflowState()
     state.add_slide("s.png", np.zeros((40, 60), dtype=np.uint8))
@@ -532,8 +532,8 @@ def test_atlas_matcher_navigate_and_assign(qtbot) -> None:
 @pytest.mark.qt
 def test_atlas_matcher_prematch_deepslice(qtbot, monkeypatch) -> None:
     """Pre-match fills AP from DeepSlice and caches the full planes for Register."""
-    import histo_to_ccf.gui.widgets.atlas_matcher as matcher_mod
-    from histo_to_ccf.gui.widgets.atlas_matcher import AtlasMatcherDialog
+    import atlastrack.gui.widgets.atlas_matcher as matcher_mod
+    from atlastrack.gui.widgets.atlas_matcher import AtlasMatcherDialog
 
     state = WorkflowState()
     state.add_slide("s.png", np.zeros((40, 60), dtype=np.uint8))
@@ -565,7 +565,7 @@ def test_atlas_matcher_prematch_deepslice(qtbot, monkeypatch) -> None:
 
     monkeypatch.setattr(matcher_mod, "deepslice_worker", fake_worker, raising=False)
     # deepslice_worker is imported lazily inside the handler from gui.workers.
-    import histo_to_ccf.gui.workers as workers_mod
+    import atlastrack.gui.workers as workers_mod
     monkeypatch.setattr(workers_mod, "deepslice_worker", fake_worker, raising=False)
 
     dlg = AtlasMatcherDialog(state)
@@ -601,7 +601,7 @@ class _Signal:
 
 @pytest.mark.qt
 def test_gl_report_never_raises(qtbot) -> None:
-    from histo_to_ccf.gui.gl_diagnostics import format_gl_report, gl_report
+    from atlastrack.gui.gl_diagnostics import format_gl_report, gl_report
 
     rep = gl_report()  # must not raise, even with no usable GL context
     assert {"ok", "vendor", "renderer", "version", "error"} <= set(rep)
@@ -614,7 +614,7 @@ def test_gl_report_never_raises(qtbot) -> None:
 def test_build_panel_constructs_full_app(qtbot) -> None:
     """Build the entire dock panel exactly as launch() does (all tabs wired)."""
     import napari
-    from histo_to_ccf.gui.app import _build_panel
+    from atlastrack.gui.app import _build_panel
 
     viewer = napari.Viewer(show=False)
     try:
@@ -653,8 +653,8 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
 def test_reload_restores_slide_flip(qtbot, tmp_path) -> None:
     """Loading a project re-applies the persisted slide flip to the raw image."""
     import napari
-    from histo_to_ccf.gui.app import _reload_project_display
-    from histo_to_ccf.io.image import load_image
+    from atlastrack.gui.app import _reload_project_display
+    from atlastrack.io.image import load_image
 
     # A non-symmetric image so a flip is detectable.
     img = np.arange(12, dtype=np.uint8).reshape(3, 4)
@@ -679,8 +679,8 @@ def test_reload_restores_slide_flip(qtbot, tmp_path) -> None:
 @pytest.mark.qt
 def test_add_probe_arms_tip_mode(qtbot) -> None:
     import napari
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
-    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -703,7 +703,7 @@ def test_add_probe_arms_tip_mode(qtbot) -> None:
 @pytest.mark.qt
 def test_edit_boxes_resize_and_delete(qtbot) -> None:
     import napari
-    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -745,7 +745,7 @@ def test_edit_boxes_delete_hovered_does_not_crash(qtbot) -> None:
     highlight recompute used to crash in `_outline_shapes`.
     """
     import napari
-    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -783,7 +783,7 @@ def test_open_slides_replaces_image_keeping_registration(qtbot, tmp_path) -> Non
     sections + registration, different-size clears them."""
     import imageio.v3 as iio
 
-    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
 
     state = WorkflowState()
     state.add_slide("orig.png", np.zeros((200, 300, 3), dtype=np.uint8))
@@ -831,7 +831,7 @@ def test_replacing_with_a_different_size_does_not_block_on_a_dialog(
     """
     import imageio.v3 as iio
 
-    from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
 
     state = WorkflowState()
     state.add_slide("orig.png", np.zeros((200, 300, 3), dtype=np.uint8))
@@ -858,12 +858,12 @@ def test_markers_redraw_after_layers_cleared(qtbot) -> None:
     'Select / move' warned 'not in the list')."""
     import napari
 
-    from histo_to_ccf.gui.widgets.click_overlay import (
+    from atlastrack.gui.widgets.click_overlay import (
         _LAYER_ENTRY,
         _LAYER_TIP,
         ClickOverlayWidget,
     )
-    from histo_to_ccf.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+    from atlastrack.project.schema import Point2D, ProbeSpec, ProbeType, Shank
 
     viewer = napari.Viewer(show=False)
     try:
@@ -905,8 +905,8 @@ def test_sync_layer_does_not_wipe_markers_from_partial_layer(qtbot) -> None:
     (the 'only Probe A reloaded' data-loss bug)."""
     import napari
 
-    from histo_to_ccf.gui.widgets.click_overlay import _LAYER_TIP, ClickOverlayWidget
-    from histo_to_ccf.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+    from atlastrack.gui.widgets.click_overlay import _LAYER_TIP, ClickOverlayWidget
+    from atlastrack.project.schema import Point2D, ProbeSpec, ProbeType, Shank
 
     viewer = napari.Viewer(show=False)
     try:
@@ -950,8 +950,8 @@ def test_sync_layer_does_not_wipe_markers_from_partial_layer(qtbot) -> None:
 
 @pytest.mark.qt
 def test_ordering_resort_and_interpolate(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
-    from histo_to_ccf.project.schema import PlaneParams
+    from atlastrack.gui.widgets.ordering_panel import OrderingPanelWidget
+    from atlastrack.project.schema import PlaneParams
 
     state = WorkflowState()
     state.add_slide("s.png", np.zeros((10, 10), dtype=np.uint8))
@@ -982,7 +982,7 @@ def test_ordering_resort_and_interpolate(qtbot) -> None:
 
 @pytest.mark.qt
 def _two_shank_state() -> WorkflowState:
-    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
     state = WorkflowState()
     state.add_slide("s.png", np.zeros((100, 100), dtype=np.uint8))
@@ -1010,7 +1010,7 @@ def _color_of(layer, p_idx, s_idx):
 def test_markers_color_per_shank_and_one_per_shank(qtbot) -> None:
     """Tip+entry of a shank share a colour; another shank cycles; one tip/shank."""
     import napari
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1050,7 +1050,7 @@ def test_markers_color_per_shank_and_one_per_shank(qtbot) -> None:
 @pytest.mark.qt
 def test_markers_clear_selected_removes_one(qtbot) -> None:
     import napari
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1082,7 +1082,7 @@ def test_markers_clear_selected_removes_one(qtbot) -> None:
 def test_wheel_pan_moves_camera(qtbot) -> None:
     """Ctrl+wheel pans horizontally, Shift+wheel vertically; neither zooms."""
     import napari
-    from histo_to_ccf.gui.app import _install_wheel_pan
+    from atlastrack.gui.app import _install_wheel_pan
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1117,10 +1117,10 @@ def test_wheel_pan_moves_camera(qtbot) -> None:
 def test_update_coordinates_remaps_moved_points(qtbot) -> None:
     """'Update coordinates' re-maps tip/entry pixels (incl. moved ones) into CCF."""
     import napari
-    from histo_to_ccf.project.schema import (
+    from atlastrack.project.schema import (
         Point2D, ProbeSpec, ProbeType, RegistrationResult, Section, Shank,
     )
-    from histo_to_ccf.gui.widgets.viz_export_panel import VizExportPanelWidget
+    from atlastrack.gui.widgets.viz_export_panel import VizExportPanelWidget
 
     class _FakeAtlas:
         resolution = (25.0, 25.0, 25.0)
@@ -1162,8 +1162,8 @@ def test_update_coordinates_remaps_moved_points(qtbot) -> None:
 def test_reset_morph_drops_bspline_keeps_plane(qtbot, tmp_path) -> None:
     """Reset-morph nulls the B-spline + manual corrections but keeps the anchoring."""
     import napari
-    from histo_to_ccf.project.schema import ManualLandmarks, RegistrationResult, Section
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.project.schema import ManualLandmarks, RegistrationResult, Section
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1201,8 +1201,8 @@ def test_reset_morph_drops_bspline_keeps_plane(qtbot, tmp_path) -> None:
 def test_residuals_table_bregma_and_ap_order(qtbot) -> None:
     """Residuals table: AP from bregma (matches Atlas tab) and sorted by AP order."""
     import napari
-    from histo_to_ccf.project.schema import RegistrationResult, Section
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.project.schema import RegistrationResult, Section
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1239,7 +1239,7 @@ def test_residuals_table_bregma_and_ap_order(qtbot) -> None:
 @pytest.mark.qt
 def test_click_overlay_modes_and_nearest_section(qtbot) -> None:
     import napari
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1302,7 +1302,7 @@ def _fake_lfp_result(n_ch: int = 16, n_freq: int = 20) -> dict:
 
 
 def _registered_probe_state() -> WorkflowState:
-    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
     state = WorkflowState()
     shank = Shank(
@@ -1320,7 +1320,7 @@ def _registered_probe_state() -> WorkflowState:
 @pytest.mark.qt
 def test_ephys_panel_lists_probes(qtbot) -> None:
     import napari
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1338,7 +1338,7 @@ def test_ephys_panel_lists_probes(qtbot) -> None:
 
 @pytest.mark.qt
 def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
-    from histo_to_ccf.gui.widgets.ephys_align_dialog import EphysAlignmentDialog
+    from atlastrack.gui.widgets.ephys_align_dialog import EphysAlignmentDialog
 
     state = _registered_probe_state()
     dlg = EphysAlignmentDialog(state, 0, 0, _fake_lfp_result())
@@ -1379,7 +1379,7 @@ def test_ephys_alignment_dialog_apply_writes_ccf(qtbot) -> None:
 def test_landmark_dialog_reads_the_atlas_along_the_track(qtbot) -> None:
     """The region column works with no recording at all - only a registered shank."""
     pytest.importorskip("pyqtgraph")
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+    from atlastrack.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     state = _registered_probe_state()  # entry DV 1000 -> tip DV 5000, boundary at 3000
     dlg = EphysProbeAlignmentDialog(state, 0)
@@ -1398,7 +1398,7 @@ def test_landmark_dialog_reads_the_atlas_along_the_track(qtbot) -> None:
 @pytest.mark.qt
 def test_landmark_dialog_apply_stores_landmarks_without_touching_the_old_fields(qtbot) -> None:
     pytest.importorskip("pyqtgraph")
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+    from atlastrack.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     state = _registered_probe_state()
     dlg = EphysProbeAlignmentDialog(state, 0)
@@ -1425,7 +1425,7 @@ def test_landmark_dialog_apply_stores_landmarks_without_touching_the_old_fields(
 @pytest.mark.qt
 def test_landmark_dialog_restores_a_stored_alignment(qtbot) -> None:
     pytest.importorskip("pyqtgraph")
-    from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
+    from atlastrack.gui.widgets.ephys_alignment_panel import EphysProbeAlignmentDialog
 
     state = _registered_probe_state()
     first = EphysProbeAlignmentDialog(state, 0)
@@ -1445,8 +1445,8 @@ def test_landmark_dialog_restores_a_stored_alignment(qtbot) -> None:
 def test_ephys_panel_alignment_button_needs_a_registered_probe(qtbot, monkeypatch) -> None:
     import napari
 
-    from histo_to_ccf.gui.widgets import ephys_panel as ephys_panel_module
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets import ephys_panel as ephys_panel_module
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
 
     warnings: list[str] = []
     monkeypatch.setattr(
@@ -1471,8 +1471,8 @@ def test_ephys_panel_alignment_button_needs_a_registered_probe(qtbot, monkeypatc
 @pytest.mark.qt
 def test_ephys_shank_selection_full_shank_not_one_column(qtbot) -> None:
     """A NP2.0 shank (2 columns) selects all 96 of its channels, not one 48-col."""
-    from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
-    from histo_to_ccf.gui.widgets.ephys_align_dialog import EphysAlignmentDialog
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
+    from atlastrack.gui.widgets.ephys_align_dialog import EphysAlignmentDialog
 
     state = WorkflowState()
     shanks = [Shank(index=i) for i in range(4)]
@@ -1513,8 +1513,8 @@ def test_ephys_shank_selection_full_shank_not_one_column(qtbot) -> None:
 def test_napari_probe_layer_uses_placed_ml_no_offset(qtbot) -> None:
     """The 3D probe line uses the placed tip/entry ML, with no shank offset added."""
     import napari
-    from histo_to_ccf.project.schema import Project, ProbeSpec, ProbeType, Shank
-    from histo_to_ccf.viz.napari3d import add_probe_layers
+    from atlastrack.project.schema import Project, ProbeSpec, ProbeType, Shank
+    from atlastrack.viz.napari3d import add_probe_layers
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1538,7 +1538,7 @@ def test_bregma_display_affine_does_not_mirror() -> None:
     reversal caused.
     """
     import numpy as np
-    from histo_to_ccf.viz.napari3d import _bregma_affine
+    from atlastrack.viz.napari3d import _bregma_affine
 
     a = _bregma_affine()
     assert np.isclose(np.linalg.det(a[:3, :3]), 1.0)  # proper rotation, no mirror
@@ -1551,7 +1551,7 @@ def test_bregma_display_affine_does_not_mirror() -> None:
 def test_default_3d_camera_is_posterior_dorsal_up(qtbot) -> None:
     """Default 3D camera: from behind (anterior view dir), dorsal up, tilted down."""
     import napari
-    from histo_to_ccf.viz.napari3d import _set_default_camera
+    from atlastrack.viz.napari3d import _set_default_camera
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1573,8 +1573,8 @@ def test_default_3d_camera_is_posterior_dorsal_up(qtbot) -> None:
 @pytest.mark.qt
 def test_show_3d_scene_adds_ephys_channel_layer(qtbot) -> None:
     import napari
-    from histo_to_ccf.project.schema import EphysAlignment, ProbeSpec, ProbeType, Shank
-    from histo_to_ccf.viz.napari3d import show_3d_scene
+    from atlastrack.project.schema import EphysAlignment, ProbeSpec, ProbeType, Shank
+    from atlastrack.viz.napari3d import show_3d_scene
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1602,7 +1602,7 @@ def test_show_3d_scene_adds_ephys_channel_layer(qtbot) -> None:
 # ---------------------------------------------------------------------------
 
 def test_project_section_spacing_round_trips(tmp_path) -> None:
-    from histo_to_ccf.project.io import load_project, save_project
+    from atlastrack.project.io import load_project, save_project
 
     proj = Project(section_spacing_um=123.0)
     path = tmp_path / "p.histo2ccf.json"
@@ -1611,8 +1611,8 @@ def test_project_section_spacing_round_trips(tmp_path) -> None:
 
 
 def _populated_state() -> WorkflowState:
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM  # noqa: F401
-    from histo_to_ccf.project.schema import (
+    from atlastrack.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM  # noqa: F401
+    from atlastrack.project.schema import (
         AtlasRef,
         Point2D,
         ProbeSpec,
@@ -1651,13 +1651,13 @@ def _populated_state() -> WorkflowState:
 @pytest.mark.qt
 def test_reload_repopulates_widgets(qtbot) -> None:
     import napari
-    from histo_to_ccf.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
-    from histo_to_ccf.gui.widgets.ordering_panel import OrderingPanelWidget
-    from histo_to_ccf.gui.widgets.probe_picker import ProbePickerWidget
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.io.ccf_coords import BREGMA_AP_FROM_ORIGIN_UM
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets.ordering_panel import OrderingPanelWidget
+    from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1698,8 +1698,8 @@ def test_reload_repopulates_widgets(qtbot) -> None:
 def test_auto_load_atlas_skips_when_already_loaded(qtbot) -> None:
     """auto_load_atlas is a no-op when the matching atlas is already loaded or unset."""
     import napari
-    from histo_to_ccf.gui.widgets.atlas_browser import AtlasBrowserWidget
-    from histo_to_ccf.project.schema import AtlasRef
+    from atlastrack.gui.widgets.atlas_browser import AtlasBrowserWidget
+    from atlastrack.project.schema import AtlasRef
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1730,7 +1730,7 @@ def test_manual_atlas_adjustment(qtbot, tmp_path) -> None:
     import numpy as np
     from napari.utils.transforms import Affine
 
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1781,7 +1781,7 @@ def test_landmark_warp_apply_and_reset(qtbot, tmp_path) -> None:
     import napari
     import numpy as np
 
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
 
     viewer = napari.Viewer(show=False)
     try:

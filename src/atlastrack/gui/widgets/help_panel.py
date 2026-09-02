@@ -43,8 +43,8 @@ def find_doc(filename: str) -> Path | None:
     here = Path(__file__).resolve()
     candidates = [
         here.parents[4] / filename,   # <repo>/MANUAL.md
-        here.parents[3] / filename,   # <site-packages>/histo_to_ccf/../
-        here.parents[2] / filename,   # histo_to_ccf/MANUAL.md
+        here.parents[3] / filename,   # <site-packages>/atlastrack/../
+        here.parents[2] / filename,   # atlastrack/MANUAL.md
     ]
     for path in candidates:
         if path.is_file():
@@ -118,7 +118,7 @@ class HelpPanelWidget(QWidget):
 
     def refresh_atlases(self) -> None:
         """Re-render the atlas sheet, picking up the current theme and anchors."""
-        from histo_to_ccf.gui.widgets.atlas_help_dialog import (
+        from atlastrack.gui.widgets.atlas_help_dialog import (
             atlas_reference_html,
             link_colour_for,
         )

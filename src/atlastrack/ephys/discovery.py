@@ -39,7 +39,7 @@ from pathlib import Path
 
 import numpy as np
 
-from histo_to_ccf.ephys.recordings import (
+from atlastrack.ephys.recordings import (
     NP2_ROW_PITCH_UM,
     SHANK_PITCH_UM,
     channels_for_shank,
@@ -232,7 +232,7 @@ def _require_si():
         import spikeinterface.full as si
     except ImportError as exc:  # pragma: no cover - exercised by the extras gate
         raise ImportError(
-            "Reading recordings needs SpikeInterface: pip install 'histo-to-ccf[ephys]'"
+            "Reading recordings needs SpikeInterface: pip install 'atlastrack[ephys]'"
         ) from exc
     return si
 
@@ -246,7 +246,7 @@ def find_record_nodes(root: str | Path, *, max_depth: int = 6) -> list[Path]:
 
     Formats are recognised by structure rather than by folder name, because the name
     is the part people change: a copied or renamed node is still a record node. See
-    :func:`histo_to_ccf.ephys.formats.detect_format` for the per-format rules - an
+    :func:`atlastrack.ephys.formats.detect_format` for the per-format rules - an
     Open Ephys record node holds ``experimentN/recordingM``, Intan leaves an
     ``info.rhd``, SpikeGLX leaves ``.bin``/``.meta`` pairs.
 
@@ -257,7 +257,7 @@ def find_record_nodes(root: str | Path, *, max_depth: int = 6) -> list[Path]:
     The name is historical: it returns every recording directory, not only Open
     Ephys record nodes.
     """
-    from histo_to_ccf.ephys.formats import detect_format
+    from atlastrack.ephys.formats import detect_format
 
     root = Path(root)
     if not root.exists():
@@ -400,7 +400,7 @@ def scan_streams(root: str | Path, *, probe_only: bool = True) -> list[StreamInf
     Streams that fail to open are skipped rather than aborting the scan: one
     unreadable recording in a session should not cost the user the other nine.
     """
-    from histo_to_ccf.ephys.loader import list_streams
+    from atlastrack.ephys.loader import list_streams
 
     out: list[StreamInfo] = []
     for node in find_record_nodes(root):
@@ -708,7 +708,7 @@ def derive_electrode_range(
 ) -> tuple[int, int] | None:
     """The 1-based electrode numbers a full-bank coverage corresponds to.
 
-    Inverts :func:`histo_to_ccf.ephys.recordings.bank_offset_um`, so the notes and the
+    Inverts :func:`atlastrack.ephys.recordings.bank_offset_um`, so the notes and the
     geometry can be checked against each other in both directions: LO_06's bank
     starting 720 µm up the shank comes back as ``(97, 192)``, which is exactly what
     the notes say.

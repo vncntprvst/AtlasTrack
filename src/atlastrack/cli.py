@@ -1,14 +1,15 @@
-"""histo2ccf - guided histology->atlas registration with probe trajectory mapping.
+"""atlastrack - guided histology->atlas registration with probe trajectory mapping.
 
 Typical workflow
 ----------------
-1. ``histo2ccf gui``           - launch the interactive napari GUI.
-2. ``histo2ccf split image.tif`` - detect sections in a composite slide.
-3. ``histo2ccf register-one `` - headless single-section registration.
-4. ``histo2ccf register project.json`` - run the full M3 pipeline on a project.
-5. ``histo2ccf export project.json`` - write per-channel CCF / Paxinos CSVs.
+1. ``atlastrack gui``           - launch the interactive napari GUI.
+2. ``atlastrack split image.tif`` - detect sections in a composite slide.
+3. ``atlastrack register-one `` - headless single-section registration.
+4. ``atlastrack register project.json`` - run the full M3 pipeline on a project.
+5. ``atlastrack export project.json`` - write per-channel CCF / Paxinos CSVs.
 
-Run ``histo2ccf <command> --help`` for per-command options.
+Run ``atlastrack <command> --help`` for per-command options. ``histo2ccf``
+remains as an alias for the same commands.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from loguru import logger
 
 # Windows consoles default to a legacy codepage (cp1252), which cannot encode the
 # non-ASCII characters used in help text and messages ("µm", "->"). Without this,
-# even `histo2ccf --help` dies with a UnicodeEncodeError. Reconfiguring the streams
+# even `atlastrack --help` dies with a UnicodeEncodeError. Reconfiguring the streams
 # is a no-op where the encoding is already UTF-8.
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -58,9 +59,9 @@ def _parse_bbox(s: str) -> tuple[int, int, int, int]:
 @app.command()
 def version() -> None:
     """Print the installed package version and exit."""
-    from histo_to_ccf import __version__
+    from atlastrack import __version__
 
-    typer.echo(f"histo2ccf {__version__}")
+    typer.echo(f"atlastrack {__version__}")
 
 
 @app.command()
@@ -68,10 +69,10 @@ def gui() -> None:
     """Launch the interactive napari GUI.
 
     If it fails with 'QOpenGLFramebufferObject: Unsupported framebuffer format',
-    your GPU/OpenGL driver is the problem - run ``histo2ccf gl-info`` to see what
+    your GPU/OpenGL driver is the problem - run ``atlastrack gl-info`` to see what
     renderer is active and how to fix it.
     """
-    from histo_to_ccf.gui.app import launch
+    from atlastrack.gui.app import launch
 
     launch()
 
@@ -79,7 +80,7 @@ def gui() -> None:
 @app.command("gl-info")
 def gl_info() -> None:
     """Report the OpenGL renderer/driver and diagnose GUI launch failures."""
-    from histo_to_ccf.gui.gl_diagnostics import format_gl_report
+    from atlastrack.gui.gl_diagnostics import format_gl_report
 
     typer.echo(format_gl_report())
 
@@ -118,9 +119,9 @@ def split(
     """Detect sections in a composite slide and write a sidecar JSON of bboxes."""
     import json
 
-    from histo_to_ccf.io.image import load_image
-    from histo_to_ccf.sectioning.ordering import order_sections
-    from histo_to_ccf.sectioning.split import detect_sections
+    from atlastrack.io.image import load_image
+    from atlastrack.sectioning.ordering import order_sections
+    from atlastrack.sectioning.split import detect_sections
 
     img = load_image(image)
     sections = detect_sections(
@@ -188,7 +189,7 @@ def register_one_cmd(
         typer.Option(
             help=(
                 "Where to write the project JSON. Defaults to "
-                "<image_dir>/<image_stem>.histo2ccf.json."
+                "<image_dir>/<image_stem>.atlastrack.json."
             ),
         ),
     ] = None,
@@ -213,10 +214,10 @@ def register_one_cmd(
     """
     import numpy as np
 
-    from histo_to_ccf.io.herbs_writer import write_herbs_pkl
-    from histo_to_ccf.io.image import load_image
-    from histo_to_ccf.project.io import save_project
-    from histo_to_ccf.project.schema import (
+    from atlastrack.io.herbs_writer import write_herbs_pkl
+    from atlastrack.io.image import load_image
+    from atlastrack.project.io import save_project
+    from atlastrack.project.schema import (
         AtlasRef,
         PlaneParams,
         Point2D,
@@ -227,8 +228,8 @@ def register_one_cmd(
         Shank,
         Slide,
     )
-    from histo_to_ccf.registration.pipeline import register_project
-    from histo_to_ccf.registration.predictor import ManualPredictor
+    from atlastrack.registration.pipeline import register_project
+    from atlastrack.registration.predictor import ManualPredictor
 
     tip_xy = _parse_xy(tip, "tip")
     entry_xy = _parse_xy(entry, "entry")
@@ -274,7 +275,7 @@ def register_one_cmd(
 
     image_path = Path(image)
     if output_json is None:
-        output_json = image_path.with_suffix(".histo2ccf.json")
+        output_json = image_path.with_suffix(".atlastrack.json")
     save_project(project, output_json)
     typer.echo(f"wrote project -> {output_json}")
 
@@ -344,9 +345,9 @@ def register_cmd(
     """
     from brainglobe_atlasapi import BrainGlobeAtlas
 
-    from histo_to_ccf.project.images import section_images
-    from histo_to_ccf.project.io import load_project, save_project
-    from histo_to_ccf.registration.pipeline import register_project_with_atlas
+    from atlastrack.project.images import section_images
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.registration.pipeline import register_project_with_atlas
 
     # Parse grid
     try:
@@ -462,9 +463,9 @@ def export_cmd(
     export can be refreshed after the project has been corrected. Writes
     ``<name>.csv`` (CCF µm) and ``<name> - Paxinos.csv`` (stereotaxic mm).
     """
-    from histo_to_ccf.probes.channels import export_channel_csv, export_paxinos_csv
-    from histo_to_ccf.project.io import load_project, save_project
-    from histo_to_ccf.project.provenance import write_export_provenance
+    from atlastrack.probes.channels import export_channel_csv, export_paxinos_csv
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.project.provenance import write_export_provenance
 
     project = load_project(project_json)
     out_dir = out_dir or project_json.parent
@@ -473,7 +474,7 @@ def export_cmd(
     if remap:
         from brainglobe_atlasapi import BrainGlobeAtlas
 
-        from histo_to_ccf.registration.pipeline import (
+        from atlastrack.registration.pipeline import (
             _apply_to_shank_registered,
             reload_registered_transforms,
         )
@@ -491,7 +492,7 @@ def export_cmd(
         typer.echo(f"re-mapped {n_remapped} shank(s) from the stored transforms")
 
     if rigid_array:
-        from histo_to_ccf.probes.fitting import enforce_rigid_arrays
+        from atlastrack.probes.fitting import enforce_rigid_arrays
 
         infos = enforce_rigid_arrays(
             project, tolerance=rigid_tolerance, lock_spacing_um=lock_spacing_um

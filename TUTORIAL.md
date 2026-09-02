@@ -1,4 +1,4 @@
-# Histo-to-CCF - Tutorial
+# AtlasTrack - Tutorial
 
 One histology slide registration, start to finish. About 20 minutes, most of it 
 waiting for the atlas to download and the fit to run. For the full reference see
@@ -141,7 +141,7 @@ image. **Load Project** brings everything back and reloads the atlas for you.
 To open a project in Python:
 
 ```python
-from histo_to_ccf.project.io import load_project
+from atlastrack.project.io import load_project
 p = load_project(r"path\to\project.histo2ccf.json")
 ```
 

@@ -6,7 +6,7 @@ prepared the way the app prepared them, in series order - with the registered
 atlas contours alongside.
 
 The crops come straight from
-:func:`histo_to_ccf.project.images.rebuild_slide_image`, so the flips *and* the
+:func:`atlastrack.project.images.rebuild_slide_image`, so the flips *and* the
 per-section rotation are already in them - the same pixels the registration was
 computed against. That is what lets the outline sidecar be written in the section's
 own frame with no correction: it cannot drift out of alignment with its image,
@@ -24,7 +24,7 @@ import numpy as np
 if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas
 
-    from histo_to_ccf.project.schema import Project, Section
+    from atlastrack.project.schema import Project, Section
 
 #: The sidecar is a figure component, not a screen overlay: black lines on white
 #: drop straight into a paper or an illustration without inverting anything.
@@ -64,7 +64,7 @@ def _warped_labels(
     """Registered atlas region labels in this section's pixel grid."""
     if getattr(section, "registration", None) is None:
         return None
-    from histo_to_ccf.registration.transforms import warp_annotation_to_section
+    from atlastrack.registration.transforms import warp_annotation_to_section
 
     return warp_annotation_to_section(
         section.registration, atlas, shape,
@@ -129,7 +129,7 @@ def straighten_angle_deg(section: Section) -> float:
 
     Returns 0 for a section DeepSlice never saw - there is nothing to measure from.
     """
-    from histo_to_ccf.project.images import deepslice_rotation_deg
+    from atlastrack.project.images import deepslice_rotation_deg
 
     anchoring = getattr(section, "deepslice_anchoring", None)
     if not anchoring or len(anchoring) < 6:
@@ -203,8 +203,8 @@ def export_section_series(
     Plus ``series.json``: per section its index, slide, bbox, AP, rotation and where
     that rotation came from, so the export can be traced back to the project.
     """
-    from histo_to_ccf.io.image import crop
-    from histo_to_ccf.project.images import rebuild_slide_image
+    from atlastrack.io.image import crop
+    from atlastrack.project.images import rebuild_slide_image
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -263,7 +263,7 @@ def export_section_series(
                         (section.index, "section is not registered")
                     )
                 else:
-                    from histo_to_ccf.registration.transforms import (
+                    from atlastrack.registration.transforms import (
                         annotation_boundaries,
                     )
 

@@ -1,6 +1,6 @@
 """Write HERBS-compatible pickle files from CCF µm coordinates.
 
-The reverse of :func:`histo_to_ccf.io.herbs.load_herbs_pkl`. The resulting
+The reverse of :func:`atlastrack.io.herbs.load_herbs_pkl`. The resulting
 pickle can be consumed by the legacy ``herbs_probe_mapping.py`` script as well
 as any other HERBS-aware tool that reads ``sites_vox`` / ``region_sites`` /
 ``label_acronym``.
@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from histo_to_ccf.io.herbs import DEFAULT_HERBS_GRID_UM, ccf_um_to_herbs_voxel
+from atlastrack.io.herbs import DEFAULT_HERBS_GRID_UM, ccf_um_to_herbs_voxel
 
 
 def _rle_labels(labels: Sequence[str]) -> tuple[list[str], list[int]]:

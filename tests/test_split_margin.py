@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.sectioning.split import detect_sections
+from atlastrack.sectioning.split import detect_sections
 
 
 def _slide(blobs, shape=(400, 600)):
@@ -103,7 +103,7 @@ def test_margin_is_fast_with_many_boxes() -> None:
     """
     import time
 
-    from histo_to_ccf.sectioning.split import DetectedSection, _add_box_margin
+    from atlastrack.sectioning.split import DetectedSection, _add_box_margin
 
     rng = np.random.default_rng(0)
     n = 2000
@@ -127,14 +127,14 @@ def test_margin_is_fast_with_many_boxes() -> None:
 
 
 def test_margin_on_empty_input() -> None:
-    from histo_to_ccf.sectioning.split import _add_box_margin
+    from atlastrack.sectioning.split import _add_box_margin
 
     assert _add_box_margin([], (100, 100), margin_frac=0.1) == []
 
 
 def test_single_box_uses_the_full_margin() -> None:
     """With no neighbour there is nothing to cap against."""
-    from histo_to_ccf.sectioning.split import DetectedSection, _add_box_margin
+    from atlastrack.sectioning.split import DetectedSection, _add_box_margin
 
     dummy = np.zeros((1, 1), dtype=bool)
     box = DetectedSection(bbox_px=(100, 100, 200, 200), mask=dummy, area_px=1,

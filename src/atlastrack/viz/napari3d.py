@@ -12,7 +12,7 @@ import numpy as np
 if TYPE_CHECKING:
     import napari
     from brainglobe_atlasapi import BrainGlobeAtlas
-    from histo_to_ccf.project.schema import Project
+    from atlastrack.project.schema import Project
 
 _PROBE_COLORS = [
     (1.0, 0.1, 0.1, 1.0),
@@ -115,7 +115,7 @@ def _add_region_surface(
     blending: str = "translucent_no_depth",
 ):
     """Add one region mesh as a flat-coloured napari Surface layer."""
-    from histo_to_ccf.atlas.meshes import mesh_vertices_faces
+    from atlastrack.atlas.meshes import mesh_vertices_faces
 
     try:
         mesh = atlas.mesh_from_structure(acronym)
@@ -143,7 +143,7 @@ def add_region_layers(
     blending: str = "translucent",
 ) -> list:
     """Add atlas region meshes as napari Surface layers using the palette."""
-    from histo_to_ccf.viz.plotly3d import hex_to_rgb, styled_regions
+    from atlastrack.viz.plotly3d import hex_to_rgb, styled_regions
 
     added = []
     for acronym, color, opacity in styled_regions(regions):
@@ -162,7 +162,7 @@ def add_region_by_acronym(
     acronym: str,
 ):
     """Add a single searched-for region mesh (palette-coloured) to a 3D scene."""
-    from histo_to_ccf.viz.plotly3d import hex_to_rgb, region_style
+    from atlastrack.viz.plotly3d import hex_to_rgb, region_style
 
     color, opacity = region_style(acronym)
     return _add_region_surface(
@@ -192,7 +192,7 @@ def show_3d_scene(
     Internal regions shown are only those containing a shank tip, plus any
     ``extra_regions`` the user searched for.
     """
-    from histo_to_ccf.viz.plotly3d import (
+    from atlastrack.viz.plotly3d import (
         CONTEXT_REGIONS,
         hex_to_rgb,
         resolve_regions,
@@ -243,7 +243,7 @@ def show_3d_scene(
 # is a proper rotation (det = +1, no mirror) - hence flipping ML alongside AP. DV is
 # left as CCF depth (ventral +); dorsal-up comes from the camera up vector.
 def _bregma_affine(atlas_name: str | None = None) -> "np.ndarray":
-    from histo_to_ccf.io.ccf_coords import MIDLINE_ML_UM, bregma_ap_for_display
+    from atlastrack.io.ccf_coords import MIDLINE_ML_UM, bregma_ap_for_display
 
     bregma_ap = bregma_ap_for_display(atlas_name)
     return np.array([

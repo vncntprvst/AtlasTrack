@@ -4,12 +4,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.alignment import (
+from atlastrack.ephys.alignment import (
     apply_depth_alignment,
     channel_ccf_um,
     invert_anchors,
 )
-from histo_to_ccf.ephys.features import lfp_psd, power_image
+from atlastrack.ephys.features import lfp_psd, power_image
 
 
 # --- depth warp -------------------------------------------------------------
@@ -125,7 +125,7 @@ class _RegionAtlas:
 
 
 def test_regions_at_ccf_returns_acronym_and_rgb() -> None:
-    from histo_to_ccf.ephys.regions import regions_at_ccf
+    from atlastrack.ephys.regions import regions_at_ccf
 
     atlas = _RegionAtlas()
     pts = [(0.0, 0.0, 1000.0), (0.0, 0.0, 3000.0), (0.0, 0.0, 9999.0)]
@@ -136,7 +136,7 @@ def test_regions_at_ccf_returns_acronym_and_rgb() -> None:
 
 
 def test_region_strip_image_shape_and_top_bottom() -> None:
-    from histo_to_ccf.ephys.regions import region_strip_image
+    from atlastrack.ephys.regions import region_strip_image
 
     hits = [("A", (10, 20, 30)), ("B", (40, 50, 60))]
     img = region_strip_image(hits, height=10, width=4)
@@ -177,8 +177,8 @@ def test_derived_lfp_filter_chain_does_not_raise() -> None:
 
 
 def test_ephys_alignment_persists(tmp_path) -> None:
-    from histo_to_ccf.project.io import load_project, save_project
-    from histo_to_ccf.project.schema import (
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.project.schema import (
         EphysAlignment,
         Project,
         ProbeSpec,

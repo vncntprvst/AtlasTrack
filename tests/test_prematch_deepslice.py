@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.gui.workflow import WorkflowState, crop_fingerprint
-from histo_to_ccf.registration.pipeline import anchoring_center_ap_um
+from atlastrack.gui.workflow import WorkflowState, crop_fingerprint
+from atlastrack.registration.pipeline import anchoring_center_ap_um
 
 
 def _anchoring9(ap_origin: float, ux: float = 20.0, vx: float = 0.0) -> list[float]:
@@ -14,7 +14,7 @@ def _anchoring9(ap_origin: float, ux: float = 20.0, vx: float = 0.0) -> list[flo
 
 def test_anchoring_center_ap_um_matches_coronal_anchoring_roundtrip() -> None:
     """ap_um -> coronal_anchoring -> anchoring_center_ap_um returns the same AP."""
-    from histo_to_ccf.atlas.planes import coronal_anchoring
+    from atlastrack.atlas.planes import coronal_anchoring
 
     class _Atlas:
         resolution = (25.0, 25.0, 25.0)
@@ -98,14 +98,14 @@ def test_reset_clears_prematch_cache() -> None:
 # -- AP-order safeguard (post-pre-match warning core) ------------------------
 
 def test_prematch_order_issues_clean_series_has_none() -> None:
-    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+    from atlastrack.registration.pipeline import prematch_ap_order_issues
 
     aps = [(0, 1000.0), (1, 1100.0), (2, 1200.0), (3, 1300.0)]
     assert prematch_ap_order_issues(aps) == ([], [])
 
 
 def test_prematch_order_issues_flags_reversal() -> None:
-    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+    from atlastrack.registration.pipeline import prematch_ap_order_issues
 
     # section 2 lands anterior to section 1 -> AP reverses on the 1->2 step.
     aps = [(0, 1000.0), (1, 1200.0), (2, 1150.0), (3, 1400.0)]
@@ -114,7 +114,7 @@ def test_prematch_order_issues_flags_reversal() -> None:
 
 
 def test_prematch_order_issues_flags_too_close() -> None:
-    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+    from atlastrack.registration.pipeline import prematch_ap_order_issues
 
     # 2->3 step (5 µm) is a tiny fraction of the ~100 µm median -> "too close".
     aps = [(0, 1000.0), (1, 1100.0), (2, 1200.0), (3, 1205.0), (4, 1305.0)]
@@ -123,7 +123,7 @@ def test_prematch_order_issues_flags_too_close() -> None:
 
 
 def test_prematch_order_issues_handles_descending_series() -> None:
-    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+    from atlastrack.registration.pipeline import prematch_ap_order_issues
 
     # Overall posterior->anterior is fine; only a local reversal is flagged.
     aps = [(0, 1300.0), (1, 1200.0), (2, 1250.0), (3, 1000.0)]
@@ -132,6 +132,6 @@ def test_prematch_order_issues_handles_descending_series() -> None:
 
 
 def test_prematch_order_issues_too_few_sections() -> None:
-    from histo_to_ccf.registration.pipeline import prematch_ap_order_issues
+    from atlastrack.registration.pipeline import prematch_ap_order_issues
 
     assert prematch_ap_order_issues([(0, 1000.0), (1, 1100.0)]) == ([], [])

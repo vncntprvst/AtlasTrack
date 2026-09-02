@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.probemap import (
+from atlastrack.ephys.probemap import (
     NEURONEXUS_POLY3_A32_RHD2132,
     GeometrySource,
     ProbeMap,
@@ -20,7 +20,7 @@ from histo_to_ccf.ephys.probemap import (
     read_csv_map,
     resolve_probe_map,
 )
-from histo_to_ccf.probes.catalog import NEURONEXUS_A1X32_POLY3
+from atlastrack.probes.catalog import NEURONEXUS_A1X32_POLY3
 
 
 def _csv(tmp_path, text, name="map.csv"):
@@ -312,7 +312,7 @@ def _rhx(tmp_path, pages, name="probe.xml", outline=True):
 
 def _poly3_sites():
     """The full 32-site Poly3 map, keyed by Intan channel, as written by RHX."""
-    from histo_to_ccf.ephys.probemap import _POLY3_SITES_BY_PIN, A32_TO_RHD2132
+    from atlastrack.ephys.probemap import _POLY3_SITES_BY_PIN, A32_TO_RHD2132
 
     return {ch: _POLY3_SITES_BY_PIN[pin] for pin, ch in enumerate(A32_TO_RHD2132)}
 
@@ -424,14 +424,14 @@ def test_the_wired_builtin_places_the_same_sites_as_the_catalog_layout():
 
 def test_the_adapter_wiring_is_a_permutation_of_the_headstage_channels():
     """A dropped or repeated entry would silently mis-place every later site."""
-    from histo_to_ccf.ephys.probemap import A32_TO_RHD2132
+    from atlastrack.ephys.probemap import A32_TO_RHD2132
 
     assert sorted(A32_TO_RHD2132) == list(range(32))
 
 
 def test_the_wiring_is_not_the_identity():
     """If it were, an unmapped Intan recording would have been fine all along."""
-    from histo_to_ccf.ephys.probemap import A32_TO_RHD2132
+    from atlastrack.ephys.probemap import A32_TO_RHD2132
 
     assert list(A32_TO_RHD2132) != list(range(32))
 

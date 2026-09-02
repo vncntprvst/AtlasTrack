@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from histo_to_ccf.config import AppSettings, load_app_settings, save_app_settings
+from atlastrack.config import AppSettings, load_app_settings, save_app_settings
 
 
 def test_defaults() -> None:
@@ -41,7 +41,7 @@ def test_bending_weight_clamp() -> None:
 
 
 def test_round_trip(tmp_path: Path, monkeypatch) -> None:
-    import histo_to_ccf.config as cfg
+    import atlastrack.config as cfg
 
     monkeypatch.setattr(cfg, "_PREFS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "_PREFS_FILE", tmp_path / "settings.json")
@@ -71,7 +71,7 @@ def test_round_trip(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_load_with_missing_file(tmp_path: Path, monkeypatch) -> None:
-    import histo_to_ccf.config as cfg
+    import atlastrack.config as cfg
 
     monkeypatch.setattr(cfg, "_PREFS_FILE", tmp_path / "nonexistent.json")
     settings = load_app_settings()
@@ -79,7 +79,7 @@ def test_load_with_missing_file(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_load_with_corrupt_file(tmp_path: Path, monkeypatch) -> None:
-    import histo_to_ccf.config as cfg
+    import atlastrack.config as cfg
 
     prefs = tmp_path / "bad.json"
     prefs.write_text("{not valid json!!}", encoding="utf-8")
@@ -115,7 +115,7 @@ def test_recent_projects_cap(tmp_path: Path) -> None:
     s = AppSettings()
     for i in range(20):
         s.remember_project(tmp_path / f"p{i}.json")
-    from histo_to_ccf.config import _MAX_RECENT_PROJECTS
+    from atlastrack.config import _MAX_RECENT_PROJECTS
 
     assert len(s.recent_projects) == _MAX_RECENT_PROJECTS
     assert s.recent_projects[0] == str(tmp_path / "p19.json")  # newest first
@@ -131,7 +131,7 @@ def test_project_start_dir(tmp_path: Path) -> None:
 
 
 def test_recent_projects_round_trip(tmp_path: Path, monkeypatch) -> None:
-    import histo_to_ccf.config as cfg
+    import atlastrack.config as cfg
 
     monkeypatch.setattr(cfg, "_PREFS_DIR", tmp_path)
     monkeypatch.setattr(cfg, "_PREFS_FILE", tmp_path / "settings.json")
@@ -160,8 +160,8 @@ def test_clamp_iterations_validator() -> None:
 def test_version_command() -> None:
     """CLI `version` command prints the package version."""
     from typer.testing import CliRunner
-    from histo_to_ccf.cli import app
-    from histo_to_ccf import __version__
+    from atlastrack.cli import app
+    from atlastrack import __version__
 
     runner = CliRunner()
     result = runner.invoke(app, ["version"])
@@ -170,16 +170,16 @@ def test_version_command() -> None:
 
 
 def test_version_string() -> None:
-    from histo_to_ccf import __version__
-    assert __version__ == "0.6.3"
+    from atlastrack import __version__
+    assert __version__ == "0.7.0"
 
 
 @pytest.mark.qt
 def test_register_panel_with_settings(qtbot) -> None:
     """RegisterPanelWidget.apply_settings populates controls correctly."""
     import napari
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     viewer = napari.Viewer(show=False)
     try:

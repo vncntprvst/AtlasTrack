@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("qtpy")
 
-from histo_to_ccf.project.schema import ProbeSpec, ProbeType, Shank
+from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
 pytestmark = pytest.mark.qt
 
@@ -14,7 +14,7 @@ N_CH = 16
 
 
 def _state():
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.workflow import WorkflowState
 
     state = WorkflowState()
     state.project.probes.append(
@@ -45,7 +45,7 @@ def _lfp_result():
 def _panel(qtbot):
     import napari
 
-    from histo_to_ccf.gui.widgets.ephys_panel import EphysPanelWidget
+    from atlastrack.gui.widgets.ephys_panel import EphysPanelWidget
 
     viewer = napari.Viewer(show=False)
     widget = EphysPanelWidget(_state(), viewer)
@@ -86,7 +86,7 @@ def test_exports_carry_both_depth_conventions_and_the_tip_offset(qtbot) -> None:
 
 
 def test_saving_computed_features_round_trips(qtbot, tmp_path) -> None:
-    from histo_to_ccf.ephys.export import load_shank_features, save_feature_export
+    from atlastrack.ephys.export import load_shank_features, save_feature_export
 
     widget, viewer = _panel(qtbot)
     try:

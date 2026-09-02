@@ -12,8 +12,8 @@ import numpy as np
 import SimpleITK as sitk
 from skimage.draw import disk, ellipse
 
-from histo_to_ccf.atlas.planes import Anchoring, resample_atlas_at_plane
-from histo_to_ccf.project.schema import (
+from atlastrack.atlas.planes import Anchoring, resample_atlas_at_plane
+from atlastrack.project.schema import (
     AtlasRef,
     PlaneParams,
     Point2D,
@@ -24,8 +24,8 @@ from histo_to_ccf.project.schema import (
     Shank,
     Slide,
 )
-from histo_to_ccf.registration.bspline import warp_moving_to_fixed
-from histo_to_ccf.registration.pipeline import register_project_with_atlas, register_section_image
+from atlastrack.registration.bspline import warp_moving_to_fixed
+from atlastrack.registration.pipeline import register_project_with_atlas, register_section_image
 
 
 # ---------------------------------------------------------------------------

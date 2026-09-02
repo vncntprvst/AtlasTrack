@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.project.schema import (
+from atlastrack.project.schema import (
     Point2D,
     ProbeSpec,
     ProbeType,
@@ -12,7 +12,7 @@ from histo_to_ccf.project.schema import (
     Shank,
     TrackPick,
 )
-from histo_to_ccf.registration.pipeline import _apply_track_picks
+from atlastrack.registration.pipeline import _apply_track_picks
 
 
 def _shank(**kwargs) -> Shank:
@@ -100,9 +100,9 @@ pytest.importorskip("qtpy")
 def test_track_points_are_many_per_shank_and_unassignable(qtbot) -> None:
     import napari
 
-    from histo_to_ccf.gui.widgets.click_overlay import _UNASSIGNED, ClickOverlayWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
-    from histo_to_ccf.project.schema import Section, Slide
+    from atlastrack.gui.widgets.click_overlay import _UNASSIGNED, ClickOverlayWidget
+    from atlastrack.gui.workflow import WorkflowState
+    from atlastrack.project.schema import Section, Slide
 
     state = WorkflowState()
     state.project.slides.append(
@@ -150,8 +150,8 @@ def test_track_points_are_many_per_shank_and_unassignable(qtbot) -> None:
 def test_the_unassigned_control_is_only_live_for_track_points(qtbot) -> None:
     import napari
 
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     viewer = napari.Viewer(show=False)
     try:
@@ -171,8 +171,8 @@ def test_the_shank_combo_still_indexes_shanks_directly(qtbot) -> None:
     """Regression guard: an 'Unassigned' row here would shift every shank by one."""
     import napari
 
-    from histo_to_ccf.gui.widgets.click_overlay import ClickOverlayWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     state = WorkflowState()
     state.project.probes.append(

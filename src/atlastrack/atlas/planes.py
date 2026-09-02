@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy import ndimage
 
-from histo_to_ccf.io.ccf_coords import atlas_resolution_um
-from histo_to_ccf.project.schema import PlaneParams
+from atlastrack.io.ccf_coords import atlas_resolution_um
+from atlastrack.project.schema import PlaneParams
 
 if TYPE_CHECKING:
     from brainglobe_atlasapi import BrainGlobeAtlas

@@ -4,12 +4,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.ephys.penetration import (
+from atlastrack.ephys.penetration import (
     PenetrationProfile,
     RecordingProfile,
     to_shared_axis,
 )
-from histo_to_ccf.ephys.recordings import NP2_ROW_PITCH_UM, recording_span
+from atlastrack.ephys.recordings import NP2_ROW_PITCH_UM, recording_span
 
 INSERTION = 4945.0
 

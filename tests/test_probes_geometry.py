@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from histo_to_ccf.probes.geometry import (
+from atlastrack.probes.geometry import (
     SHANK_PITCH_UM,
     SHANK_THICKNESS_UM,
     SHANK_TIP_LENGTH_UM,
@@ -69,8 +69,8 @@ def test_shank_offsets_4shank() -> None:
 def test_register_panel_creates(qtbot) -> None:
     """RegisterPanelWidget can be constructed (no viewer interaction)."""
     import napari
-    from histo_to_ccf.gui.widgets.register_panel import RegisterPanelWidget
-    from histo_to_ccf.gui.workflow import WorkflowState
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.gui.workflow import WorkflowState
 
     viewer = napari.Viewer(show=False)
     try:

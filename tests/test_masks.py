@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from histo_to_ccf.registration.masks import (
+from atlastrack.registration.masks import (
     moment_similarity,
     registration_moving_mask,
     section_label_mask,

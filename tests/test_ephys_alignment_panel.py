@@ -7,9 +7,9 @@ import pytest
 pytest.importorskip("qtpy")
 pytest.importorskip("pyqtgraph")
 
-from histo_to_ccf.ephys.penetration import PenetrationProfile, RecordingProfile
-from histo_to_ccf.ephys.recordings import NP2_ROW_PITCH_UM, recording_span
-from histo_to_ccf.gui.widgets.ephys_alignment_panel import EphysAlignmentPanel
+from atlastrack.ephys.penetration import PenetrationProfile, RecordingProfile
+from atlastrack.ephys.recordings import NP2_ROW_PITCH_UM, recording_span
+from atlastrack.gui.widgets.ephys_alignment_panel import EphysAlignmentPanel
 
 pytestmark = pytest.mark.qt
 
