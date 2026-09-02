@@ -17,8 +17,17 @@ def launch() -> None:
     # Armed before anything else: a fault in Qt/vispy/the GL driver kills the
     # process with no traceback and no dialog, and this is the only thing that
     # records what the app was doing when it happened.
+    # Checked before install(), which starts a new session block in the log.
+    crashed_before = crashlog.previous_session_crashed()
     log_path = crashlog.install()
-    print(f"Crash log: {log_path}", file=sys.stderr)
+    if crashed_before:
+        # Only worth saying when there is something to look at. Printing the path
+        # on every healthy launch is noise, and noise is what stops a warning
+        # being read on the one occasion it matters.
+        print(
+            f"The previous session ended in a crash. Details: {log_path}",
+            file=sys.stderr,
+        )
 
     _install_exception_handler()
     try:

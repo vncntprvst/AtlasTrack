@@ -213,6 +213,29 @@ def _install_qt_message_handler() -> None:
     qInstallMessageHandler(_handler)
 
 
+#: What a crash leaves behind. ``[unhandled ...]`` comes from the two exception
+#: hooks, ``qFatal`` from the Qt handler, and faulthandler writes its own banner
+#: on a segfault or access violation.
+_CRASH_MARKERS = ("[unhandled ", "qFatal", "Current thread 0x", "Fatal Python error")
+
+
+def previous_session_crashed(log_file: Path | None = None) -> bool:
+    """Did the last recorded session end in a crash?
+
+    Used to decide whether the launch is worth interrupting. Only the final
+    session block is examined - a crash three runs ago is history, and mentioning
+    it on every start is how a warning stops being read.
+    """
+    path = log_file or LOG_FILE
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    # Session blocks are separated by the header rule; the last one is the last run.
+    last = text.rsplit("=" * 78, 1)[-1]
+    return any(marker in last for marker in _CRASH_MARKERS)
+
+
 def install(*, log_file: Path | None = None) -> Path:
     """Arm the crash recorders. Returns the log path. Safe to call twice."""
     global _log_stream, _installed

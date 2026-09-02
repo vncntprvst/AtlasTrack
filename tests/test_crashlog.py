@@ -180,3 +180,52 @@ def test_native_crash_leaves_the_python_stack(tmp_path):
     text = log.read_text(encoding="utf-8")
     assert "access violation" in text.lower() or "segmentation fault" in text.lower()
     assert "frame_that_should_be_recorded" in text
+
+
+# ---------------------------------------------------------------------------
+# Announcing the log only when there is something in it
+# ---------------------------------------------------------------------------
+
+
+def _session(body: str = "") -> str:
+    return "\n" + "=" * 78 + "\nsession start  2026-09-02T10:00:00  pid 1\n" + body
+
+
+def test_a_clean_session_is_not_reported_as_a_crash(tmp_path):
+    """A healthy launch must say nothing - noise is what stops a warning being read."""
+    log = tmp_path / "crash.log"
+    log.write_text(_session("some breadcrumb\n"), encoding="utf-8")
+
+    assert crashlog.previous_session_crashed(log) is False
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "[unhandled ValueError] 2026-09-02T10:00:01\nTraceback...\n",
+        "[Qt fatal] qFatal: something went wrong\n",
+        "Current thread 0x00001234 (most recent call first):\n",
+        "Fatal Python error: Segmentation fault\n",
+    ],
+)
+def test_each_way_the_app_can_die_is_recognised(tmp_path, body):
+    """The four recorders write different things; missing one loses the report."""
+    log = tmp_path / "crash.log"
+    log.write_text(_session(body), encoding="utf-8")
+
+    assert crashlog.previous_session_crashed(log) is True
+
+
+def test_only_the_last_session_counts(tmp_path):
+    """A crash three runs ago is history; repeating it every launch is noise."""
+    log = tmp_path / "crash.log"
+    log.write_text(
+        _session("Fatal Python error: Segmentation fault\n") + _session("all fine\n"),
+        encoding="utf-8",
+    )
+
+    assert crashlog.previous_session_crashed(log) is False
+
+
+def test_a_missing_log_is_not_a_crash(tmp_path):
+    assert crashlog.previous_session_crashed(tmp_path / "nope.log") is False
