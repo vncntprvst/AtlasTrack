@@ -43,7 +43,7 @@ _ATLASES = [
         [
             ("Bolaños-Puchet et al. 2024",
              "https://pmc.ncbi.nlm.nih.gov/articles/PMC12319842/"),
-            ("Data on Zenodo", "https://doi.org/10.5281/zenodo.15176439"),
+            ("Data on Zenodo (latest)", "https://zenodo.org/records/18223882"),
         ],
         "566 AP slices rather than 528, and the same anatomy sits <b>+346 µm</b> "
         "along the AP axis. "
@@ -80,6 +80,23 @@ _ATLASES = [
     ),
     # (measured here: volume centroids over 811 structures, +101.8 ± 26.6 µm, a pure translation)
 ]
+
+#: The atlas picker's last entry. Its label says "Custom ID" and nothing else, so
+#: what it accepts has to be written down somewhere the user can reach from it.
+_CUSTOM_ID = (
+    "<h3 style='margin-bottom:2px;'>Custom ID</h3>"
+    "<p style='margin-top:0;'>The last entry in the atlas list. Choosing it reveals "
+    "a text box that takes <b>any BrainGlobe atlas id</b> - the identifier "
+    "<code>brainglobe-atlasapi</code> uses, such as "
+    "<code>kim_mouse_isotropic_20um</code> or <code>whs_sd_rat_39um</code>. The "
+    "atlas is downloaded on first use and cached, so the first load of an unfamiliar "
+    "id is slow.</p>"
+    "<p>Use it to reach a resolution or species not in the list above. Two things to "
+    "expect: an atlas with no bregma anchor here shows AP against Allen's anchor "
+    "(the status line says so) and <b>refuses</b> to export Paxinos coordinates "
+    "rather than borrow one; and an atlas on a different voxel grid or a different "
+    "species will not share coordinates with the four above.</p><hr>"
+)
 
 _FOOTER = (
     "All four cover the same physical volume, so probe coordinates are identical "
@@ -133,6 +150,7 @@ def atlas_reference_html(link_colour: str = LINK_ON_DARK) -> str:
             f"<p>{linked}</p>"
             f"<p><b>Bregma:</b> {anchor}<br>{note}</p><hr>"
         )
+    parts.append(_CUSTOM_ID)
     footer = _FOOTER.replace("<a href=", f'<a style="color:{link_colour};" href=')
     parts.append(f"<p>{footer}</p></body></html>")
     return "".join(parts)

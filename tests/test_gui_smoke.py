@@ -626,14 +626,15 @@ def test_build_panel_constructs_full_app(qtbot) -> None:
         # vispy "Unsupported framebuffer format" shader errors on some GPUs.
         assert "Tips" not in viewer.layers
         assert "Entries" not in viewer.layers
-        # Only "Project" and "Settings" menus are visible; napari's defaults
-        # (File / View / Plugins / Window / Help) are hidden.
+        # Only our Project / Settings / Help menus are visible; napari's defaults
+        # (File / View / Plugins / Window / Help) are hidden - including its own
+        # Help, which shares a title with ours and so is matched by identity.
         visible = [
             (a.menu().title() if a.menu() else a.text()).replace("&", "")
             for a in viewer.window._qt_window.menuBar().actions()
             if a.isVisible()
         ]
-        assert set(visible) == {"Project", "Settings"}, visible
+        assert set(visible) == {"Project", "Settings", "Help"}, visible
         # Project menu wires Ctrl+S (save) as an application-wide shortcut.
         proj_menu = next(
             a.menu() for a in viewer.window._qt_window.menuBar().actions()

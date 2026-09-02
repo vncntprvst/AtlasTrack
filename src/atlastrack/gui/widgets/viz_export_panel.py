@@ -21,6 +21,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QStyle,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -292,7 +293,8 @@ class VizExportPanelWidget(QWidget):
         self._paxinos_check.toggled.connect(self._on_paxinos_toggled)
         pax_row.addWidget(self._paxinos_check, 1)
         help_btn = QToolButton()
-        help_btn.setText("?")
+        help_btn.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxQuestion))
+        help_btn.setAutoRaise(True)
         help_btn.setToolTip("What Paxinos conversion means, and how much to trust it")
         help_btn.clicked.connect(self._show_paxinos_help)
         pax_row.addWidget(help_btn)

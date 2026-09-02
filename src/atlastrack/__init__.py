@@ -1,3 +1,3 @@
 """histo-to-ccf - guided histology→atlas registration with probe trajectory mapping."""
 
-__version__ = "0.5.4"
+__version__ = "0.6.3"

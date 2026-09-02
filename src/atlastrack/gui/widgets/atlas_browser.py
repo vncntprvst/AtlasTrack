@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QStyle,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -43,12 +44,14 @@ class AtlasBrowserWidget(QWidget):
         state: WorkflowState,
         viewer: "napari.Viewer",
         settings=None,
+        on_show_atlas_help=None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._state = state
         self._viewer = viewer
         self._settings = settings
+        self._on_show_atlas_help = on_show_atlas_help
         self._matcher: "AtlasMatcherDialog | None" = None
         # Set by app.py so the matcher can sync the section-spacing value too.
         self.ordering_panel = None
@@ -67,10 +70,13 @@ class AtlasBrowserWidget(QWidget):
         # Which atlas you pick changes the region names and, less visibly, where
         # bregma sits. The reference sheet is the same one under Settings > Atlases.
         atlas_help = QToolButton()
-        atlas_help.setText("?")
+        atlas_help.setIcon(
+            self.style().standardIcon(QStyle.SP_MessageBoxQuestion)
+        )
+        atlas_help.setAutoRaise(True)
         atlas_help.setToolTip(
-            "What each atlas is, where it came from, and where its bregma sits "
-            "(also under Settings ▸ Atlases)."
+            "What each atlas is, where it came from, where its bregma sits, and "
+            "what Custom ID accepts (also under Help ▸ Atlases)."
         )
         atlas_help.clicked.connect(self._show_atlas_reference)
         atlas_label_row.addWidget(atlas_help)
@@ -78,6 +84,11 @@ class AtlasBrowserWidget(QWidget):
         self._atlas_combo = QComboBox()
         for label, _ in _QUICK_PICKS:
             self._atlas_combo.addItem(label)
+        self._atlas_combo.setToolTip(
+            "Which atlas to register into. 'Custom ID' reveals a text box that "
+            "takes any BrainGlobe atlas id (e.g. kim_mouse_isotropic_20um), "
+            "downloaded on first use. See the ? for what each one is."
+        )
         self._atlas_combo.currentIndexChanged.connect(self._on_combo_changed)
         layout.addWidget(self._atlas_combo)
 
@@ -253,6 +264,15 @@ class AtlasBrowserWidget(QWidget):
         self._load_btn.setEnabled(True)
 
     def _show_atlas_reference(self) -> None:
+        """Show the atlas sheet: the docked Help tab, or a window standalone.
+
+        The callback is absent when this widget is built outside the full app (a
+        test, or a future embedding), and a "?" that silently does nothing is worse
+        than one that opens a window.
+        """
+        if self._on_show_atlas_help is not None:
+            self._on_show_atlas_help()
+            return
         from histo_to_ccf.gui.widgets.atlas_help_dialog import show_atlas_reference
 
         show_atlas_reference(self.window())

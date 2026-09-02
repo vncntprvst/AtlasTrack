@@ -36,6 +36,9 @@ def launch() -> None:
     crashlog.install_input_tracer()
     panel, viz_panel = _build_panel(viewer)
     # Workflow (Registration) on the left; 3D visualization + export on the right.
+    # Before the docks, so they size themselves against a central widget that is
+    # already its final shape.
+    _install_help_tab(viewer, panel.help_panel)
     viewer.window.add_dock_widget(panel, area="left", name="Registration", tabify=False)
     viewer.window.add_dock_widget(viz_panel, area="right", name="3D & Export", tabify=False)
     _hide_layer_panels(viewer)
@@ -232,8 +235,13 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     from histo_to_ccf.gui.widgets.slide_loader import SlideLoaderWidget
     from histo_to_ccf.gui.widgets.viz_export_panel import VizExportPanelWidget
 
+    from histo_to_ccf.gui.widgets.help_panel import ATLASES, HelpPanelWidget
+
     settings = load_app_settings()
     state = WorkflowState()
+    # Carried on the container rather than returned: every caller of _build_panel
+    # unpacks two values, and the dock is only launch()'s business.
+    help_panel = HelpPanelWidget()
 
     container = QWidget()
     container.setMinimumWidth(320)
@@ -262,7 +270,10 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     tab_atlas = QWidget()
     atlas_layout = QVBoxLayout(tab_atlas)
     atlas_layout.setContentsMargins(2, 2, 2, 2)
-    atlas_browser = AtlasBrowserWidget(state, viewer, settings=settings)
+    atlas_browser = AtlasBrowserWidget(
+        state, viewer, settings=settings,
+        on_show_atlas_help=lambda: _show_help_page(viewer, help_panel, ATLASES),
+    )
     ordering = OrderingPanelWidget(state)
     # The matcher dialog (opened from the browser) syncs AP + spacing with these
     # widgets, so give the browser a handle to the ordering panel.
@@ -331,6 +342,9 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     probe_picker.on_probes_changed = _refresh_panels
 
     def _on_project_loaded() -> None:
+        # A project was just opened; whatever was being read, the thing to look at
+        # now is the project. Reading is never lost - the Help tab keeps its page.
+        _show_project_tab(help_panel)
         _reload_project_display(viewer, state)
         _refresh_panels()
         # Auto-load the project's atlas in the background so the overlay / 3D
@@ -348,14 +362,16 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     # Project save/load/close live in the menu bar (see _install_project_menu),
     # not a tab - they are file actions, not part of the left-to-right workflow.
-    _install_project_menu(viewer, state, settings=settings,
-                          on_loaded=_on_project_loaded,
-                          on_cleared=_on_project_cleared)
-    # A "Registration" menu hosts the parameters dialog (kept out of the panel),
-    # and napari's default menus are hidden - the user only wants Project +
-    # Registration in the bar.
-    _install_settings_menu(viewer, register_panel)
-    _keep_only_menus(viewer, {"Project", "Settings"})
+    project_menu = _install_project_menu(
+        viewer, state, settings=settings,
+        on_loaded=_on_project_loaded, on_cleared=_on_project_cleared,
+    )
+    # Settings hosts the registration parameters (kept out of the panel); Help
+    # raises the docked manual / tutorial / atlas sheet. napari's own menus are
+    # hidden, including its Help, so ours is the only one in the bar.
+    settings_menu = _install_settings_menu(viewer, register_panel)
+    help_menu = _install_help_menu(viewer, help_panel)
+    _keep_only_menus(viewer, (project_menu, settings_menu, help_menu))
     _install_wheel_pan(viewer)
 
     # Persist settings when the tab changes (cheap enough to do on every switch).
@@ -379,6 +395,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     wrap_tooltips(container)
     wrap_tooltips(viz_panel)
+    container.help_panel = help_panel
     return container, viz_panel
 
 
@@ -526,6 +543,7 @@ def _install_project_menu(
         action.setShortcutContext(Qt.ApplicationShortcut)
     # After the shortcuts are set, so their width is known.
     _fit_menu_width(menu)
+    return menu
 
 
 def _fit_menu_width(menu) -> None:
@@ -577,14 +595,92 @@ def _install_settings_menu(viewer: "napari.Viewer", register_panel) -> None:
     registration_action = menu.addAction("Registration")
     registration_action.triggered.connect(register_panel.open_parameters_dialog)
 
-    atlases_action = menu.addAction("Atlases")
-    atlases_action.setToolTip(
-        "What each atlas is, where it came from, and where its bregma sits."
-    )
-    atlases_action.triggered.connect(
-        lambda: _show_atlas_reference(viewer)
-    )
     _fit_menu_width(menu)
+    return menu
+
+
+def _install_help_menu(viewer: "napari.Viewer", help_panel) -> None:
+    """Add a "Help" menu that raises the docked help panel on the right page.
+
+    The items do not open windows: they select a tab in a dock that sits beside the
+    workflow, so reading the manual never covers the project or loses its place.
+    """
+    from qtpy.QtWidgets import QMenu
+
+    try:
+        menubar = viewer.window._qt_window.menuBar()
+    except Exception:
+        return
+
+    from histo_to_ccf.gui.widgets.help_panel import ATLASES, MANUAL, TUTORIAL
+
+    menu = QMenu("Help", menubar)
+    menubar.addMenu(menu)
+    for title, tip in (
+        (MANUAL, "The full reference: concepts, GUI tour, recipes, troubleshooting."),
+        (TUTORIAL, "A single linear walkthrough on example data."),
+        (ATLASES, "What each atlas is, where it came from, and where its bregma sits."),
+    ):
+        action = menu.addAction(title)
+        action.setToolTip(tip)
+        action.triggered.connect(
+            lambda _checked=False, page=title: _show_help_page(viewer, help_panel, page)
+        )
+    _fit_menu_width(menu)
+    return menu
+
+
+def _install_help_tab(viewer: "napari.Viewer", help_panel):
+    """Put the help panel in the *central* pane, as a tab beside the canvas.
+
+    Not a dock: a dock lives in the sidebar and stays there over the project. The
+    manual belongs where the project is, so switching to it and back is the same
+    gesture as switching between them.
+
+    napari sets its central widget once during construction and never reads it back
+    (``qt_main_window.py`` has the only reference), so wrapping that widget in a
+    QTabWidget is safe - the QtViewer object itself is untouched, only reparented,
+    which the GL canvas survives.
+    """
+    from qtpy.QtWidgets import QTabWidget
+
+    try:
+        window = viewer.window._qt_window
+        central = window.centralWidget()
+    except Exception:
+        return None
+    if central is None:
+        return None
+
+    tabs = QTabWidget()
+    tabs.setDocumentMode(True)
+    tabs.addTab(central, "Project")
+    tabs.addTab(help_panel, "Help")
+    window.setCentralWidget(tabs)
+    help_panel._central_tabs = tabs
+    return tabs
+
+
+def _show_project_tab(help_panel) -> bool:
+    """Bring the Project tab forward. False when there is no central tab bar."""
+    tabs = getattr(help_panel, "_central_tabs", None)
+    if tabs is None:
+        return False
+    index = tabs.indexOf(help_panel)
+    # Two tabs, so "not the help one" is the project one.
+    tabs.setCurrentIndex(1 if index == 0 else 0)
+    return True
+
+
+def _show_help_page(viewer: "napari.Viewer", help_panel, page: str) -> None:
+    """Select ``page`` and bring the help tab to the front of the central pane."""
+    help_panel.show_page(page)
+    tabs = getattr(help_panel, "_central_tabs", None)
+    if tabs is None:
+        return
+    index = tabs.indexOf(help_panel)
+    if index >= 0:
+        tabs.setCurrentIndex(index)
 
 
 def _show_atlas_reference(viewer: "napari.Viewer"):
@@ -632,22 +728,22 @@ def _install_wheel_pan(viewer: "napari.Viewer") -> None:
     viewer.mouse_wheel_callbacks.append(_pan)
 
 
-def _keep_only_menus(viewer: "napari.Viewer", keep: set[str]) -> None:
-    """Hide every top-level menu-bar menu except those whose title is in ``keep``.
+def _keep_only_menus(viewer: "napari.Viewer", keep) -> None:
+    """Hide every top-level menu except the ones we built.
 
-    napari adds File / View / Plugins / Window / Help; the user only wants Project
-    and Settings. Hiding (not removing) is reversible and robust to napari
-    re-adding menus. Best-effort: no-op if the menu bar is unavailable.
+    Matched by identity, not by title: napari's own menu is called "&Help" and ours
+    is called "Help", so a title comparison keeps both and the bar ends up with two
+    Help menus. Hiding (not removing) is reversible and survives napari re-adding
+    its menus. Best-effort: no-op if the menu bar is unavailable.
     """
     try:
         menubar = viewer.window._qt_window.menuBar()
     except Exception:
         return
 
+    ours = {id(menu) for menu in keep if menu is not None}
     for action in menubar.actions():
-        sub = action.menu()
-        title = (sub.title() if sub is not None else action.text()).replace("&", "")
-        if title not in keep:
+        if id(action.menu()) not in ours:
             action.setVisible(False)
 
 

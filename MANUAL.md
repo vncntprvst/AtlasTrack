@@ -1,283 +1,299 @@
 # Histo-to-CCF - User Manual
 
-_A cookbook-style reference for registering mouse histology to the Allen CCF and
-mapping electrophysiology probe trajectories. Modeled on the HERBS cookbook:
-concepts first, then a GUI reference, then task **recipes**, then troubleshooting._
-
-For a single linear walkthrough on example data, see **TUTORIAL.md**. This manual
-is the comprehensive reference.
+This is reference manual. If you're a new user, start with **TUTORIAL.md** (or the **Tutorial** tab in the app), which
+walks through one registration from start to finish.
 
 ---
 
-## 1. About Histo-to-CCF
+## 1. What the app does
 
-Histo-to-CCF is a [napari](https://napari.org)-based desktop app that:
+You give it one or multiple image(s) of brain sections. It:
 
-- loads a composite slide image (many brain sections in one photo),
-- detects and lets you edit each section,
-- assigns each section an antero-posterior (**AP**) atlas plane (by hand, or
-  automatically with **DeepSlice**),
-- registers each section to the atlas with a masked, regularized 2-D B-spline,
-- lets you hand-correct any section with a box transform or landmark warp,
-- maps electrophysiology **probe trajectories** (tip/entry, per-channel) into
-  atlas (CCF) coordinates, optionally refined from **LFP** depth features,
-- and exports the result (3-D view, interactive HTML, HERBS `.pkl`, per-channel
-  CSV in CCF or Paxinos stereotaxic space).
+- finds each section and lets you tidy the boxes,
+- places each section at the right front-to-back level in the atlas,
+- warps the atlas onto each section so region outlines follow your tissue,
+- turns probe tracks you click into atlas coordinates,
+- and exports the result - coordinates, figures, or your section series with
+  region outlines.
 
----
-
-## 2. Concepts & coordinates
-
-**CCF.** The Allen Common Coordinate Framework v3 is a 3-D reference mouse brain.
-Positions are given in micrometres (µm) along three axes - **AP** (antero-posterior),
-**ML** (medio-lateral), **DV** (dorso-ventral).
-
-**AP from bregma.** The app shows AP relative to **bregma**: `0` = bregma,
-**negative = posterior**, positive = anterior. Internally it stores an absolute
-"distance from the anterior end"; the conversion anchor is 5400 µm.
-
-**Supported atlases** (all fetched via BrainGlobe, cached under `~/.brainglobe`):
-
-- Allen Mouse CCFv3 - 25 µm (default) and 100 µm
-- CCFv3-BBP Augmented - 25 µm
-- Chon / Kim Unified - 25 µm
-- any custom BrainGlobe atlas ID (free-text).
-
-**The pipeline at a glance:** section image → AP plane (atlas coronal slice) →
-2-D B-spline warp of that slice onto the section → atlas region boundaries you can
-overlay → probe pixels mapped through the same transform into CCF µm.
-
-**Project file.** Everything is saved to a `*.histo2ccf.json` file. By
-convention, **outputs go next to your input data**, not the repo folder.
+The defaults settings should be good enough to do most of registration. 
+Most of the work is looking at each section, checking the atlas matching, and correcting warping. 
 
 ---
 
-## 3. Installation & launch
+## 2. Ideas and coordinates
+
+**The atlas.** A 3-D reference brain. Positions are in micrometres (µm) along
+three axes: **AP** front-to-back, **ML** left-right, **DV** top-to-bottom.
+
+**AP from bregma.** The app shows front-to-back position relative to **bregma**,
+the skull landmark: `0` = bregma, **negative = behind it**, positive = in front.
+
+**Atlases you can use.** All are downloaded once and cached under `~/.brainglobe`.
+**Help ▸ Atlases** describes each one, with links and the bregma it uses:
+
+| Atlas | Why you would pick it |
+|---|---|
+| Allen CCFv3 | The default. |
+| CCFv3-BBP Augmented | Adds cerebellar layers, olfactory bulb layers, barrel columns. |
+| Chon / Kim Unified | Franklin-Paxinos region names (M1, S1BF, 4V) instead of Allen's. |
+| Chon / Kim v2, isotropic | The 2024 re-release of the above, 20 µm. |
+| Custom ID | Any other BrainGlobe atlas, typed in by name. |
+
+**The pipeline in one line:** section image → atlas slice at the right level →
+that slice warped onto your section → outlines and probe coordinates.
+
+**Your project** is one `*.histo2ccf.json` file. Outputs go **next to your data**,
+not into the app's folder.
+
+---
+
+## 3. Install and launch
 
 ```bash
-# base install (full histology→CCF workflow)
-uv pip install -e .
+uv pip install -e ".[all]"   # everything - recommended
+uv pip install -e .          # base only: the histology → atlas workflow
 
-# optional extras
-uv pip install -e ".[deepslice]"   # DeepSlice AP prediction (pulls TensorFlow)
-uv pip install -e ".[ephys]"       # Ephys tab (SpikeInterface)
-uv pip install -e ".[deepslice,ephys]"
-
-histo2ccf version      # confirm install
-histo2ccf gui          # launch the app
-histo2ccf gl-info      # diagnose a GUI/OpenGL failure to start
+histo2ccf gui       # launch
+histo2ccf version   # check the install
+histo2ccf gl-info   # if the window will not open, run this and send the output
 ```
 
-The app opens a napari viewer with a **left dock** of five workflow tabs -
-**Histology · Atlas · Probes · Register · Ephys** - and a permanent **right dock**
-**3D & Export** panel.
+The base install is deliberately light. `[all]` adds three optional pieces, which
+you can also install one at a time (`".[elastix]"` and so on):
+
+| Extra | What it adds | Notes |
+|---|---|---|
+| `elastix` | The **regularized** registration engine | Recommended - it is the setting the Register step relies on. ~150 MB. Without it the app falls back to a plainer fit and that option is greyed out. |
+| `deepslice` | Automatic front-to-back placement | ~1.65 GB (it pulls TensorFlow), so it is the one to skip if you are placing sections by hand. |
+| `ephys` | The Ephys tab | Only needed if you are refining depth from recordings. |
 
 ---
 
-## 4. The interface (reference)
+## 4. The window
 
-**Menu bar**
+**Centre** - two tabs: **Project** (your slide and the atlas overlay) and
+**Help** (this manual, the tutorial, and the atlas reference). Loading a project
+switches you back to Project automatically. **Open in a window** moves a help page
+onto a second screen; closing that window puts it back.
 
-- **Project** - Save Project (Ctrl+S), Save Project As (Ctrl+Shift+S),
-  Load Project (Ctrl+O), Close Project (clears to a fresh project).
-- **Registration** - Parameters (the registration settings; see Recipe 5.5).
+**Left** - the workflow, in the order you use it:
 
-**Left-dock tabs**
+| Tab | What you do there |
+|---|---|
+| Histology | Load the slide, find sections, straighten and adjust them |
+| Atlas | Choose an atlas, set each section's front-to-back level |
+| Register | Run the fit, check it, hand-correct anything that missed |
+| Probes | Add a probe, click its tip and entry |
+| Ephys | Optional: refine depth from recorded activity |
 
-| Tab | What it's for |
-|-----|---------------|
-| Histology | Load/merge slides, detect & edit sections, flip & adjust levels |
-| Atlas | Load an atlas, assign AP planes (manually or via the matcher / DeepSlice) |
-| Probes | Define probes, click tip/entry markers |
-| Register | Run registration, inspect residuals, hand-correct sections |
-| Ephys | Compute LFP power and align channel depths to anatomy |
+**Right - 3D & Export**, always available: **Probe** (re-map coordinates),
+**3D Visualization** (region atlas, 3-D view), **Export**.
 
-**Right dock - 3D & Export** - 3-D view, HTML/HERBS/CSV export (always available).
+**Menus**
+
+- **Project** - Save (Ctrl+S), Save As (Ctrl+Shift+S), Load (Ctrl+O), Load
+  recent, Close.
+- **Settings** - Registration (the fitting options).
+- **Help** - Manual, Tutorial, Atlases.
+
+**Moving around the image:** wheel to zoom, **Ctrl**+wheel to pan sideways,
+**Shift**+wheel to pan up and down.
 
 ---
 
 ## 5. Recipes
 
-### 5.1 Load and prepare slides
+### 5.1 Load a slide
 
-1. **Histology** tab → **Open histology image(s)** → pick one or more images
-   (TIFF/PNG/JPEG). Selecting several **merges** them top-to-bottom into one
-   canvas so all sections share a coordinate space.
-2. Reopening a slide while one is loaded **swaps** the pixels (same-size keeps your
-   sections + registration; different-size starts fresh) - useful to reuse a
-   project on a different dye channel.
-3. **Flip / levels** (Image tools): choose **Whole slide** or **Selected section**,
-   click **Flip H** / **Flip V**, and set per-channel **R/G/B** low/high cutoffs
-   (or **Auto**). Flips and levels are saved to the project.
+**Histology ▸ Open histology image(s)** - pick one image, or several to stack
+them into one canvas so every section shares a coordinate space.
 
-### 5.2 Detect and edit sections
+Opening an image when one is already loaded **replaces** it. Same size keeps your
+sections and registration - handy for the same slide in a different dye. A
+different size starts fresh.
 
-1. Set **Min area (px²)** (raise to drop debris), **Closing radius (px)** (bridge
-   fragmented sections), and optionally **Equalize under-sized boxes**.
-2. Click **Detect sections**.
-3. **Edit boxes (resize / move / add / delete):** drag a handle to resize, drag
-   inside to move, press **Delete** to remove the selected box, or use the
-   rectangle tool to add one. (Deleting a hovered box is safe as of v0.2.33.)
-4. **Draw new section** then **Add drawn section** to add a missed section by hand.
+### 5.2 Find the sections
 
-### 5.3 Assign atlas AP planes (manual / matcher)
+1. **Detect sections**. Adjust **Min area** upward to ignore debris, or
+   **Closing radius** upward to join a section that came out in pieces.
+2. **Click any box to select that section** - you do not need edit mode for this.
+   The Adjustments **Section** dropdown follows your click.
+3. **Edit boxes** when a box needs changing: drag a handle to resize, drag inside
+   to move, **Delete** to remove.
+4. **Draw new bounding box** for a section that was missed. It becomes a section
+   as soon as you finish the rectangle.
 
-1. **Atlas** tab → choose an atlas (or type a custom BrainGlobe ID) → **Load atlas**
-   (first download is slow; later loads are instant and offline-safe).
-2. Quick manual path: set **AP from bregma (µm)** and a section index, then
-   **Assign AP to section**.
-3. Interactive path: **Open atlas matcher**
-   - **Split** view shows histology left / atlas right; **Overlay** blends them
-     (use the **opacity** slider and **Atlas edges**).
-   - Step with **◀ Section / Section ▶**; tune **AP from bregma (µm)** until the
-     atlas slice matches.
-   - **Link** + **spacing (µm)** + **Anchor here**: pin one section, and every
-     other section's AP follows by the spacing (sign sets direction). **Assign**
-     the current section, or **Assign all (linked)** to fill the whole series.
+### 5.3 Straighten and adjust
 
-> **Set the spacing before you pre-match** - it's what lets the app flag a bad
-> DeepSlice result (Recipe 5.4).
+In **Adjustments**, first choose **Scope**: the whole slide, or one selected
+section.
 
-### 5.4 Pre-match all sections with DeepSlice
+- **Rotation ▸ Angle** straightens a section that was mounted crooked. **From
+  DeepSlice** fills in the angle it measured. Rotating a section that is already
+  registered invalidates that fit - the panel says so, and you re-register it.
+  For a tidy exported series you usually need none of this: the section-series
+  export straightens on its own (Recipe 5.9).
+- **Flip H / Flip V** if the tissue is mirrored.
+- **Levels** to brighten faint channels, or **Auto**.
 
-DeepSlice predicts a consistent set of AP planes (with tilt) for the whole slide
-in one pass - a fast way to seed AP before fine-tuning.
+### 5.4 Set the front-to-back level
 
-1. In the **atlas matcher**, make sure the section order is correct (no two
-   sections share an order position; address missing sections in the order) and a
-   **spacing** is set.
-2. Click **Pre-match all (DeepSlice)** (first run downloads the model and is slow).
-3. **Read the warnings.** DeepSlice enforces *order* but not *spacing*, so the app
-   checks the result and warns if any sections come back **out of order** (AP
-   reverses) or **too close together**. If warned, fix those sections before
-   registering - set/confirm the spacing and use **Link + Assign all (linked)** to
-   even them out, or correct individual APs.
-4. Fine-tune any section's AP, then **Assign** / register.
+**Atlas** tab. Choose an atlas and **Load atlas** (first download is slow, later
+loads are instant). The **?** beside the picker explains each one.
 
-### 5.5 Register the sections
+Then either:
 
-Open **Registration → Parameters** to set:
+**Quick manual assignment** - type an **AP from bregma**, pick a section number,
+**Assign AP to section**.
 
-- **Predict planes with DeepSlice** - predict planes during registration (no
-  manual AP needed; reuses a prior pre-match when the section images are unchanged).
-- **B-spline grid (N×N)** (default 8) and **Max iterations** (default 100).
-- **Regularized registration (elastix)** - recommended: a bending-energy penalty
-  + tissue mask keep atlas boundaries on the tissue.
-- **Smoothness (bending energy)** (default 20) - higher = stiffer/smoother.
-- **Restrict to tissue mask**, **Silhouette pre-align**, **Snap atlas contour to
-  tissue** - masking/pre-alignment helpers (elastix).
-- **Keep hand-corrected sections on re-run** - skip sections you've hand-corrected
-  so a re-run doesn't recompute and lose them.
+**Matching viewer ▸ Open atlas matcher** - your section beside the atlas, or
+blended over it. Step through sections and turn the AP dial until they match.
+Pin one section, set the **spacing** between sections, and **Assign all** fills
+in the rest.
 
-Then on the **Register** tab:
+**Section order and spacing** lists the sections front to back. Drag to reorder,
+set the spacing, **Apply spacing** to fill in the series.
 
-1. **Register all sections** (watch the progress bar + per-section status).
-2. Check the **Per-section residuals** table (lower = better fit).
-3. **Show atlas overlay on sections** to see the warped region boundaries on the
-   histology.
+> Set the section order and spacing **before** using DeepSlice - that is what lets
+> the app tell you when a prediction came out wrong.
 
-### 5.6 Hand-correct a section
+### 5.5 Let DeepSlice place them all
 
-Pick the section in the **Section** dropdown of *Manual atlas adjustment*, then:
+**Pre-match all (DeepSlice)** in the atlas matcher predicts every section at once.
 
-**Box transform** - toggle **Adjust atlas (drag in viewer)**: drag the body to
-move, drag handles to scale/stretch/rotate; toggle again to apply (probes re-map,
-project auto-saves).
+- It **overwrites every AP on the slide**, so if you have set some by hand it asks
+  first and names them.
+- It fixes the *order* but not the *spacing*, so the app checks the result and
+  warns if sections come back out of order or too close together. Fix those before
+  registering.
+- Any AP you set by hand also **guides** it: one pinned section sets the overall
+  offset, two or more set offset and scale.
 
-**Landmarks** (for *local* distortions a box can't fix):
+### 5.6 Register
 
-1. **Place landmarks** - drops correspondence points on **salient features**
-   (silhouette tips, region-outline junctions, high-curvature corners) rather than
-   on a fixed geometric ring, so they land where you'd want to grab.
-2. Drag each point onto the matching tissue feature. The atlas contour **follows
-   your cursor in real time**.
-   - plain drag = warp; **Ctrl+drag** or **Move points** = relocate a point
-     without warping; **Add points** then click = add; select + **Delete** = remove.
-3. **Apply landmark warp** to commit (full warp + probe re-map + save).
+**Settings ▸ Registration** holds the options. The defaults are good; the ones
+worth knowing:
 
-Other buttons: **Reset morph to plane (keep AP/ML)** drops the auto B-spline but
-keeps the AP plane (good for torn/missing tissue - redo the fit by hand);
-**Reset adjustment** clears the manual correction for that section.
+- **Predict planes with DeepSlice** - place the sections automatically as part of
+  the run.
+- **Regularized registration (elastix)** - keeps the atlas outline on the tissue.
+  Recommended, and on when the elastix extra is installed.
+- **Keep hand-corrected sections on re-run** - so a re-run does not throw away
+  corrections you made by hand.
 
-### 5.7 Probes and trajectories
+Then **Register ▸ Register all sections**. Watch the progress, then check the
+**residuals** table (lower is a better fit) and switch on **Show atlas overlay on
+sections** to see the outlines on your tissue.
 
-1. **Probes** tab → choose a **Type** preset (Neuropixels 1.0, NP2.0 4-shank,
-   NeuroNexus, Custom), a **Label**, and **Shanks**, then **Add probe**.
-2. **Rename** an existing probe: pick it in the **Rename** dropdown, type a new
-   label, **Rename** (labels must be unique - they're export keys).
-3. Mark the track: choose **Tip** or **Entry** mode and the **Probe**/**Shank**,
-   then **click** in the viewer to drop a marker. For entry you can instead pick
-   **Trajectory line** and draw the trajectory - the entry is where it crosses the
-   tissue surface.
-4. **Select / move** to drag/select markers; **Clear selected** / **Clear all
-   points** to remove.
+### 5.7 Hand-correct a section
 
-### 5.8 Refine depth from LFP (Ephys, optional)
+Click the section in the image, or pick it in **Manual atlas adjustment ▸
+Section**.
 
-1. **Ephys** tab → select **Probe**/**Shank**, set the Open Ephys **Path** (or
-   **Browse**), optionally **List streams** and adjust **Seconds to analyse**.
-2. **Load and compute LFP power** → then **Open alignment**.
-3. In the dialog, the LFP power map (depth × frequency) sits beside the atlas
-   region strip. **Double-click** the map to drop a red **anchor**, drag it to line
-   an LFP transition up with a region boundary. **Normalize per frequency** makes
-   depth features stand out. **Save LFP power** exports the map (.npz/.csv).
-4. **Apply** to store per-channel CCF on the shank.
+**Box transform** - **Adjust atlas (drag in viewer)**: drag to move, drag the
+handles to scale, stretch or rotate. Toggle off to apply.
 
-### 5.9 Visualize and export (right dock)
+**Landmarks**, for local distortion a box cannot fix:
 
-- **View in napari 3D** - probes + brain regions in a 3-D viewer.
-- **Export Plotly HTML** - standalone interactive 3-D scene.
-- **Update coordinates** - re-map every tip/entry/channel through the current
-  registration (incl. manual corrections) into CCF µm.
-- **Export pkl file** - HERBS-compatible 128-point-per-shank trajectory.
-- **Export per-channel CSV** - `probe, shank, channel, ap_um, ml_um, dv_um`.
-- **Export per-channel Paxinos CSV** - same in Paxinos stereotaxic mm.
+1. **Place landmarks** drops points on recognisable features - outline tips,
+   junctions, corners.
+2. Drag each onto the matching spot on your tissue. The outline follows as you
+   drag. **Ctrl+drag** moves a point without warping.
+3. **Apply landmark warp**.
 
-### 5.10 Headless / CLI
+**Reset morph to plane** drops the automatic warp but keeps the level - the right
+move for torn tissue or a missing piece, then place landmarks by hand.
+**Reset adjustment** clears a correction.
+
+### 5.8 Probes
+
+1. **Probes ▸** choose a **Type**, give it a **Label**, set **Shanks**, **Add
+   probe**. Labels must be unique - they name the columns you export.
+2. Choose **Tip** or **Entry** and click in the image. For entry you can instead
+   draw a **Trajectory line**; the entry is where it crosses the surface.
+3. Each shank has its own colour; tips are discs, entries are triangles.
+4. **Select / move** to drag a marker; **Clear selected** to remove some.
+
+### 5.9 Export
+
+Everything is in the right-hand **3D & Export** panel.
+
+**Update probe coordinates** first if you have moved a marker or corrected a
+section - exports use the last computed coordinates. **Enforce rigid array**
+regularises a multi-shank probe to parallel, evenly spaced shanks.
+
+**3D Visualization** - **Region atlas** names regions from a different atlas
+without re-registering (this is how you get Franklin-Paxinos names). **3D view**
+opens the brain and probes in a 3-D window.
+
+**Export** - pick a **Format**, then **Export…**:
+
+| Format | What you get |
+|---|---|
+| Per-channel coordinates (CSV) | One row per recording channel |
+| Probe tracks for Python / HERBS (pkl) | The tracks, for the older pipeline |
+| 3D view as interactive HTML | A page you can send someone |
+| Registered section series (folder) | Your sections, in order, with region outlines |
+
+**Convert to Paxinos stereotaxic coordinates** (CSV only) converts the finished
+coordinates to millimetres from bregma. The **?** explains the choices and how far
+apart they are - they are published estimates, so validate against your histology.
+
+The **section series** writes your sections in front-to-back order, straightened,
+with the atlas outlines as a separate black-on-white image per section, plus a
+manifest. Options add outlines burnt onto the section, an editable **SVG** of the
+outlines, and a **region list** naming every region in every section.
+
+### 5.10 Refine depth from recordings (optional)
+
+Needs the `ephys` extra and a probe with tip and entry already registered.
+
+1. **Ephys ▸** pick the probe and shank, point at the recording folder.
+2. Open Ephys and SpikeGLX store the probe layout; **Intan does not**, so for
+   Intan pick a **Probe map** (your RHX `-probe.xml`, or the built-in wired map).
+   Without one the app refuses rather than reporting depths in channel numbers.
+3. **Compute features from recording**, then **Open alignment**.
+4. Drag the anchor lines so features in the recording line up with region
+   boundaries, then **Apply** to store per-channel coordinates.
+
+### 5.11 Without the GUI
 
 ```bash
-histo2ccf split --image IMAGE                  # detect sections → <stem>.sections.json
-histo2ccf register-one --image IMAGE [...]     # single-section register → <stem>.histo2ccf.json
-histo2ccf register PROJECT.json [--atlas ...]  # full-project registration → updates JSON
+histo2ccf split IMAGE                  # find sections
+histo2ccf register PROJECT.json        # register a whole project
+histo2ccf export PROJECT.json          # per-channel CCF and Paxinos CSVs
 ```
-
-Transform sidecars are written to `<project_dir>/transforms/`.
 
 ---
 
 ## 6. Troubleshooting
 
-**"Load atlas" hangs / the app won't exit.** Older versions hung on BrainGlobe's
-online version check. Fixed in v0.2.35 (`check_latest=False`); loads are now
-instant and offline-safe. If a process is ever stuck on a network read,
-`Stop-Process -Name python -Force` (or close the terminal) clears it.
+**Every section fails registration at once.** Usually the stain colour was
+mistaken for a label and the tissue was masked out. Update and re-run.
 
-**A whole slide fails registration instantly** (every section "Internal elastix
-error"). Usually the sections are stained in a colour the label mask mistook for a
-fluorescent label (e.g. cyan = green+blue), so the tissue got excised from the
-metric mask. Fixed in v0.2.34 - the mask now keeps tissue when label-exclusion
-would remove most of it. Update and re-run.
+**The atlas overlay's outline fits but the inside looks stretched** (an enlarged
+ventricle, say). Intensity-based warping has little to go on inside. Place
+landmarks on that structure - raising smoothness or the grid will not help.
 
-**DeepSlice APs come out out-of-order or too close.** Expected with no spacing/
-order set - see Recipe 5.4; set the spacing and section order first, and heed the
-post-pre-match warning.
+**DeepSlice APs come out in the wrong order or bunched together.** Set the section
+order and spacing first, then re-run, and read the warning.
 
-**Interior of the atlas overlay looks distorted but the outline is fine** (e.g. an
-enlarged ventricle). Inherent to intensity-based warping where interior cues are
-weak. Use **Place landmarks** on the structure (Recipe 5.6); raising smoothness or
-the grid does not help.
+**Elastix options are greyed out.** Install the elastix extra; without it the
+plain B-spline is used.
 
-**Elastix options are greyed out.** Install the elastix extra; otherwise the plain
-SimpleITK B-spline is used.
+**The first DeepSlice run in a session is slow.** It loads a large model once.
 
-**First DeepSlice run is slow.** It downloads the model once; later runs are fast.
+**The window will not open.** Run `histo2ccf gl-info` and send the output.
 
-**GUI won't start / OpenGL error.** Run `histo2ccf gl-info` and share the output.
+**Region names look wrong.** Check **Region atlas** in 3D & Export - Allen and
+Chon/Kim name the same tissue differently (MOp vs M1). And do not switch the
+registration atlas mid-project: levels assigned under one do not carry to another.
 
 ---
 
 ## 7. Conventions
 
-- **Outputs go next to your data**, never the repo working directory.
-- Project files are `*.histo2ccf.json`; the atlas cache lives under `~/.brainglobe`.
-- The app auto-saves the project after a manual correction (box/landmarks).
+- Outputs go next to your data, never into the app's folder.
+- Projects are `*.histo2ccf.json`; atlases cache under `~/.brainglobe`.
+- The project auto-saves after a hand correction.
