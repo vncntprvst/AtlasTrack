@@ -4,25 +4,25 @@ One histology slide registration, start to finish. About 20 minutes, most of it
 waiting for the atlas to download and the fit to run. For the full reference see
  **MANUAL.md** (or the **Manual** tab in the app).
 
-You need one image of a slide with brain sections on it. The repository includes
-one to practise on: `example data\L07_slide3_2x_whole_overlay.jpg`.
+You need one image of a slide with brain sections on it - a whole-slide scan with
+several sections on it is ideal. Any common format works (`.tif`, `.jpg`, `.png`).
 
 ---
 
 ## Before you start
 
 ```bash
-uv pip install -e ".[all]"   # everything - recommended for this walkthrough
+uv pip install "atlastrack[all]"   # everything - recommended for this walkthrough
 
-histo2ccf version
-histo2ccf gui
+atlastrack version
+atlastrack gui
 ```
 
 `[all]` brings three optional pieces: **elastix** (the better registration
 engine - worth having, it is what step 6 uses), **deepslice** (automatic
 placement, step 5), and **ephys** (the optional last section). A plain
-`uv pip install -e .` runs the walkthrough too, but the fit is plainer and the
-DeepSlice step is unavailable.
+`uv pip install atlastrack` runs the walkthrough too, but the fit is plainer and
+the DeepSlice step is unavailable.
 
 ---
 
@@ -135,14 +135,14 @@ Pick a **Format** and click **Export…**:
   **region list** for a table of every region in every section.
 - **Probe tracks for Python / HERBS (pkl)** - for the older pipeline.
 
-Then **Project ▸ Save Project** - it writes `<slide>.histo2ccf.json` next to your
+Then **Project ▸ Save Project** - it writes `<slide>.atlastrack.json` next to your
 image. **Load Project** brings everything back and reloads the atlas for you.
 
 To open a project in Python:
 
 ```python
 from atlastrack.project.io import load_project
-p = load_project(r"path\to\project.histo2ccf.json")
+p = load_project(r"path\to\project.atlastrack.json")
 ```
 
 ---
@@ -179,6 +179,6 @@ Needs the `ephys` extra and a probe that already has tip and entry.
 
 The **Manual** has a troubleshooting section. The two most common:
 
-- **The window will not open** - run `histo2ccf gl-info` and send the output.
+- **The window will not open** - run `atlastrack gl-info` and send the output.
 - **Every section failed at once** - usually the stain colour was mistaken for a
   label and the tissue was masked out. Update and re-run.

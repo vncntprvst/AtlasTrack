@@ -1,4 +1,4 @@
-"""Tests for the ``histo2ccf export`` command and the shared rigid-array helper.
+"""Tests for the ``atlastrack export`` command and the shared rigid-array helper.
 
 The export path deliberately works from the coordinates already stored in a
 project, so a corrected project can be re-exported without re-registering.

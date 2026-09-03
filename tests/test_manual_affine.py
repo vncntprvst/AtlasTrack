@@ -60,7 +60,7 @@ def test_schema_round_trips_manual_affine(tmp_path) -> None:
     a = [[1.2, 0.0, 3.0], [0.0, 0.8, -5.0], [0.0, 0.0, 1.0]]
     sec = Section(index=0, slide_idx=0, bbox_px=(0, 0, 80, 40), manual_affine=a)
     proj = Project(atlas=AtlasRef(), slides=[Slide(image_path="x.png", sections=[sec])])
-    path = tmp_path / "p.histo2ccf.json"
+    path = tmp_path / "p.atlastrack.json"
     save_project(proj, path)
     loaded = load_project(path)
     assert loaded.slides[0].sections[0].manual_affine == a

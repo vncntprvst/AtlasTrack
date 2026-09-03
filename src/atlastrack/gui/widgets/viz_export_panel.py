@@ -574,7 +574,7 @@ class VizExportPanelWidget(QWidget):
             from atlastrack.viz.napari3d import show_3d_scene
 
             if self._viewer3d is None or not _viewer_alive(self._viewer3d):
-                self._viewer3d = napari.Viewer(title="Histo→CCF - 3D")
+                self._viewer3d = napari.Viewer(title="Registered histology and probe tracks - 3D view")
             else:
                 self._viewer3d.layers.clear()
 

@@ -75,6 +75,38 @@ def test_saving_writes_to_the_new_directory_only(homes):
 
 
 # ---------------------------------------------------------------------------
+# Environment variables
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fresh_settings(tmp_path, monkeypatch):
+    """Clear the cached Settings and both env prefixes for one test."""
+    monkeypatch.setattr(config, "_settings", None)
+    for field in config.Settings.model_fields:
+        for prefix in (config._ENV_PREFIX, config._LEGACY_ENV_PREFIX):
+            monkeypatch.delenv(f"{prefix}{field.upper()}", raising=False)
+    # Run somewhere without a .env, which would otherwise supply the same keys.
+    monkeypatch.chdir(tmp_path)
+    yield
+    config._settings = None
+
+
+def test_the_old_env_prefix_still_takes_effect(fresh_settings, monkeypatch):
+    """A stale HISTO2CCF_* in a shell profile must not be silently ignored."""
+    monkeypatch.setenv("HISTO2CCF_DEFAULT_ATLAS", "kim_mouse_25um")
+
+    assert config.get_settings().default_atlas == "kim_mouse_25um"
+
+
+def test_the_new_env_prefix_wins_over_the_old(fresh_settings, monkeypatch):
+    monkeypatch.setenv("HISTO2CCF_DEFAULT_ATLAS", "kim_mouse_25um")
+    monkeypatch.setenv("ATLASTRACK_DEFAULT_ATLAS", "allen_mouse_25um")
+
+    assert config.get_settings().default_atlas == "allen_mouse_25um"
+
+
+# ---------------------------------------------------------------------------
 # Saved projects
 # ---------------------------------------------------------------------------
 

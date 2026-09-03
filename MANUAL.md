@@ -43,7 +43,7 @@ the skull landmark: `0` = bregma, **negative = behind it**, positive = in front.
 **The pipeline in one line:** section image → atlas slice at the right level →
 that slice warped onto your section → outlines and probe coordinates.
 
-**Your project** is one `*.histo2ccf.json` file. Outputs go **next to your data**,
+**Your project** is one `*.atlastrack.json` file. Outputs go **next to your data**,
 not into the app's folder.
 
 ---
@@ -51,13 +51,16 @@ not into the app's folder.
 ## 3. Install and launch
 
 ```bash
-uv pip install -e ".[all]"   # everything - recommended
-uv pip install -e .          # base only: the histology → atlas workflow
+uv pip install "atlastrack[all]"   # everything - recommended
+uv pip install atlastrack          # base only: the histology → atlas workflow
 
-histo2ccf gui       # launch
-histo2ccf version   # check the install
-histo2ccf gl-info   # if the window will not open, run this and send the output
+atlastrack gui       # launch
+atlastrack version   # check the install
+atlastrack gl-info   # if the window will not open, run this and send the output
 ```
+
+`pip install` works just as well as `uv pip install`. Quote the target and leave
+no spaces between extras - PowerShell and `zsh` both treat `[...]` as a pattern.
 
 The base install is deliberately light. `[all]` adds three optional pieces, which
 you can also install one at a time (`".[elastix]"` and so on):
@@ -260,9 +263,9 @@ Needs the `ephys` extra and a probe with tip and entry already registered.
 ### 5.11 Without the GUI
 
 ```bash
-histo2ccf split IMAGE                  # find sections
-histo2ccf register PROJECT.json        # register a whole project
-histo2ccf export PROJECT.json          # per-channel CCF and Paxinos CSVs
+atlastrack split IMAGE                  # find sections
+atlastrack register PROJECT.json        # register a whole project
+atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
 ```
 
 ---
@@ -284,7 +287,7 @@ plain B-spline is used.
 
 **The first DeepSlice run in a session is slow.** It loads a large model once.
 
-**The window will not open.** Run `histo2ccf gl-info` and send the output.
+**The window will not open.** Run `atlastrack gl-info` and send the output.
 
 **Region names look wrong.** Check **Region atlas** in 3D & Export - Allen and
 Chon/Kim name the same tissue differently (MOp vs M1). And do not switch the
@@ -295,5 +298,5 @@ registration atlas mid-project: levels assigned under one do not carry to anothe
 ## 7. Conventions
 
 - Outputs go next to your data, never into the app's folder.
-- Projects are `*.histo2ccf.json`; atlases cache under `~/.brainglobe`.
+- Projects are `*.atlastrack.json`; atlases cache under `~/.brainglobe`.
 - The project auto-saves after a hand correction.

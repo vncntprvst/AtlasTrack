@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from loguru import logger
@@ -12,15 +13,41 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Runtime settings (env-vars / .env)
 # ---------------------------------------------------------------------------
 
-class Settings(BaseSettings):
-    """Runtime settings, populated from env vars (prefix HISTO2CCF_) or defaults."""
+#: Env prefix now, and the one used when the app was called Histo-to-CCF. A
+#: legacy variable is still honoured when the new one is unset, so an existing
+#: shell profile or ``.env`` does not quietly stop taking effect after the
+#: rename - a silently ignored ``HISTO2CCF_LOG_LEVEL`` looks like a bug in the
+#: app rather than a stale variable name.
+_ENV_PREFIX = "ATLASTRACK_"
+_LEGACY_ENV_PREFIX = "HISTO2CCF_"
 
-    model_config = SettingsConfigDict(env_prefix="HISTO2CCF_", env_file=".env", extra="ignore")
+
+class Settings(BaseSettings):
+    """Runtime settings, populated from env vars (prefix ATLASTRACK_) or defaults."""
+
+    model_config = SettingsConfigDict(env_prefix=_ENV_PREFIX, env_file=".env", extra="ignore")
 
     atlas_cache_dir: Path = Path.home() / ".brainglobe"
     project_dir: Path = Path.cwd()
     default_atlas: str = "allen_mouse_25um"
     log_level: str = "INFO"
+
+
+def _legacy_env_overrides() -> dict[str, str]:
+    """Values taken from ``HISTO2CCF_*`` where the ``ATLASTRACK_*`` name is unset.
+
+    Returned as constructor arguments rather than written back into
+    :data:`os.environ`, so reading the old names has no side effect on the
+    process environment.
+    """
+    out: dict[str, str] = {}
+    for field in Settings.model_fields:
+        if f"{_ENV_PREFIX}{field.upper()}" in os.environ:
+            continue
+        value = os.environ.get(f"{_LEGACY_ENV_PREFIX}{field.upper()}")
+        if value is not None:
+            out[field] = value
+    return out
 
 
 _settings: Settings | None = None
@@ -29,7 +56,7 @@ _settings: Settings | None = None
 def get_settings() -> Settings:
     global _settings
     if _settings is None:
-        _settings = Settings()
+        _settings = Settings(**_legacy_env_overrides())
         logger.remove()
         logger.add(lambda msg: print(msg, end=""), level=_settings.log_level)
     return _settings

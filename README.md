@@ -74,8 +74,6 @@ atlastrack gl-info    # diagnose GPU/OpenGL if the window will not open
 atlastrack split | register | export      # headless equivalents
 ```
 
-`histo2ccf` still works as an alias for every command.
-
 ## The window
 
 The centre holds **Project** (your slide and the atlas overlay) and **Help**. On

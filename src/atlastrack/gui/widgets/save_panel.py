@@ -77,9 +77,9 @@ class SavePanelWidget(QWidget):
         save_btn.clicked.connect(self._save)
         load_btn = QPushButton("Load project")
         load_btn.setToolTip(
-            "Load a saved project (.atlastrack.json, or .histo2ccf.json from before "
-            "the rename) - restores slides, sections, AP planes "
-            "and the registration result (no need to re-run registration)."
+            "Load a saved project (.atlastrack.json) - restores "
+            "slides, sections, AP planes and the registration result "
+            "(no need to re-run registration)."
         )
         load_btn.clicked.connect(self._load)
         btn_row.addWidget(save_btn)

@@ -52,7 +52,7 @@ def _project() -> Project:
 
 def test_save_then_load(tmp_path: Path) -> None:
     original = _project()
-    p = tmp_path / "project.histo2ccf.json"
+    p = tmp_path / "project.atlastrack.json"
     save_project(original, p)
     reloaded = load_project(p)
     assert reloaded.model_dump() == original.model_dump()

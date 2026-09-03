@@ -12,7 +12,7 @@ def test_reset_clears_project_but_keeps_atlas() -> None:
     state.active_slide_idx = 0
     state.active_section_idx = 2
     state.slide_bands[0] = [(0, 4)]
-    state.project_path = "p.histo2ccf.json"  # type: ignore[assignment]
+    state.project_path = "p.atlastrack.json"  # type: ignore[assignment]
     state.atlas = object()  # a stand-in for a loaded BrainGlobeAtlas
     sentinel = state.atlas
 

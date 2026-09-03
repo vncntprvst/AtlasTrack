@@ -175,7 +175,7 @@ def test_schema_round_trips_landmarks(tmp_path) -> None:
     lm = ManualLandmarks(source=[[1.0, 2.0], [3.0, 4.0]], target=[[1.5, 2.5], [3.0, 4.0]])
     sec = Section(index=0, slide_idx=0, bbox_px=(0, 0, 80, 40), manual_landmarks=lm)
     proj = Project(atlas=AtlasRef(), slides=[Slide(image_path="x.png", sections=[sec])])
-    path = tmp_path / "p.histo2ccf.json"
+    path = tmp_path / "p.atlastrack.json"
     save_project(proj, path)
     loaded = load_project(path)
     got = loaded.slides[0].sections[0].manual_landmarks

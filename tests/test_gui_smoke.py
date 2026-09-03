@@ -296,7 +296,7 @@ def test_save_panel_load_path_records_recent(qtbot, tmp_path) -> None:
     from atlastrack.project.io import save_project
 
     # Write a real project to disk.
-    proj_path = tmp_path / "proj" / "demo.histo2ccf.json"
+    proj_path = tmp_path / "proj" / "demo.atlastrack.json"
     proj_path.parent.mkdir()
     state0 = WorkflowState()
     save_project(state0.project, proj_path)
@@ -1170,7 +1170,7 @@ def test_reset_morph_drops_bspline_keeps_plane(qtbot, tmp_path) -> None:
         state = WorkflowState()
         state.add_slide(str(tmp_path / "s.png"), np.zeros((10, 10), dtype=np.uint8))
         state.active_slide_idx = 0
-        state.project_path = tmp_path / "p.histo2ccf.json"
+        state.project_path = tmp_path / "p.atlastrack.json"
         anchoring = [1, 2, 3, 4, 5, 6, 7, 8, 9]
         sec = Section(
             index=5, slide_idx=0, bbox_px=(0, 0, 5, 5), ap_order=0,
@@ -1605,7 +1605,7 @@ def test_project_section_spacing_round_trips(tmp_path) -> None:
     from atlastrack.project.io import load_project, save_project
 
     proj = Project(section_spacing_um=123.0)
-    path = tmp_path / "p.histo2ccf.json"
+    path = tmp_path / "p.atlastrack.json"
     save_project(proj, path)
     assert load_project(path).section_spacing_um == 123.0
 
@@ -1735,7 +1735,7 @@ def test_manual_atlas_adjustment(qtbot, tmp_path) -> None:
     viewer = napari.Viewer(show=False)
     try:
         state = _populated_state()
-        state.project_path = tmp_path / "p.histo2ccf.json"
+        state.project_path = tmp_path / "p.atlastrack.json"
         panel = RegisterPanelWidget(state, viewer)
         qtbot.addWidget(panel)
 
@@ -1786,7 +1786,7 @@ def test_landmark_warp_apply_and_reset(qtbot, tmp_path) -> None:
     viewer = napari.Viewer(show=False)
     try:
         state = _populated_state()
-        state.project_path = tmp_path / "p.histo2ccf.json"
+        state.project_path = tmp_path / "p.atlastrack.json"
         panel = RegisterPanelWidget(state, viewer)
         qtbot.addWidget(panel)
 

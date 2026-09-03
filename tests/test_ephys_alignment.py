@@ -201,7 +201,7 @@ def test_ephys_alignment_persists(tmp_path) -> None:
     project = Project(
         probes=[ProbeSpec(label="p", type=ProbeType(name="NP", n_shanks=1), shanks=[shank])]
     )
-    path = tmp_path / "p.histo2ccf.json"
+    path = tmp_path / "p.atlastrack.json"
     save_project(project, path)
     loaded = load_project(path)
     eph = loaded.probes[0].shanks[0].ephys
