@@ -11,6 +11,8 @@ This is a desktop app for wet-lab neuroscientists: load histology slide images,
 place each section in the atlas, register the series automatically, click your 
 probe tracks, and export coordinates or figures.
 
+<img src="https://raw.githubusercontent.com/vncntprvst/AtlasTrack/main/images/AT_GUI.png" alt="AtlasTrack GUI" width="600">
+
 ## What it does
 
 Given one or more slide images and a little guidance:

@@ -43,6 +43,7 @@ tests/fixtures/_downloaded/
 
 # Project files / scratch
 *.histo2ccf.json
+*.atlastrack.json
 scratch/
 
 # Example data

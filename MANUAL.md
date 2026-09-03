@@ -1,6 +1,6 @@
 # AtlasTrack - User Manual
 
-This is reference manual. If you're a new user, start with **TUTORIAL.md** (or the **Tutorial** tab in the app), which
+This is the reference manual. If you're a new user, start with **TUTORIAL.md** (or the **Tutorial** tab in the app), which
 walks through one registration from start to finish.
 
 ---
