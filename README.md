@@ -1,5 +1,9 @@
 # AtlasTrack
 
+[![PyPI](https://img.shields.io/pypi/v/atlastrack)](https://pypi.org/project/atlastrack/)
+[![Python](https://img.shields.io/pypi/pyversions/atlastrack)](https://pypi.org/project/atlastrack/)
+[![License](https://img.shields.io/pypi/l/atlastrack)](LICENSE)
+
 Register histological brain sections to a reference atlas, and map probe
 trajectories into atlas coordinates.
 
@@ -34,8 +38,10 @@ Both are also available in the app under **Help**.
 
 ## Install
 
+From [PyPI](https://pypi.org/project/atlastrack/):
+
 ```bash
-uv pip install "atlastrack[all]"    # recommended
+uv pip install "atlastrack[all]"    # recommended  (pip install also works)
 atlastrack gui
 ```
 
@@ -48,7 +54,13 @@ each installable on its own:
 | `deepslice` | Automatic front-to-back placement | ~1.65 GB (TensorFlow) |
 | `ephys` | The Ephys tab (Open Ephys / SpikeGLX / Intan) | SpikeInterface |
 
-For development: `uv pip install -e ".[all,dev]"`.
+From source, for development:
+
+```bash
+git clone https://github.com/vncntprvst/AtlasTrack
+cd AtlasTrack
+uv pip install -e ".[all,dev]"
+```
 
 > Quote the target and use no spaces between extras - `zsh` and PowerShell treat
 > `[...]` as a glob, and a space splits the argument.

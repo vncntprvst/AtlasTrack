@@ -1,20 +1,28 @@
+# The Help tab renders these two files at runtime. An editable install finds them
+# at the repository root; a wheel has no repository root, so they are copied in
+# beside the package, which is the third location help_panel.find_doc tries.
+[tool.hatch.build.targets.wheel.force-include]
+"MANUAL.md" = "atlastrack/MANUAL.md"
+"TUTORIAL.md" = "atlastrack/TUTORIAL.md"
+
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]  # >=1.27 for PEP 639 license-files
 build-backend = "hatchling.build"
 
 [project]
 name = "atlastrack"
-version = "0.7.1"
+version = "0.7.2"
 description = "Guided registration of histological brain sections to a reference atlas (Allen CCF), with probe trajectory mapping in 3D."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "BSD-3-Clause" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [
-    { name = "Wang Lab" },
+    { name = "Vincent Prevosto", email = "prevosto@mit.edu" },
 ]
 keywords = ["neuroscience", "histology", "registration", "allen-ccf", "neuropixels", "napari"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
