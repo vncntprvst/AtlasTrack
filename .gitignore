@@ -15,7 +15,12 @@ venv/
 env/
 .python-version
 uv.lock
-.claude
+.c*/
+*_cache/
+*.md
+!README.md
+!MANUAL.md
+!TUTORIAL.md
 
 # --- Tooling caches ---
 .pytest_cache/
