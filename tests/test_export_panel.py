@@ -199,12 +199,18 @@ def test_the_standing_paxinos_paragraph_is_gone_from_the_panel(qtbot):
 # ---------------------------------------------------------------------------
 
 
+_FAKE_ATLAS = object()
+
+
 def _capture_export(qtbot, monkeypatch, tmp_path, *, fmt_index, paxinos):
     from qtpy.QtWidgets import QFileDialog
 
     from atlastrack.probes import channels
 
     viz, viewer = _panel(qtbot)
+    # A loaded atlas makes the CCF export synchronous (no atlas worker) and is
+    # what the export must hand on for the region columns.
+    viz._state.atlas = _FAKE_ATLAS
     out = tmp_path / "out"
     monkeypatch.setattr(
         QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(out), ""))
@@ -231,6 +237,7 @@ def test_exporting_without_paxinos_writes_ccf(qtbot, monkeypatch, tmp_path):
     )
 
     assert [c[0] for c in calls] == ["ccf"]
+    assert calls[0][1]["atlas"] is _FAKE_ATLAS
 
 
 def test_exporting_with_paxinos_passes_the_selected_alignment(qtbot, monkeypatch,

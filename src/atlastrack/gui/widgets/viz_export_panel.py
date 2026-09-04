@@ -399,7 +399,7 @@ class VizExportPanelWidget(QWidget):
         atlas_dir = None
         if self._settings is not None:
             atlas_dir = getattr(self._settings, "atlas_dir", "") or None
-        self._status.setText(f"Loading atlas {atlas_id} for 3D view")
+        self._status.setText(f"Loading atlas {atlas_id}")
         from atlastrack.gui.workers import load_atlas_worker
 
         worker = load_atlas_worker(atlas_id, brainglobe_dir=atlas_dir)
@@ -756,6 +756,14 @@ class VizExportPanelWidget(QWidget):
             _error_dialog(self, "pkl export failed", str(exc))
 
     def _write_channel_csv(self, path: str, *, paxinos: bool) -> None:
+        if paxinos:
+            self._do_write_channel_csv(path, paxinos=True)
+            return
+        # The CCF CSV carries region columns, which need the atlas. Load it lazily
+        # (as the 3D view does) rather than silently writing coordinates only.
+        self._ensure_atlas(lambda: self._do_write_channel_csv(path, paxinos=False))
+
+    def _do_write_channel_csv(self, path: str, *, paxinos: bool) -> None:
         try:
             from atlastrack.probes.channels import (
                 export_channel_csv,
@@ -767,8 +775,11 @@ class VizExportPanelWidget(QWidget):
                 n = export_paxinos_csv(self._state.project, path, alignment=align)
                 what = f"Paxinos CSV ({align})"
             else:
-                n = export_channel_csv(self._state.project, path)
+                atlas = self._state.atlas
+                n = export_channel_csv(self._state.project, path, atlas=atlas)
                 what = "Per-channel CSV (CCF)"
+                if atlas is None:
+                    what += ", no atlas so no region columns"
             if n == 0:
                 _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
             else:

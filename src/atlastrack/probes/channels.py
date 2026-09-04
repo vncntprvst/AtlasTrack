@@ -304,7 +304,9 @@ def export_channel_csv(
     """Export per-channel CCF coordinates to a CSV file.
 
     Columns: ``probe, shank, channel, ap_um, ml_um, dv_um, depth_source`` - plus
-    ``region`` when an ``atlas`` is given.
+    ``region, region_id, region_color`` when an ``atlas`` is given (see
+    :data:`REGION_COLUMNS`). A channel outside the atlas gets ``""``, ``0`` and
+    ``""`` so a reader can tell "unlabelled" from a real structure.
 
     ``depth_source`` says whether each shank's depths came from the ephys landmark
     alignment or from probe geometry alone. Two shanks of one probe can legitimately
@@ -319,7 +321,8 @@ def export_channel_csv(
     probe_label
         If given, only export this probe; otherwise export all probes.
     atlas
-        Optional BrainGlobe atlas; when given, each channel gets its region acronym.
+        Optional BrainGlobe atlas; when given, each channel gets its region
+        acronym, Allen structure id and atlas colour (``#rrggbb``).
 
     Returns
     -------
@@ -332,7 +335,7 @@ def export_channel_csv(
 
     header = ["probe", "shank", "channel", "ap_um", "ml_um", "dv_um", "depth_source"]
     if atlas is not None:
-        header.append("region")
+        header.extend(REGION_COLUMNS)
 
     n_rows = 0
     with out_path.open("w", newline="", encoding="utf-8") as fh:
@@ -342,22 +345,49 @@ def export_channel_csv(
             if probe_label is not None and label != probe_label:
                 continue
             source = "ephys_alignment" if used else "geometry"
-            regions = _region_acronyms(atlas, coords) if atlas is not None else None
+            regions = channel_regions(atlas, coords) if atlas is not None else None
             for ch_idx, (ap, ml, dv) in enumerate(coords):
                 row = [label, shank_idx, ch_idx, f"{ap:.2f}", f"{ml:.2f}", f"{dv:.2f}", source]
                 if regions is not None:
-                    row.append(regions[ch_idx])
+                    row.extend(regions[ch_idx])
                 writer.writerow(row)
                 n_rows += 1
 
     return n_rows
 
 
-def _region_acronyms(atlas, coords: np.ndarray) -> list[str]:
-    """Atlas acronym at each ``(AP, ML, DV)`` µm point, ``""`` outside the atlas."""
+#: Columns appended to the per-channel CSV when an atlas is available. Kept as a
+#: constant so consumers (SpikeViz, provenance) can name them without guessing.
+REGION_COLUMNS: tuple[str, ...] = ("region", "region_id", "region_color")
+
+#: One CSV region record: ``(acronym, structure_id, "#rrggbb")``. Outside the
+#: atlas this is ``("", 0, "")``.
+ChannelRegion = tuple[str, int, str]
+
+
+def channel_regions(atlas, coords: np.ndarray) -> list[ChannelRegion]:
+    """Region acronym, Allen structure id and atlas colour at each channel.
+
+    ``coords`` is ``(n, 3)`` in ``(AP, ML, DV)`` µm. The colour is the atlas's own
+    ``rgb_triplet`` as a ``#rrggbb`` string, so downstream tools can paint bands
+    to match the atlas rather than invent a palette. Points outside the atlas
+    yield ``("", 0, "")``.
+    """
     from atlastrack.ephys.regions import regions_at_ccf
 
-    return [acr for acr, _rgb in regions_at_ccf(atlas, coords)]
+    out: list[ChannelRegion] = []
+    for acr, rgb in regions_at_ccf(atlas, coords):
+        if not acr:
+            out.append(("", 0, ""))
+            continue
+        r, g, b = (int(c) for c in rgb)
+        out.append((acr, _structure_id(atlas, acr), f"#{r:02x}{g:02x}{b:02x}"))
+    return out
+
+
+def _region_acronyms(atlas, coords: np.ndarray) -> list[str]:
+    """Atlas acronym at each ``(AP, ML, DV)`` µm point, ``""`` outside the atlas."""
+    return [acr for acr, _id, _hex in channel_regions(atlas, coords)]
 
 
 def export_ibl_channel_locations(

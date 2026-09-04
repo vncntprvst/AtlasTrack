@@ -247,6 +247,36 @@ def test_register_panel_region_hover(qtbot) -> None:
 
 
 @pytest.mark.qt
+def test_atlas_overlay_layers_are_white_and_not_depth_tested(qtbot) -> None:
+    """The overlay vanished twice for styling reasons and both must stay pinned:
+    'translucent' depth-tests against the slide at the same z and can drop the whole
+    layer, and napari's palette colour for label 1 is a dark brown that is invisible
+    on dark tissue."""
+    import napari
+
+    from atlastrack.gui.widgets.register_panel import (
+        OVERLAY_BLENDING,
+        OVERLAY_CONTOUR_RGBA,
+        style_overlay_layer,
+    )
+
+    viewer = napari.Viewer(show=False)
+    try:
+        edges = np.zeros((20, 20), dtype=np.uint8)
+        edges[10, :] = 1
+        layer = viewer.add_labels(edges, name="Atlas overlay 0", opacity=0.7)
+        assert layer.blending == "translucent"  # napari's default: the broken state
+
+        style_overlay_layer(layer)
+
+        assert layer.blending == OVERLAY_BLENDING == "translucent_no_depth"
+        assert tuple(np.round(layer.get_color(1), 3)) == OVERLAY_CONTOUR_RGBA
+        assert layer.get_color(0) is None or float(layer.get_color(0)[-1]) == 0.0
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
 def test_viz_panel_enforce_rigid_array(qtbot) -> None:
     """The viz panel's rigid-array enforcement evens a multi-shank probe's spacing."""
     import napari

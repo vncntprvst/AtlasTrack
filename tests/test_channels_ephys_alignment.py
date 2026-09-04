@@ -266,6 +266,44 @@ def test_channel_csv_adds_regions_when_an_atlas_is_given(tmp_path):
     assert any(r["region"] == "B" for r in rows)
 
 
+def test_channel_csv_region_id_and_colour_come_from_the_atlas(tmp_path):
+    """SpikeViz paints bands from these, so they must be the atlas's own values."""
+    path = tmp_path / "channels.csv"
+
+    export_channel_csv(_project(), path, atlas=_Atlas())
+
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    assert list(rows[0].keys())[-3:] == ["region", "region_id", "region_color"]
+    by_region = {r["region"]: r for r in rows}
+    assert by_region["A"]["region_id"] == "111"
+    assert by_region["A"]["region_color"] == "#010203"
+    assert by_region["B"]["region_id"] == "222"
+    assert by_region["B"]["region_color"] == "#040506"
+
+
+def test_channel_csv_marks_channels_outside_the_atlas_as_unlabelled(tmp_path):
+    """Empty acronym, id 0, empty colour - never a grey default that looks real."""
+    path = tmp_path / "channels.csv"
+    # Track from DV 8000 to 12000: the fake atlas ends at DV 9000.
+    shank = Shank(
+        index=0,
+        entry_ccf_um=(5000.0, 2000.0, 8000.0),
+        tip_ccf_um=(5000.0, 2000.0, 12000.0),
+    )
+    project = Project()
+    project.probes.append(
+        ProbeSpec(label="p1", type=ProbeType(name="NP1", n_shanks=1), shanks=[shank])
+    )
+
+    export_channel_csv(project, path, atlas=_Atlas())
+
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    outside = [r for r in rows if r["region"] == ""]
+    assert outside
+    assert {(r["region_id"], r["region_color"]) for r in outside} == {("0", "")}
+    assert any(r["region"] == "B" for r in rows)
+
+
 def test_paxinos_export_follows_the_alignment_too(tmp_path):
     """The gap this closes: both exporters were ignoring Shank.ephys."""
     plain, aligned = tmp_path / "a.csv", tmp_path / "b.csv"

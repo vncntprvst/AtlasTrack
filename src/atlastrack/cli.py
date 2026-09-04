@@ -420,8 +420,24 @@ def export_cmd(
         ),
     ] = False,
     atlas: Annotated[
-        str, typer.Option(help="BrainGlobe atlas id, used only with --remap.")
-    ] = "allen_mouse_25um",
+        str | None,
+        typer.Option(
+            help=(
+                "BrainGlobe atlas id used for --remap and for the region columns. "
+                "Defaults to the atlas the project was registered against."
+            )
+        ),
+    ] = None,
+    regions: Annotated[
+        bool,
+        typer.Option(
+            "--regions/--no-regions",
+            help=(
+                "Add region, region_id and region_color columns to the CCF CSV by "
+                "looking each channel up in the atlas (on by default)."
+            ),
+        ),
+    ] = True,
     rigid_array: Annotated[
         bool,
         typer.Option(
@@ -463,24 +479,39 @@ def export_cmd(
     export can be refreshed after the project has been corrected. Writes
     ``<name>.csv`` (CCF µm) and ``<name> - Paxinos.csv`` (stereotaxic mm).
     """
-    from atlastrack.probes.channels import export_channel_csv, export_paxinos_csv
+    from atlastrack.probes.channels import (
+        REGION_COLUMNS,
+        export_channel_csv,
+        export_paxinos_csv,
+    )
     from atlastrack.project.io import load_project, save_project
     from atlastrack.project.provenance import write_export_provenance
 
     project = load_project(project_json)
     out_dir = out_dir or project_json.parent
     base = name or project_json.stem
+    atlas_name = atlas or project.atlas.name
+
+    # One atlas load serves both --remap and the region columns. A failed load
+    # must not lose the coordinates: the CSV is still written, just without
+    # regions, and the provenance sidecar records that.
+    bg_atlas = None
+    if remap or regions:
+        bg_atlas = _load_export_atlas(atlas_name)
+        if bg_atlas is None:
+            if remap:
+                raise typer.Exit(code=1)
+            typer.echo(
+                f"warning: atlas '{atlas_name}' could not be loaded - exporting "
+                "without region columns"
+            )
 
     if remap:
-        from brainglobe_atlasapi import BrainGlobeAtlas
-
         from atlastrack.registration.pipeline import (
             _apply_to_shank_registered,
             reload_registered_transforms,
         )
 
-        logger.info("loading atlas {}", atlas)
-        bg_atlas = BrainGlobeAtlas(atlas)
         transforms = reload_registered_transforms(
             project, bg_atlas, project_dir=project_json.parent
         )
@@ -505,7 +536,8 @@ def export_cmd(
 
     ccf_path = out_dir / f"{base}.csv"
     pax_path = out_dir / f"{base} - Paxinos.csv"
-    n_ccf = export_channel_csv(project, ccf_path)
+    region_atlas = bg_atlas if regions else None
+    n_ccf = export_channel_csv(project, ccf_path, atlas=region_atlas)
     n_pax = export_paxinos_csv(project, pax_path, alignment=paxinos_alignment)
 
     if n_ccf == 0:
@@ -523,6 +555,8 @@ def export_cmd(
         outputs=[ccf_path, pax_path],
         n_rows=n_ccf,
         options={
+            "atlas": atlas_name if bg_atlas is not None else None,
+            "region_columns": list(REGION_COLUMNS) if region_atlas is not None else [],
             "remap": remap,
             "rigid_array": rigid_array,
             "rigid_tolerance": rigid_tolerance if rigid_array else None,
@@ -535,6 +569,29 @@ def export_cmd(
     if save_project_to is not None:
         save_project(project, save_project_to)
         typer.echo(f"wrote project -> {save_project_to}")
+
+
+def _load_export_atlas(name: str):
+    """Load a BrainGlobe atlas for ``export``; ``None`` (after logging) on failure.
+
+    Honours the GUI's configured atlas folder so the CLI finds the same copies.
+    ``check_latest=False`` skips BrainGlobe's un-timed online version check, which
+    can hang a headless export when the GIN server is unreachable.
+    """
+    from brainglobe_atlasapi import BrainGlobeAtlas
+
+    from atlastrack.config import load_app_settings
+
+    kwargs: dict = {"check_latest": False}
+    atlas_dir = load_app_settings().atlas_dir
+    if atlas_dir:
+        kwargs["brainglobe_dir"] = atlas_dir
+    logger.info("loading atlas {}", name)
+    try:
+        return BrainGlobeAtlas(name, **kwargs)
+    except Exception as exc:  # any load failure degrades to 'no regions'
+        logger.error("atlas {} failed to load: {}", name, exc)
+        return None
 
 
 if __name__ == "__main__":

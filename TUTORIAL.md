@@ -171,7 +171,7 @@ Needs the `ephys` extra and a probe that already has tip and entry.
 | Registration | Every section has a residual, no error dialog |
 | Overlay | Outlines follow the anatomy, not just the outer edge |
 | 3-D view | The probe sits inside the brain, in the structure you expect |
-| CSV | One row per channel |
+| CSV | One row per channel, with its region, id and colour |
 
 ---
 

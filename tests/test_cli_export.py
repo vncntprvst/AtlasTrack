@@ -6,6 +6,7 @@ project, so a corrected project can be re-exported without re-registering.
 from __future__ import annotations
 
 import csv
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -24,6 +25,32 @@ from atlastrack.project.schema import (
 )
 
 runner = CliRunner()
+
+
+class _Atlas:
+    """Two-region fake so ``export`` never loads (or downloads) a real atlas."""
+
+    structures: ClassVar[dict] = {
+        "A": {"rgb_triplet": [1, 2, 3], "id": 111},
+        "B": {"rgb_triplet": [4, 5, 6], "id": 222},
+    }
+
+    def structure_from_coords(self, coords, *, microns=True, as_acronym=True):
+        _ap, dv, _ml = coords
+        return "A" if dv < 3500 else "B"
+
+
+@pytest.fixture(autouse=True)
+def _fake_atlas(monkeypatch):
+    """Every test here gets the fake atlas; ``requested`` records what was asked."""
+    requested: list[str] = []
+
+    def _load(name):
+        requested.append(name)
+        return _Atlas()
+
+    monkeypatch.setattr("atlastrack.cli._load_export_atlas", _load)
+    return requested
 
 # A 4-shank NP2.0 whose picks are deliberately uneven: the shanks should sit
 # 250 µm apart in ML but shank 2 is pulled out to a 400 µm gap.
@@ -80,6 +107,62 @@ def test_export_writes_ccf_and_paxinos(tmp_path) -> None:
     pax_header, pax_rows = _read(pax)
     assert pax_header == ["probe", "shank", "channel", "ap_mm", "ml_mm", "dv_mm"]
     assert len(pax_rows) == len(rows)
+
+
+def test_export_adds_region_columns_from_the_project_atlas(tmp_path, _fake_atlas) -> None:
+    """The gap this closes: the exporter could add regions but the CLI never asked."""
+    project_json = tmp_path / "LO_test_whole.json"
+    save_project(_make_project(), project_json)
+
+    result = runner.invoke(app, ["export", str(project_json)])
+    assert result.exit_code == 0, result.output
+
+    header, rows = _read(tmp_path / "LO_test_whole.csv")
+    assert header[-3:] == ["region", "region_id", "region_color"]
+    regions = {r[-3] for r in rows}
+    assert regions == {"A", "B"}
+    assert {r[-2] for r in rows} == {"111", "222"}
+    assert {r[-1] for r in rows} == {"#010203", "#040506"}
+    assert _fake_atlas == ["allen_mouse_25um"]  # the project's atlas, not a hard-coded one
+
+    import json
+
+    prov = json.loads((tmp_path / "LO_test_whole.provenance.json").read_text())
+    assert prov["options"]["atlas"] == "allen_mouse_25um"
+    assert prov["options"]["region_columns"] == ["region", "region_id", "region_color"]
+
+
+def test_export_no_regions_skips_the_atlas(tmp_path, _fake_atlas) -> None:
+    project_json = tmp_path / "LO_test_whole.json"
+    save_project(_make_project(), project_json)
+
+    result = runner.invoke(app, ["export", str(project_json), "--no-regions"])
+    assert result.exit_code == 0, result.output
+
+    header, _rows = _read(tmp_path / "LO_test_whole.csv")
+    assert header[-1] == "depth_source"
+    assert _fake_atlas == []
+
+
+def test_export_survives_an_atlas_that_fails_to_load(tmp_path, monkeypatch) -> None:
+    """Coordinates must still ship; the sidecar records that regions are absent."""
+    project_json = tmp_path / "LO_test_whole.json"
+    save_project(_make_project(), project_json)
+    monkeypatch.setattr("atlastrack.cli._load_export_atlas", lambda name: None)
+
+    result = runner.invoke(app, ["export", str(project_json)])
+    assert result.exit_code == 0, result.output
+    assert "without region columns" in result.output
+
+    header, rows = _read(tmp_path / "LO_test_whole.csv")
+    assert header[-1] == "depth_source"
+    assert len(rows) > 0
+
+    import json
+
+    prov = json.loads((tmp_path / "LO_test_whole.provenance.json").read_text())
+    assert prov["options"]["atlas"] is None
+    assert prov["options"]["region_columns"] == []
 
 
 def test_export_respects_out_dir_and_name(tmp_path) -> None:

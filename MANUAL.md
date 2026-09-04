@@ -234,10 +234,18 @@ opens the brain and probes in a 3-D window.
 
 | Format | What you get |
 |---|---|
-| Per-channel coordinates (CSV) | One row per recording channel |
+| Per-channel coordinates (CSV) | One row per recording channel, with its atlas region |
 | Probe tracks for Python / HERBS (pkl) | The tracks, for the older pipeline |
 | 3D view as interactive HTML | A page you can send someone |
 | Registered section series (folder) | Your sections, in order, with region outlines |
+
+The per-channel CSV has columns `probe, shank, channel, ap_um, ml_um, dv_um,
+depth_source, region, region_id, region_color`. `depth_source` says whether that
+shank's depths came from the ephys alignment or from probe geometry alone. The
+three region columns come from looking each channel up in the project's atlas:
+the acronym, the Allen structure id, and the atlas colour as `#rrggbb`. A channel
+outside the atlas has an empty acronym, id `0` and an empty colour. The atlas is
+loaded on first use, so the first CSV export can take a moment.
 
 **Convert to Paxinos stereotaxic coordinates** (CSV only) converts the finished
 coordinates to millimetres from bregma. The **?** explains the choices and how far

@@ -33,6 +33,35 @@ def _error_dialog(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.critical(parent, title, str(message)[:2000])
 
 
+#: Colour of the atlas-overlay contours (RGBA, 0-1). Pinned rather than left to
+#: napari's label palette: label value 1 there is a dark brown that disappears on
+#: dark tissue, and the palette is napari's to change.
+OVERLAY_CONTOUR_RGBA = (1.0, 1.0, 1.0, 1.0)
+
+#: Blending for the overlay Labels layers. ``translucent`` depth-tests against the
+#: slide image at the same z and can lose the whole layer; ``translucent_no_depth``
+#: composites on top of whatever is below, which is what an outline wants.
+OVERLAY_BLENDING = "translucent_no_depth"
+
+
+def style_overlay_layer(layer) -> None:
+    """Give an atlas-overlay Labels layer its fixed look: white contours, no depth test.
+
+    Applied on creation *and* on data refresh, so a layer that outlived a project
+    reload is restyled too. Best-effort on the colormap: a napari without
+    ``DirectLabelColormap`` keeps its default palette rather than failing the overlay.
+    """
+    layer.blending = OVERLAY_BLENDING
+    try:
+        from napari.utils.colormaps import DirectLabelColormap
+
+        layer.colormap = DirectLabelColormap(
+            color_dict={1: list(OVERLAY_CONTOUR_RGBA), None: [0.0, 0.0, 0.0, 0.0]}
+        )
+    except Exception:  # noqa: BLE001 - older napari: palette colour is still drawn
+        pass
+
+
 # The live landmark-drag preview must look like the ordinary atlas overlay: a
 # 1-pixel contour. Thickening the splat was the old way to stop the warped
 # points reading as dots, but it doubled (thickness=1) or trebled (=2) the ink
@@ -733,6 +762,7 @@ class RegisterPanelWidget(QWidget):
                 layer = self._viewer.add_labels(
                     edge_labels, name=name, opacity=0.7, translate=(y0, x0)
                 )
+            style_overlay_layer(layer)
             # Stash the full region-id image (the displayed layer is only edges) so a
             # hover callback can name the region under the cursor.
             layer.metadata["region_ids"] = labels
@@ -1046,7 +1076,9 @@ class RegisterPanelWidget(QWidget):
             layer.translate = (y0, x0)
             layer.affine = affine
         else:
-            self._viewer.add_labels(edges, name=name, opacity=0.7, translate=(y0, x0)).affine = affine
+            layer = self._viewer.add_labels(edges, name=name, opacity=0.7, translate=(y0, x0))
+            layer.affine = affine
+        style_overlay_layer(layer)
 
     def _landmark_layer(self):
         if self._landmark_idx is None:
