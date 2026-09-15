@@ -171,7 +171,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from atlastrack import __version__
-    assert __version__ == "0.8.0"
+    assert __version__ == "0.8.1"
 
 
 @pytest.mark.qt
@@ -208,3 +208,22 @@ def test_register_panel_with_settings(qtbot) -> None:
         assert widget._params_box.parent() is widget._params_dialog
     finally:
         viewer.close()
+
+
+def test_tests_never_point_at_the_real_preferences_file() -> None:
+    """The autouse isolation fixture must actually be in force.
+
+    Pinned because the failure is silent and off-site: nothing in a test run goes
+    red, and the damage shows up later in the developer's own app as an emptied
+    "Load recent" menu. If someone removes the fixture in ``conftest.py``, this
+    fails instead of a user losing their project list.
+    """
+    from pathlib import Path
+
+    from atlastrack import config
+
+    home = Path.home()
+    assert config._PREFS_DIR != home / ".atlastrack"
+    assert config._PREFS_FILE != home / ".atlastrack" / "settings.json"
+    assert config._LEGACY_PREFS_DIR != home / ".histo2ccf"
+    assert config._LEGACY_PREFS_FILE != home / ".histo2ccf" / "settings.json"
