@@ -2078,3 +2078,75 @@ def test_section_numbers_stay_the_topmost_layer(qtbot) -> None:
         assert [str(v) for v in viewer.layers[-1].text.values] == ["0", "2", "5"]
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_place_landmarks_says_nothing_is_registered_when_nothing_is(qtbot, monkeypatch) -> None:
+    """The old message told the user to pick from a list that was empty.
+
+    "Pick a registered section first" is unfollowable when the picker lists only
+    registered sections and none exist - the advice names the wrong obstacle.
+    """
+    import napari
+
+    from atlastrack.gui.widgets import register_panel as rp
+
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setattr(rp, "_error_dialog", lambda parent, title, msg: seen.append((title, msg)))
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        state.project.slides.append(
+            Slide(image_path="s.png", sections=[Section(index=0, slide_idx=0,
+                                                        bbox_px=(0, 0, 50, 50), ap_order=0)])
+        )
+        panel = rp.RegisterPanelWidget(state, viewer)
+        qtbot.addWidget(panel)
+        panel._populate_adjust_combo()
+        assert panel._adjust_combo.count() == 0, "an unregistered section must not be listed"
+
+        panel._place_landmarks()
+
+        assert seen, "the refusal must be explained"
+        title, msg = seen[-1]
+        assert "registered" in title.lower()
+        assert "Register all sections" in msg, "it must name the step that unblocks it"
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_the_section_picker_refreshes_when_the_tab_is_shown(qtbot) -> None:
+    """Registration can finish while this tab is hidden.
+
+    Populating the picker only on project load and on 'Show atlas overlay' left it
+    empty exactly when someone switched here to place landmarks.
+    """
+    import napari
+
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        section = Section(index=4, slide_idx=0, bbox_px=(0, 0, 50, 50), ap_order=0)
+        state.project.slides.append(Slide(image_path="s.png", sections=[section]))
+        panel = RegisterPanelWidget(state, viewer)
+        qtbot.addWidget(panel)
+        assert panel._adjust_combo.count() == 0
+
+        # Registration lands while the tab is not in front.
+        from atlastrack.project.schema import RegistrationResult
+
+        section.registration = RegistrationResult(
+            anchoring=[0.0] * 9, output_size_px=(50, 50), residual=0.5
+        )
+        from qtpy.QtGui import QShowEvent
+
+        panel.showEvent(QShowEvent())
+
+        assert panel._adjust_combo.count() == 1
+        assert panel._adjust_combo.itemData(0) == 4, "listed by its stored id"
+    finally:
+        viewer.close()

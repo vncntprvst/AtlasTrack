@@ -410,12 +410,6 @@ class RegisterPanelWidget(QWidget):
         self._params_dialog.raise_()
         self._params_dialog.activateWindow()
 
-    def _display_no(self, section) -> int:
-        """What the UI calls this section: its 1-based position in the AP order."""
-        from atlastrack.gui.workflow import section_display_no
-
-        return section_display_no(self._state.project, section)
-
     def _on_elastix_toggled(self, on: bool) -> None:
         """Enable the elastix-only controls only when elastix is selected."""
         self._bending_spin.setEnabled(on)
@@ -938,6 +932,58 @@ class RegisterPanelWidget(QWidget):
                     return sec
         return None
 
+    def _require_registered_section(self):
+        """The chosen section, or None having said *which* thing is missing.
+
+        These used to share one message - "Pick a registered section first" - which
+        is misleading in the common case: the picker only lists sections that have
+        a registration, so when it is empty there is nothing to pick and the advice
+        cannot be followed. Naming the actual obstacle is the difference between a
+        dead end and a next step.
+        """
+        section = self._adjust_section()
+        if section is None:
+            if self._adjust_combo.count() == 0:
+                _error_dialog(
+                    self,
+                    "Nothing registered yet",
+                    "No section has a registration, so there is none to adjust.\n"
+                    "Run 'Register all sections' above first - landmarks and the "
+                    "box transform correct an existing registration, they do not "
+                    "replace it.",
+                )
+            else:
+                _error_dialog(
+                    self,
+                    "No section chosen",
+                    "Pick a section in the 'Section' dropdown above.",
+                )
+            return None
+        if section.registration is None:
+            _error_dialog(
+                self,
+                "Section not registered",
+                f"Section {section.index} has no registration yet. "
+                f"Run 'Register all sections' above first.",
+            )
+            return None
+        return section
+
+    def showEvent(self, event) -> None:
+        """Refresh the section picker whenever this tab comes to the front.
+
+        The picker lists only sections that have a registration, and registration
+        finishes while this tab may not be visible. Populating it solely on project
+        load and on 'Show atlas overlay' left it empty exactly when someone came
+        here to place landmarks - so the button refused, and said to pick a section
+        from a list that had nothing in it.
+        """
+        super().showEvent(event)
+        try:
+            self._populate_adjust_combo()
+        except Exception:  # a stale picker must never stop the tab opening
+            pass
+
     def _overlay_layer_for(self, section):
         name = f"Atlas overlay {section.index}"
         if name in self._viewer.layers:
@@ -969,7 +1015,7 @@ class RegisterPanelWidget(QWidget):
             self._focus_section(section)
             self._adjust_btn.setText(BOX_TRANSFORM_ACTIVE_TEXT)
             self._status.setText(
-                f"Adjusting section {self._display_no(section)}: drag inside the box to move, corner / "
+                f"Adjusting section {section.index}: drag inside the box to move, corner / "
                 f"edge handles to scale, the handle above the top edge to rotate. "
                 f"Click '{BOX_TRANSFORM_ACTIVE_TEXT}' when done."
             )
@@ -1067,7 +1113,7 @@ class RegisterPanelWidget(QWidget):
         self._rerender_section_overlay(section)
         self._remap_and_save(section)
         self._status.setText(
-            f"Section {self._display_no(section)}: morph dropped, atlas plane (AP/ML) kept. "
+            f"Section {section.index}: morph dropped, atlas plane (AP/ML) kept. "
             "Click 'Place landmarks' to fit it by hand."
         )
 
@@ -1148,9 +1194,8 @@ class RegisterPanelWidget(QWidget):
 
         from atlastrack.registration.landmarks_warp import salient_landmarks
 
-        section = self._adjust_section()
-        if section is None or section.registration is None:
-            _error_dialog(self, "No registered section", "Pick a registered section first.")
+        section = self._require_registered_section()
+        if section is None:
             return
         labels = self._warp_labels_for(section, apply_landmarks=False)
         if labels is None:
@@ -1200,7 +1245,7 @@ class RegisterPanelWidget(QWidget):
         self._lm_move_btn.setChecked(False)
         self._lm_add_btn.setChecked(False)
         self._status.setText(
-            f"Section {self._display_no(section)}: drag landmarks onto the tissue (warp); Ctrl+drag "
+            f"Section {section.index}: drag landmarks onto the tissue (warp); Ctrl+drag "
             f"or 'Move points' to relocate; 'Add points' + click to add, Delete to remove. "
             f"Then 'Apply landmark warp'."
         )
@@ -1363,9 +1408,8 @@ class RegisterPanelWidget(QWidget):
         from atlastrack.gui.widgets.pair_points_dialog import PairPointsDialog
         from atlastrack.io.ccf_coords import bregma_ap_for_display
 
-        section = self._adjust_section()
+        section = self._require_registered_section()
         if section is None:
-            _error_dialog(self, "No section", "Pick a section first.")
             return
         if self._state.atlas is None:
             _error_dialog(
@@ -1416,9 +1460,9 @@ class RegisterPanelWidget(QWidget):
                         _apply_to_shank_registered(shank, self._state.project, transforms)
                 remapped = True
             except Exception as exc:  # noqa: BLE001
-                self._status.setText(f"Section {self._display_no(section)}: probe re-map failed: {exc}")
+                self._status.setText(f"Section {section.index}: probe re-map failed: {exc}")
 
-        msg = f"Section {self._display_no(section)} adjustment applied"
+        msg = f"Section {section.index} adjustment applied"
         msg += " (probes re-mapped)" if remapped else ""
         path = self._ensure_project_path()
         if path is not None:
