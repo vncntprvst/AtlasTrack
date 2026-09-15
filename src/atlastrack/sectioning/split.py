@@ -36,16 +36,24 @@ class DetectedSection:
 
 
 def _to_gray(image: np.ndarray) -> np.ndarray:
-    """Convert to a float grayscale image in [0, 1]."""
+    """Convert to a float32 grayscale image in [0, 1].
+
+    **float32, not float64, and that matters at slide scale.** A 2x whole-slide
+    scan is ~100 megapixels; the RGB working copy alone is 2.5 GB in float64 and
+    1.2 GB in float32, and this function runs twice per detection (once for
+    :func:`estimate_min_area`, once for :func:`detect_sections`). float32 carries
+    ~7 significant digits against source data quantised to 1/255, so the extra
+    precision bought nothing but page faults.
+    """
     if image.ndim == 2:
-        return image.astype(float) / (255.0 if image.dtype == np.uint8 else 1.0)
+        return image.astype(np.float32) / (255.0 if image.dtype == np.uint8 else 1.0)
     if image.ndim == 3 and image.shape[2] in (3, 4):
         # For fluorescence (predominantly blue/green channels), max-of-channels
         # tends to preserve tissue better than luminance-based RGB→gray.
-        rgb = image[..., :3].astype(float)
+        rgb = image[..., :3].astype(np.float32)
         if rgb.max() > 1.5:
             rgb /= 255.0
-        return np.maximum(rgb2gray(rgb), rgb.max(axis=-1))
+        return np.maximum(rgb2gray(rgb), rgb.max(axis=-1)).astype(np.float32)
     raise ValueError(f"unsupported image shape {image.shape}")
 
 
