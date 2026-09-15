@@ -23,22 +23,77 @@ class OrderedSection:
     ap_order: int
 
 
-def _cluster_rows(ys: np.ndarray, min_gap: float) -> np.ndarray:
-    """Cluster centroid y-values into rows: new row when diff > ``min_gap``."""
-    order = np.argsort(ys)
-    ys_sorted = ys[order]
-    diffs = np.diff(ys_sorted)
+def _cluster_1d(values: np.ndarray, min_gap: float) -> np.ndarray:
+    """Cluster 1D centroid values: a new group starts when a sorted gap > ``min_gap``."""
+    order = np.argsort(values)
+    sorted_vals = values[order]
+    diffs = np.diff(sorted_vals)
     if len(diffs) == 0:
-        return np.zeros(len(ys), dtype=int)
-    row_of_sorted = np.zeros(len(ys), dtype=int)
-    current_row = 0
+        return np.zeros(len(values), dtype=int)
+    group_of_sorted = np.zeros(len(values), dtype=int)
+    current = 0
     for i, d in enumerate(diffs, start=1):
         if d > min_gap:
-            current_row += 1
-        row_of_sorted[i] = current_row
-    row_of_original = np.empty_like(row_of_sorted)
-    row_of_original[order] = row_of_sorted
-    return row_of_original
+            current += 1
+        group_of_sorted[i] = current
+    group_of_original = np.empty_like(group_of_sorted)
+    group_of_original[order] = group_of_sorted
+    return group_of_original
+
+
+def _grid_positions(
+    cxs: np.ndarray,
+    cys: np.ndarray,
+    widths: np.ndarray,
+    heights: np.ndarray,
+    *,
+    column_first: bool,
+    left_to_right: bool,
+    top_to_bottom: bool,
+    gap_factor: float,
+) -> list[tuple[int, int, int]]:
+    """Assign each section a ``(orig_idx, row, col)`` grid position.
+
+    **Which axis is clustered follows ``column_first``, and that is the whole
+    point.** Finding rows as gaps in a global sort of y assumes every column's
+    sections line up horizontally. On a real slide they frequently do not - the
+    sections are laid down column by column and drift vertically, so no global y
+    gap exists. Every section then lands in a single row, and column-first
+    numbering collapses to "sort by x" - which, *within* one column, is noise: on
+    a real 5-column slide the left column's centroids spanned only 2213..2335 px,
+    so its six sections came out numbered 0, 2, 3, 1, 5, 4 from top to bottom.
+
+    Columns are separated by roughly the width of a section, which is exactly the
+    gap this clustering can see. So column-first clusters **x** into columns and
+    ranks by y inside each; row-first clusters **y** into rows and ranks by x
+    inside each. On a cleanly aligned grid the two agree, which is why the
+    synthetic-grid tests passed throughout.
+    """
+    if column_first:
+        spread, inner_vals = cxs, cys
+        extent, inner_forward = widths, top_to_bottom
+        outer_forward = left_to_right
+    else:
+        spread, inner_vals = cys, cxs
+        extent, inner_forward = heights, left_to_right
+        outer_forward = top_to_bottom
+
+    median_extent = float(np.median(extent)) if len(extent) else 1.0
+    groups = _cluster_1d(spread, min_gap=max(median_extent * gap_factor, 1.0))
+
+    means = {g: float(spread[groups == g].mean()) for g in np.unique(groups)}
+    group_order = sorted(means, key=lambda g: means[g], reverse=not outer_forward)
+
+    entries: list[tuple[int, int, int]] = []
+    for outer, g in enumerate(group_order):
+        idxs = np.where(groups == g)[0]
+        inner_sort = np.argsort(inner_vals[idxs])
+        if not inner_forward:
+            inner_sort = inner_sort[::-1]
+        for inner, idx in enumerate(idxs[inner_sort]):
+            row, col = (inner, outer) if column_first else (outer, inner)
+            entries.append((int(idx), row, col))
+    return entries
 
 
 def _band_of(cy: float, bands: list[tuple[int, int]]) -> int:
@@ -61,10 +116,10 @@ def order_sections(
 ) -> list[OrderedSection]:
     """Order sections into a linear AP sequence and tag each with row/col.
 
-    Sections are clustered into rows (centroids differing in y by more than
-    ``row_gap_factor`` × median section height start a new row). The ``row`` and
-    ``col`` tags follow that grid. The ``ap_order`` numbering then walks the grid
-    either:
+    Sections are clustered along whichever axis the walk order depends on, using
+    ``row_gap_factor`` × the median section extent on that axis as the gap that
+    separates one group from the next (see :func:`_grid_positions`). The ``row``
+    and ``col`` tags follow that grid, and ``ap_order`` walks it either:
 
     * **column-first** (default) - down column 0 (top→bottom), then column 1,
       etc. This matches how sections are usually laid out on the lab's slides.
@@ -105,26 +160,15 @@ def order_sections(
     cys = np.array([s.centroid_px[1] for s in sections])
     cxs = np.array([s.centroid_px[0] for s in sections])
     heights = np.array([s.bbox_px[3] - s.bbox_px[1] for s in sections], dtype=float)
-    median_h = float(np.median(heights)) if len(heights) else 1.0
-    min_gap = max(median_h * row_gap_factor, 1.0)
-    rows = _cluster_rows(cys, min_gap=min_gap)
+    widths = np.array([s.bbox_px[2] - s.bbox_px[0] for s in sections], dtype=float)
 
-    # Sort rows top-to-bottom (or bottom-to-top) by mean y.
-    row_means = {r: float(cys[rows == r].mean()) for r in np.unique(rows)}
-    row_order = sorted(row_means, key=lambda r: row_means[r], reverse=not top_to_bottom)
-    new_row_idx = {old: new for new, old in enumerate(row_order)}
+    entries = _grid_positions(
+        cxs, cys, widths, heights, column_first=column_first,
+        left_to_right=left_to_right, top_to_bottom=top_to_bottom,
+        gap_factor=row_gap_factor,
+    )
 
-    # First pass: assign each section its (row, col) grid position.
-    entries: list[tuple[int, int, int]] = []  # (orig_idx, row, col)
-    for old_row in row_order:
-        indices = np.where(rows == old_row)[0]
-        col_sort = np.argsort(cxs[indices])
-        if not left_to_right:
-            col_sort = col_sort[::-1]
-        for col, idx in enumerate(indices[col_sort]):
-            entries.append((int(idx), new_row_idx[old_row], col))
-
-    # Second pass: number ap_order by walking the grid in the requested order.
+    # Number ap_order by walking the grid in the requested order.
     key = (lambda e: (e[2], e[1])) if column_first else (lambda e: (e[1], e[2]))
     ap_rank = {e[0]: rank for rank, e in enumerate(sorted(entries, key=key))}
 
@@ -154,21 +198,13 @@ def geometric_order(
     cxs = np.array([(b[0] + b[2]) / 2.0 for b in bboxes])
     cys = np.array([(b[1] + b[3]) / 2.0 for b in bboxes])
     heights = np.array([b[3] - b[1] for b in bboxes], dtype=float)
-    median_h = float(np.median(heights)) if len(heights) else 1.0
-    rows = _cluster_rows(cys, min_gap=max(median_h * row_gap_factor, 1.0))
+    widths = np.array([b[2] - b[0] for b in bboxes], dtype=float)
 
-    row_means = {r: float(cys[rows == r].mean()) for r in np.unique(rows)}
-    row_order = sorted(row_means, key=lambda r: row_means[r], reverse=not top_to_bottom)
-    new_row_idx = {old: new for new, old in enumerate(row_order)}
-
-    entries: list[tuple[int, int, int]] = []
-    for old_row in row_order:
-        indices = np.where(rows == old_row)[0]
-        col_sort = np.argsort(cxs[indices])
-        if not left_to_right:
-            col_sort = col_sort[::-1]
-        for col, idx in enumerate(indices[col_sort]):
-            entries.append((int(idx), new_row_idx[old_row], col))
+    entries = _grid_positions(
+        cxs, cys, widths, heights, column_first=column_first,
+        left_to_right=left_to_right, top_to_bottom=top_to_bottom,
+        gap_factor=row_gap_factor,
+    )
 
     key = (lambda e: (e[2], e[1])) if column_first else (lambda e: (e[1], e[2]))
     ordered = sorted(entries, key=key)

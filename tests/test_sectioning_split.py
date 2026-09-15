@@ -207,3 +207,54 @@ def test_real_slide_yields_expected_sections() -> None:
     # is wildly larger than the others (that would indicate a merged blob).
     areas = sorted(s.area_px for s in sections)
     assert areas[-1] / areas[0] < 6.0, "largest section is suspiciously bigger than smallest"
+
+
+def test_column_first_survives_columns_that_do_not_line_up_in_rows() -> None:
+    """Real slides stagger: no global y gap exists, and rows cannot be found in y.
+
+    This is the case that broke on a real 5-column slide. Sections are placed
+    column by column and drift vertically, so sorting every centroid by y leaves
+    no gap big enough to call a row boundary. Everything then landed in one row,
+    column-first degenerated to "sort by x", and because a single column's x
+    values differ only by jitter the result was noise - the left column numbered
+    0, 2, 3, 1, 5, 4 top to bottom.
+
+    Geometry here reproduces that: spacing (110) is bigger than a section (100)
+    but smaller than twice the row-gap threshold, and the second column is offset
+    half a step, so every consecutive y gap is 55 - below the 60 px threshold.
+    """
+    from atlastrack.sectioning.split import DetectedSection
+
+    def sec(cx, cy):
+        return DetectedSection(
+            (cx - 50, cy - 50, cx + 50, cy + 50), np.zeros((1, 1), bool),
+            10_000, (float(cx), float(cy)), 1.0,
+        )
+
+    # x jitter within each column, deliberately not matching the y order.
+    left = [sec(100, 100), sec(130, 210), sec(110, 320)]
+    right = [sec(400, 155), sec(430, 265), sec(410, 375)]
+    ordered = order_sections(left + right)
+
+    by_pos = {(int(o.section.centroid_px[0]), int(o.section.centroid_px[1])): o
+              for o in ordered}
+
+    # Every section sits in exactly two columns, not one row.
+    assert {o.col for o in ordered} == {0, 1}, "x must resolve into two columns"
+
+    # Down the left column, top to bottom, then down the right column.
+    assert [by_pos[(x, y)].ap_order for x, y in ((100, 100), (130, 210), (110, 320))] == [0, 1, 2]
+    assert [by_pos[(x, y)].ap_order for x, y in ((400, 155), (430, 265), (410, 375))] == [3, 4, 5]
+
+
+def test_geometric_order_also_survives_staggered_columns() -> None:
+    """The GUI re-sorts through geometric_order, so it must not regress either."""
+    boxes = [
+        (50, 50, 150, 150),    # left col, top      -> 0
+        (80, 160, 180, 260),   # left col, middle   -> 1
+        (60, 270, 160, 370),   # left col, bottom   -> 2
+        (350, 105, 450, 205),  # right col, top     -> 3
+        (380, 215, 480, 315),  # right col, middle  -> 4
+        (360, 325, 460, 425),  # right col, bottom  -> 5
+    ]
+    assert geometric_order(boxes, column_first=True) == [0, 1, 2, 3, 4, 5]
