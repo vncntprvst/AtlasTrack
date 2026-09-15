@@ -94,9 +94,11 @@ the outlines should follow the anatomy, not just the silhouette.
 
 If one section missed, click it and use **Manual atlas adjustment**:
 
-- **Box transform** for a section that is simply offset or the wrong size.
+- **Box transform** for a section that is simply offset or the wrong size:
+  **Move / scale / rotate overlay**, drag the box, **Apply box transform**.
 - **Landmarks** for local distortion: **Place landmarks**, drag each point onto
-  the matching feature, **Apply landmark warp**.
+  the matching feature, **Apply landmark warp**. Or **Pair points**, then click
+  each feature twice - once on the atlas, once on your tissue.
 - For torn tissue or a missing piece, **Reset morph to plane** first - that gives
   you back a clean atlas slice to fit by hand.
 

@@ -38,6 +38,20 @@ def _error_dialog(parent: QWidget, title: str, message: str) -> None:
 #: dark tissue, and the palette is napari's to change.
 OVERLAY_CONTOUR_RGBA = (1.0, 1.0, 1.0, 1.0)
 
+#: The box-transform button's two states. Its old label named where to drag but
+#: never what the tool does, and read as if it were the only way to adjust the
+#: atlas - the landmark warp below is the other. These name the action, and the
+#: active label matches "Apply landmark warp" beneath it.
+BOX_TRANSFORM_IDLE_TEXT = "Move / scale / rotate overlay"
+BOX_TRANSFORM_ACTIVE_TEXT = "Apply box transform"
+
+#: Scratch layer holding the pending atlas-side click of a landmark pair.
+PAIR_ANCHOR_LAYER = "Landmark pair anchor"
+
+#: How far (canvas px) the pointer may travel and still count as a click, not
+#: a pan. Generous: placing a landmark is a deliberate act on a still canvas.
+PAIR_CLICK_SLOP_PX = 5.0
+
 #: Blending for the overlay Labels layers. ``translucent`` depth-tests against the
 #: slide image at the same z and can lose the whole layer; ``translucent_no_depth``
 #: composites on top of whatever is below, which is what an outline wants.
@@ -279,12 +293,16 @@ class RegisterPanelWidget(QWidget):
         # Tool 1 - box transform, in its own outlined group.
         box_group = QGroupBox("Box transform")
         bg = QVBoxLayout(box_group)
-        self._adjust_btn = QPushButton("Adjust atlas (drag in viewer)")
+        self._adjust_btn = QPushButton(BOX_TRANSFORM_IDLE_TEXT)
         self._adjust_btn.setCheckable(True)
         self._adjust_btn.setToolTip(
-            "Enter transform mode for this section's atlas overlay: drag the body to "
-            "move it, drag the box handles to scale / stretch / rotate. Click again to "
-            "apply (probes re-map and the project auto-saves)."
+            "Shift the whole atlas overlay for this section as one rigid piece, when "
+            "it sits slightly off the tissue. The viewer jumps to the section and "
+            "draws a box around it: drag inside the box to move, drag a corner or "
+            "edge handle to scale / stretch, drag the handle above the top edge to "
+            "rotate. Click again to apply (probes re-map and the project auto-saves). "
+            "For LOCAL mismatches that no single box can fix, use the landmark warp "
+            "below instead."
         )
         self._adjust_btn.toggled.connect(self._on_adjust_toggled)
         bg.addWidget(self._adjust_btn)
@@ -331,6 +349,19 @@ class RegisterPanelWidget(QWidget):
         lm_row.addWidget(self._lm_add_btn)
         lg.addLayout(lm_row)
 
+        self._lm_pair_btn = QPushButton("Pair points (click atlas, then tissue)")
+        self._lm_pair_btn.setCheckable(True)
+        self._lm_pair_btn.setToolTip(
+            "Place correspondences two clicks at a time, the way HERBS does: first "
+            "click a feature ON THE ATLAS OUTLINE, then click that same feature ON "
+            "THE TISSUE. Each pair joins the landmark set and the outline re-warps "
+            "as you go. Use it when the auto-placed handles miss the features you "
+            "care about; on a section with none it starts from an empty set. "
+            "Finish with Apply landmark warp."
+        )
+        self._lm_pair_btn.toggled.connect(self._on_lm_pair_toggled)
+        lg.addWidget(self._lm_pair_btn)
+
         self._apply_lm_btn = QPushButton("Apply landmark warp")
         self._apply_lm_btn.setToolTip("Warp the atlas through the dragged landmarks, re-map probes, save.")
         self._apply_lm_btn.clicked.connect(self._apply_landmarks)
@@ -358,6 +389,10 @@ class RegisterPanelWidget(QWidget):
         self._lm_base_edge_rc = None
         self._lm_base_shape: tuple[int, int] | None = None
         self._lm_origin_xy: tuple[int, int] | None = None
+        # Pair-clicking (HERBS-style): the atlas-side click waiting for its
+        # tissue click, plus the viewer hook that collects them.
+        self._pair_anchor: tuple[float, float] | None = None
+        self._pair_cb = None
 
         layout.addStretch()
 
@@ -926,20 +961,44 @@ class RegisterPanelWidget(QWidget):
             self._adjust_btn.blockSignals(True)
             self._adjust_btn.setChecked(False)
             self._adjust_btn.blockSignals(False)
-            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+            self._adjust_btn.setText(BOX_TRANSFORM_IDLE_TEXT)
             return
 
         if on:
             self._viewer.layers.selection = {layer}
             layer.mode = "transform"
-            self._adjust_btn.setText("Apply adjustment")
+            # Frame the section first: napari draws the transform box around the
+            # layer wherever it is, so at whole-slide zoom the handles are a few
+            # pixels wide somewhere off-screen and the tool reads as "no handles,
+            # dragging just moves the overlay".
+            self._focus_section(section)
+            self._adjust_btn.setText(BOX_TRANSFORM_ACTIVE_TEXT)
             self._status.setText(
-                f"Adjusting section {self._display_no(section)}: drag to move, box handles to "
-                f"scale / stretch / rotate. Click 'Apply adjustment' when done."
+                f"Adjusting section {self._display_no(section)}: drag inside the box to move, corner / "
+                f"edge handles to scale, the handle above the top edge to rotate. "
+                f"Click '{BOX_TRANSFORM_ACTIVE_TEXT}' when done."
             )
         else:
             self._commit_adjustment(section, layer)
-            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+            self._adjust_btn.setText(BOX_TRANSFORM_IDLE_TEXT)
+
+    def _focus_section(self, section) -> None:
+        """Centre and zoom the 2D view on one section's bounding box.
+
+        Best-effort: a camera that cannot be moved must never stop the adjustment
+        itself, so every failure here is swallowed.
+        """
+        try:
+            x0, y0, x1, y1 = (float(v) for v in section.bbox_px)
+            w, h = max(x1 - x0, 1.0), max(y1 - y0, 1.0)
+            self._viewer.dims.ndisplay = 2
+            self._viewer.camera.center = (0.0, (y0 + y1) / 2.0, (x0 + x1) / 2.0)
+            # zoom is canvas pixels per world pixel; leave a margin so the rotation
+            # handle (drawn above the top edge) is not clipped by the canvas.
+            canvas_h, canvas_w = self._viewer._canvas_size
+            self._viewer.camera.zoom = 0.8 * min(canvas_h / h, canvas_w / w)
+        except Exception:  # framing is a convenience, never a blocker
+            pass
 
     def _commit_adjustment(self, section, layer) -> None:
         """Read the layer's world affine, store it section-local, re-map + save."""
@@ -979,7 +1038,7 @@ class RegisterPanelWidget(QWidget):
             self._adjust_btn.blockSignals(True)
             self._adjust_btn.setChecked(False)
             self._adjust_btn.blockSignals(False)
-            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+            self._adjust_btn.setText(BOX_TRANSFORM_IDLE_TEXT)
         # Restore the un-corrected overlay for this section.
         self._rerender_section_overlay(section)
         self._remap_and_save(section)
@@ -1009,7 +1068,7 @@ class RegisterPanelWidget(QWidget):
             self._adjust_btn.blockSignals(True)
             self._adjust_btn.setChecked(False)
             self._adjust_btn.blockSignals(False)
-            self._adjust_btn.setText("Adjust atlas (drag in viewer)")
+            self._adjust_btn.setText(BOX_TRANSFORM_IDLE_TEXT)
         self._rerender_section_overlay(section)
         self._remap_and_save(section)
         self._status.setText(
@@ -1089,6 +1148,17 @@ class RegisterPanelWidget(QWidget):
         return None
 
     def _place_landmarks(self) -> None:
+        """Auto-place landmarks on salient atlas features, ready to be dragged."""
+        self._start_landmarks(empty=False)
+
+    def _start_landmarks(self, *, empty: bool = False) -> bool:
+        """Open a landmark-editing session for the chosen section.
+
+        ``empty=True`` starts with no points, for the pair-clicking workflow where
+        every correspondence is placed by hand. Returns True if a session is open.
+        Kept separate from the button slot so Qt's ``clicked(bool)`` argument can
+        never be mistaken for ``empty``.
+        """
         import numpy as np
 
         from atlastrack.registration.landmarks_warp import salient_landmarks
@@ -1096,11 +1166,11 @@ class RegisterPanelWidget(QWidget):
         section = self._adjust_section()
         if section is None or section.registration is None:
             _error_dialog(self, "No registered section", "Pick a registered section first.")
-            return
+            return False
         labels = self._warp_labels_for(section, apply_landmarks=False)
         if labels is None:
             _error_dialog(self, "Atlas not loaded", "Click 'Show atlas overlay' first.")
-            return
+            return False
         # Cache the un-warped boundary (section-local row/col) so dragging a
         # landmark can re-warp just this contour live (see _preview_landmark_warp).
         # Subsample to keep the per-drag forward-TPS cheap on large sections.
@@ -1116,10 +1186,14 @@ class RegisterPanelWidget(QWidget):
         self._lm_origin_xy = (int(section.bbox_px[0]), int(section.bbox_px[1]))
         # Ensure the overlay layer exists so the live drag preview has a target.
         self._rerender_section_overlay(section)
-        # Continue from stored landmarks if present, else auto-place fresh ones.
+        # Continue from stored landmarks if present, else auto-place fresh ones -
+        # unless this is a pairing session, which starts empty by design.
         if section.manual_landmarks is not None:
             source = np.asarray(section.manual_landmarks.source, dtype=float)
             targets = np.asarray(section.manual_landmarks.target, dtype=float)
+        elif empty:
+            source = np.zeros((0, 2), dtype=float)
+            targets = source.copy()
         else:
             source = salient_landmarks(labels)
             targets = source.copy()
@@ -1127,13 +1201,14 @@ class RegisterPanelWidget(QWidget):
 
         x0, y0 = section.bbox_px[0], section.bbox_px[1]
         # napari (row, col) world coords. data = target; features carry source.
-        data = np.column_stack([targets[:, 1] + y0, targets[:, 0] + x0])
+        data = np.column_stack([targets[:, 1] + y0, targets[:, 0] + x0]).reshape(-1, 2)
         feats = {"sy": source[:, 1] + y0, "sx": source[:, 0] + x0}
         name = f"Atlas landmarks {section.index}"
         if name in self._viewer.layers:
             self._viewer.layers.remove(name)
         layer = self._viewer.add_points(
-            data, name=name, size=16, face_color="red", border_color="white", features=feats
+            data, name=name, size=16, face_color="red", border_color="white",
+            features=feats, ndim=2,
         )
         layer.mode = "select"
         self._viewer.layers.selection = {layer}
@@ -1143,11 +1218,13 @@ class RegisterPanelWidget(QWidget):
         layer.mouse_drag_callbacks.append(self._landmark_drag_modifier)
         self._lm_move_btn.setChecked(False)
         self._lm_add_btn.setChecked(False)
-        self._status.setText(
-            f"Section {self._display_no(section)}: drag landmarks onto the tissue (warp); Ctrl+drag "
-            f"or 'Move points' to relocate; 'Add points' + click to add, Delete to remove. "
-            f"Then 'Apply landmark warp'."
-        )
+        if not empty:
+            self._status.setText(
+                f"Section {self._display_no(section)}: drag landmarks onto the tissue (warp); Ctrl+drag "
+                f"or 'Move points' to relocate; 'Add points' + click to add, Delete to remove. "
+                f"Then 'Apply landmark warp'."
+            )
+        return True
 
     # --- landmark editing callbacks -----------------------------------
 
@@ -1166,6 +1243,139 @@ class RegisterPanelWidget(QWidget):
         layer = self._landmark_layer()
         if layer is not None:
             layer.mode = "add" if on else "select"
+
+    # --- pair clicking (HERBS 6.5.1-style correspondence entry) -------------
+
+    def _on_lm_pair_toggled(self, on: bool) -> None:
+        """Turn click-a-pair mode on/off.
+
+        A pair is the same correspondence the drag workflow produces - atlas anchor
+        plus tissue target - so it is appended to the very same points layer, and
+        every downstream step (live preview, Apply, probe re-map) is unchanged.
+        """
+        if not on:
+            self._end_pair_mode()
+            return
+        section = self._adjust_section()
+        if section is None:
+            self._set_pair_checked(False)
+            return
+        # Reuse an open session on this section; otherwise open an empty one.
+        needs_session = (
+            self._landmark_layer() is None or self._landmark_idx != section.index
+        )
+        if needs_session and not self._start_landmarks(empty=True):
+            self._set_pair_checked(False)
+            return
+        layer = self._landmark_layer()
+        if layer is not None:
+            # Clicks are ours while pairing: leave the points layer passive so a
+            # click cannot also drop a stray point or start a selection box.
+            layer.mode = "pan_zoom"
+        for btn in (self._lm_move_btn, self._lm_add_btn):
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(False)
+        self._pair_anchor = None
+        if self._pair_cb is None:
+            self._pair_cb = self._pair_click_callback
+            self._viewer.mouse_drag_callbacks.append(self._pair_cb)
+        self._focus_section(section)
+        self._status.setText(
+            f"Section {self._display_no(section)}: pairing - click a feature on the ATLAS outline, "
+            f"then the same feature on the TISSUE. Repeat, then 'Apply landmark warp'."
+        )
+
+    def _set_pair_checked(self, on: bool) -> None:
+        self._lm_pair_btn.blockSignals(True)
+        self._lm_pair_btn.setChecked(on)
+        self._lm_pair_btn.blockSignals(False)
+
+    def _end_pair_mode(self) -> None:
+        """Drop the click hook and any half-finished pair. Safe to call twice."""
+        if self._pair_cb is not None:
+            if self._pair_cb in self._viewer.mouse_drag_callbacks:
+                self._viewer.mouse_drag_callbacks.remove(self._pair_cb)
+            self._pair_cb = None
+        self._clear_pair_anchor()
+        self._set_pair_checked(False)
+        layer = self._landmark_layer()
+        if layer is not None:
+            layer.mode = "select"
+
+    def _clear_pair_anchor(self) -> None:
+        self._pair_anchor = None
+        if PAIR_ANCHOR_LAYER in self._viewer.layers:
+            self._viewer.layers.remove(PAIR_ANCHOR_LAYER)
+
+    def _pair_click_callback(self, viewer, event):
+        """Viewer-level hook: a press and release in the same spot is a click.
+
+        Written as a napari drag generator so a real drag still pans the canvas
+        instead of dropping a landmark where the user meant to look around.
+        """
+        start = tuple(float(v) for v in event.position)
+        yield
+        while event.type == "mouse_move":
+            yield
+        end = tuple(float(v) for v in event.position)
+        if abs(end[-2] - start[-2]) + abs(end[-1] - start[-1]) > PAIR_CLICK_SLOP_PX:
+            return  # a drag, not a click
+        try:
+            self._record_pair_click(start[-2], start[-1])
+        except Exception as exc:  # a bad click must not kill the hook
+            self._status.setText(f"Pairing failed: {exc}")
+
+    def _record_pair_click(self, wy: float, wx: float) -> None:
+        """First click sets the atlas anchor; the second completes the pair."""
+        import numpy as np
+
+        layer = self._landmark_layer()
+        if layer is None:
+            self._end_pair_mode()
+            return
+
+        if self._pair_anchor is None:
+            self._pair_anchor = (wy, wx)
+            self._show_pair_anchor(wy, wx)
+            self._viewer.layers.selection = {layer}
+            n = len(np.asarray(layer.data, dtype=float).reshape(-1, 2)) + 1
+            self._status.setText(
+                f"Pair {n}: atlas point set - now click the matching feature on the "
+                f"tissue. Un-check 'Pair points' to cancel it."
+            )
+            return
+
+        sy, sx = self._pair_anchor
+        data = np.asarray(layer.data, dtype=float).reshape(-1, 2)
+        # Append the target. _on_landmark_data anchors any new point where it was
+        # dropped, so the atlas-side source is written back over it here.
+        layer.data = np.vstack([data, [[wy, wx]]])
+        n = len(np.asarray(layer.data, dtype=float).reshape(-1, 2))
+        feat_sy = np.resize(np.array(layer.features.get("sy", []), dtype=float), n)
+        feat_sx = np.resize(np.array(layer.features.get("sx", []), dtype=float), n)
+        feat_sy[-1], feat_sx[-1] = sy, sx
+        layer.features = {"sy": feat_sy, "sx": feat_sx}
+        self._lm_prev_data = np.asarray(layer.data, dtype=float).reshape(-1, 2).copy()
+        self._clear_pair_anchor()
+        self._viewer.layers.selection = {layer}
+        self._preview_landmark_warp()
+        self._status.setText(
+            f"{n} pair(s) placed. Click the next atlas point, or 'Apply landmark warp' "
+            f"(needs at least 4)."
+        )
+
+    def _show_pair_anchor(self, wy: float, wx: float) -> None:
+        """Mark the pending atlas-side click so the user can see what they set."""
+        import numpy as np
+
+        if PAIR_ANCHOR_LAYER in self._viewer.layers:
+            self._viewer.layers.remove(PAIR_ANCHOR_LAYER)
+        marker = self._viewer.add_points(
+            np.array([[wy, wx]]), name=PAIR_ANCHOR_LAYER, size=16,
+            face_color="yellow", border_color="black", ndim=2,
+        )
+        marker.mode = "pan_zoom"  # must not steal the second click
 
     def _on_landmark_data(self, event=None) -> None:
         """Keep each point's source (atlas anchor, in `features`) in sync on edits."""
@@ -1216,6 +1426,7 @@ class RegisterPanelWidget(QWidget):
         self._landmark_idx = None
         self._lm_base_edge_rc = None
         self._lm_prev_data = None
+        self._end_pair_mode()
         for btn in (self._lm_move_btn, self._lm_add_btn):
             btn.blockSignals(True)
             btn.setChecked(False)

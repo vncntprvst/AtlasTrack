@@ -194,16 +194,33 @@ sections** to see the outlines on your tissue.
 Click the section in the image, or pick it in **Manual atlas adjustment ▸
 Section**.
 
-**Box transform** - **Adjust atlas (drag in viewer)**: drag to move, drag the
-handles to scale, stretch or rotate. Toggle off to apply.
+**Box transform** - **Move / scale / rotate overlay** shifts the whole overlay
+as one rigid piece. The view jumps to the section and draws a box round it: drag
+inside the box to move, drag a corner or edge handle to scale or stretch, drag the
+handle above the top edge to rotate. Click **Apply box transform** when done.
 
-**Landmarks**, for local distortion a box cannot fix:
+**Landmarks**, for local distortion a box cannot fix. Either place the points and
+drag them, or click them in pairs.
+
+Drag the auto-placed points:
 
 1. **Place landmarks** drops points on recognisable features - outline tips,
    junctions, corners.
 2. Drag each onto the matching spot on your tissue. The outline follows as you
    drag. **Ctrl+drag** moves a point without warping.
 3. **Apply landmark warp**.
+
+Or click your own pairs, the way HERBS does:
+
+1. **Pair points (click atlas, then tissue)**. On a section with no landmarks yet
+   this starts from an empty set.
+2. Click a feature on the atlas outline. A yellow marker shows the pending point.
+3. Click that same feature on your tissue. The pair joins the set and the outline
+   re-warps. Repeat for as many pairs as you need.
+4. **Apply landmark warp**, once you have at least four pairs.
+
+Both routes fill the same landmark set, so you can start with the auto-placed
+points and add hand-clicked pairs to them.
 
 **Reset morph to plane** drops the automatic warp but keeps the level - the right
 move for torn tissue or a missing piece, then place landmarks by hand.
