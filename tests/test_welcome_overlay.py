@@ -137,14 +137,25 @@ def test_it_is_parented_to_the_canvas_not_the_splitter(qtbot):
 
 
 def test_napari_own_welcome_screen_is_switched_off(qtbot):
-    """Two welcome screens on one canvas is a redraw bug waiting to happen."""
+    """Two welcome screens on one canvas is a redraw bug waiting to happen.
+
+    Asserted through whichever handle this napari exposes. This used to read
+    ``viewer.welcome_screen`` directly, which napari 0.7.1 removed - so the test
+    failed there even though the app was switching the screen off correctly, via
+    the ``_qt_viewer`` path it actually tries first. The app falls back to the old
+    attribute, so the test checks the same two places in the same order.
+    """
     from atlastrack.gui.app import _install_welcome_overlay
 
     viewer = _viewer()
     try:
         _install_welcome_overlay(viewer)
 
-        assert viewer.welcome_screen.visible is False
+        qt_viewer = viewer.window._qt_viewer
+        if hasattr(qt_viewer, "show_welcome_screen"):
+            assert qt_viewer.show_welcome_screen is False
+        else:  # napari < 0.7.1
+            assert viewer.welcome_screen.visible is False
     finally:
         viewer.close()
 
