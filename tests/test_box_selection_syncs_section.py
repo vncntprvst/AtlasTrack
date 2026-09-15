@@ -154,3 +154,49 @@ def test_select_section_reports_an_index_it_cannot_offer(qtbot):
     qtbot.addWidget(tools)
 
     assert tools.select_section(99) is False
+
+
+def test_leaving_box_edit_restores_the_section_numbers(qtbot):
+    """Entering edit mode hides the numbers; leaving it must bring them back.
+
+    Before the button became a toggle there was no "leaving" at all: the boxes
+    stayed yellow and the section numbers, hidden on entry, never returned - which
+    read as "the numbers have been removed from the app".
+    """
+    from atlastrack.gui.widgets.slide_loader import (
+        BOX_EDIT_ACTIVE_TEXT,
+        BOX_EDIT_IDLE_TEXT,
+    )
+
+    state = _state()
+    loader, _tools, viewer = _widgets(qtbot, state)  # already in edit mode
+    try:
+        assert loader._boxes_btn.isChecked(), "the button must show the mode is live"
+        assert loader._boxes_btn.text() == BOX_EDIT_ACTIVE_TEXT
+        assert "Edit boxes 0" in viewer.layers
+
+        loader._on_edit_boxes_toggled(False)
+
+        assert "Edit boxes 0" not in viewer.layers, "the yellow boxes must go"
+        assert "Section numbers 0" in viewer.layers, "the numbers must come back"
+        assert viewer.layers["Section numbers 0"].visible is True
+        assert loader._boxes_btn.isChecked() is False
+        assert loader._boxes_btn.text() == BOX_EDIT_IDLE_TEXT
+    finally:
+        viewer.close()
+
+
+def test_escape_leaves_box_edit_mode(qtbot):
+    """The canvas holds keyboard focus while dragging, so Esc is bound on the viewer."""
+    state = _state()
+    loader, _tools, viewer = _widgets(qtbot, state)
+    try:
+        assert loader._escape_bound, "Esc must be bound while the mode is live"
+        # napari keys its keymap by KeyBinding objects, not strings.
+        escape = next(k for k in viewer.keymap if str(k) == "Escape")
+        viewer.keymap[escape](viewer)
+
+        assert "Edit boxes 0" not in viewer.layers
+        assert loader._boxes_btn.isChecked() is False
+    finally:
+        viewer.close()
