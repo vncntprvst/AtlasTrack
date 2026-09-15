@@ -200,3 +200,39 @@ def test_escape_leaves_box_edit_mode(qtbot):
         assert loader._boxes_btn.isChecked() is False
     finally:
         viewer.close()
+
+
+def test_entering_box_edit_never_hides_the_section_numbers(qtbot):
+    """Nothing may hide the numbers - there is no state where they should be gone.
+
+    They used to be hidden on entry and restored only on an explicit exit, so
+    anyone who clicked "Edit boxes" and then simply moved on - switched tab, loaded
+    the atlas, showed the overlay - lost the numbers for the rest of the session
+    with nothing on screen to suggest why.
+    """
+    from atlastrack.gui.app import _update_section_numbers
+
+    state = _state()
+    loader, _tools, viewer = _widgets(qtbot, state)  # already in edit mode
+    try:
+        _update_section_numbers(viewer, state, 0)
+        assert viewer.layers["Section numbers 0"].visible is True
+
+        # Walk away without leaving the mode.
+        state.active_slide_idx = 0
+        assert viewer.layers["Section numbers 0"].visible is True
+        assert "Edit boxes 0" in viewer.layers, "still in edit mode"
+    finally:
+        viewer.close()
+
+
+def test_the_editable_boxes_do_not_draw_their_own_numbers(qtbot):
+    """One source of numbers. Two copies at the same point looked like smeared text."""
+    state = _state()
+    loader, _tools, viewer = _widgets(qtbot, state)
+    try:
+        layer = viewer.layers["Edit boxes 0"]
+        values = list(getattr(layer.text, "values", []) or [])
+        assert all(not str(v).strip() for v in values), f"unexpected text: {values}"
+    finally:
+        viewer.close()

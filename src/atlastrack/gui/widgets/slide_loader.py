@@ -695,6 +695,18 @@ class SlideLoaderWidget(QWidget):
         # or deleted, so the static outline and the numbers are both stale.
         self._refresh_static_section_display()
 
+    def _refresh_section_numbers(self) -> None:
+        """Redraw just the section-number labels. Best-effort, never a blocker."""
+        slide_idx = self._state.active_slide_idx
+        if self._viewer is None or slide_idx is None:
+            return
+        try:
+            from atlastrack.gui.app import _update_section_numbers
+
+            _update_section_numbers(self._viewer, self._state, slide_idx)
+        except Exception:
+            pass
+
     def _refresh_static_section_display(self) -> None:
         """Redraw the read-only outline + number layers from the current sections.
 
@@ -775,10 +787,9 @@ class SlideLoaderWidget(QWidget):
             edge_width=self._edge_width(),
         )
         layer.features = {"idx": idxs}
-        try:
-            layer.text = {"string": "{idx}", "size": 14, "color": "yellow", "anchor": "center"}
-        except Exception:
-            pass
+        # No text on this layer: the always-present "Section numbers" layer already
+        # labels every box at its centroid, and two copies of the same number drawn
+        # on top of each other just looked like smeared text.
         try:
             layer.feature_defaults = {"idx": -1}  # new shapes flagged until synced
         except Exception:
@@ -796,11 +807,17 @@ class SlideLoaderWidget(QWidget):
             pass
         _bind_safe_delete(layer)
 
-        # Hide the static outline + numbers so the editable boxes are the only
-        # representation while editing (avoids a confusing double display).
-        for nm in (_SECTION_LAYER.format(slide_idx), _NUMBERS_LAYER.format(slide_idx)):
-            if nm in self._viewer.layers:
-                self._viewer.layers[nm].visible = False
+        # Hide the static outline, which would double up with the editable boxes.
+        #
+        # **The numbers are deliberately left alone.** They used to be hidden here
+        # too, and restored only when the mode was explicitly left - so anyone who
+        # clicked "Edit boxes" and then simply moved on (switched tab, loaded the
+        # atlas, showed the overlay) lost the section numbers for the rest of the
+        # session with nothing to suggest why. There is no state in which the
+        # numbers should be invisible, so nothing hides them any more.
+        outline = _SECTION_LAYER.format(slide_idx)
+        if outline in self._viewer.layers:
+            self._viewer.layers[outline].visible = False
 
         self._viewer.layers.selection.active = layer
         layer.mode = "select"
@@ -880,10 +897,9 @@ class SlideLoaderWidget(QWidget):
             # Persist stabilized indices so newly added shapes keep identity.
             if idx_col != stabilized:
                 self._box_layer.features = {"idx": stabilized}
-                try:
-                    self._box_layer.refresh_text()
-                except Exception:
-                    pass
+            # Relabel: a box just added or deleted must gain or lose its number
+            # now, not when the mode is left.
+            self._refresh_section_numbers()
             self._status.setText(f"{len(seen)} section box(es).")
         finally:
             self._syncing_boxes = False
