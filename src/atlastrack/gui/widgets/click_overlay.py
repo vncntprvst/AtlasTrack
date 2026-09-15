@@ -41,6 +41,7 @@ from qtpy.QtWidgets import (
 )
 
 from atlastrack.gui.widgets.separators import section_header
+from atlastrack.gui.overlay_style import OVERLAY_BLENDING as _OVERLAY_BLENDING
 from atlastrack.gui.workflow import WorkflowState
 from atlastrack.project.schema import Point2D
 
@@ -319,6 +320,7 @@ class ClickOverlayWidget(QWidget):
                 self._tip_layer = self._viewer.layers[_LAYER_TIP]  # type: ignore[assignment]
             else:
                 self._tip_layer = self._viewer.add_points(
+                    blending=_OVERLAY_BLENDING,
                     name=_LAYER_TIP, face_color="red", size=12, ndim=2, symbol="disc",
                 )
             self._tip_layer.events.data.connect(self._on_tip_data_changed)
@@ -327,6 +329,7 @@ class ClickOverlayWidget(QWidget):
                 self._entry_layer = self._viewer.layers[_LAYER_ENTRY]  # type: ignore[assignment]
             else:
                 self._entry_layer = self._viewer.add_points(
+                    blending=_OVERLAY_BLENDING,
                     name=_LAYER_ENTRY, face_color="cyan", size=12, ndim=2,
                     symbol="triangle_up",
                 )
@@ -339,6 +342,7 @@ class ClickOverlayWidget(QWidget):
                 # (disc) and entries (triangle) at a glance, and smaller, because
                 # there can be many of them along one shank.
                 self._track_layer = self._viewer.add_points(
+                    blending=_OVERLAY_BLENDING,
                     name=_LAYER_TRACK, face_color="white", size=9, ndim=2, symbol="x",
                 )
             self._track_layer.events.data.connect(self._on_track_data_changed)
@@ -351,6 +355,7 @@ class ClickOverlayWidget(QWidget):
             self._traj_layer = self._viewer.layers[_LAYER_TRAJECTORY]  # type: ignore[assignment]
         elif self._traj_layer is None:
             self._traj_layer = self._viewer.add_shapes(
+                blending=_OVERLAY_BLENDING,
                 name=_LAYER_TRAJECTORY, edge_color="yellow", face_color="transparent",
                 edge_width=4,
             )

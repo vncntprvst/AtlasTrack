@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from atlastrack.gui.overlay_style import OVERLAY_BLENDING
 from atlastrack.gui.workflow import WorkflowState
 
 if TYPE_CHECKING:
@@ -44,11 +45,6 @@ OVERLAY_CONTOUR_RGBA = (1.0, 1.0, 1.0, 1.0)
 #: active label matches "Apply landmark warp" beneath it.
 BOX_TRANSFORM_IDLE_TEXT = "Move / scale / rotate overlay"
 BOX_TRANSFORM_ACTIVE_TEXT = "Apply box transform"
-
-#: Blending for the overlay Labels layers. ``translucent`` depth-tests against the
-#: slide image at the same z and can lose the whole layer; ``translucent_no_depth``
-#: composites on top of whatever is below, which is what an outline wants.
-OVERLAY_BLENDING = "translucent_no_depth"
 
 
 def style_overlay_layer(layer) -> None:
@@ -784,7 +780,8 @@ class RegisterPanelWidget(QWidget):
                 layer.data = edge_labels
             else:
                 layer = self._viewer.add_labels(
-                    edge_labels, name=name, opacity=0.7, translate=(y0, x0)
+                    edge_labels, name=name, opacity=0.7, translate=(y0, x0),
+                    blending=OVERLAY_BLENDING,
                 )
             style_overlay_layer(layer)
             # Stash the full region-id image (the displayed layer is only edges) so a
@@ -1176,7 +1173,10 @@ class RegisterPanelWidget(QWidget):
             layer.translate = (y0, x0)
             layer.affine = affine
         else:
-            layer = self._viewer.add_labels(edges, name=name, opacity=0.7, translate=(y0, x0))
+            layer = self._viewer.add_labels(
+                edges, name=name, opacity=0.7, translate=(y0, x0),
+                blending=OVERLAY_BLENDING,
+            )
             layer.affine = affine
         style_overlay_layer(layer)
 
@@ -1244,7 +1244,7 @@ class RegisterPanelWidget(QWidget):
             self._viewer.layers.remove(name)
         layer = self._viewer.add_points(
             data, name=name, size=16, face_color="red", border_color="white",
-            features=feats, ndim=2,
+            features=feats, ndim=2, blending=OVERLAY_BLENDING,
         )
         layer.mode = "select"
         self._viewer.layers.selection = {layer}

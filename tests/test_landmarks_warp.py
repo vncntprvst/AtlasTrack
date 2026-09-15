@@ -180,3 +180,69 @@ def test_schema_round_trips_landmarks(tmp_path) -> None:
     loaded = load_project(path)
     got = loaded.slides[0].sections[0].manual_landmarks
     assert got is not None and got.source == [[1.0, 2.0], [3.0, 4.0]]
+
+
+def test_auto_landmarks_cover_the_section_not_just_its_busy_half() -> None:
+    """Junctions outnumber every other candidate ~50:1 and sit in the dorsal half.
+
+    Priority order alone therefore spent the whole budget up there: measured on two
+    real sections, nine of twelve points landed in the top third and the geometric
+    ring - the thing meant to pin the rest of the section - contributed nothing,
+    because the budget ran out before it was reached.
+
+    The synthetic section here reproduces that shape: a plain outline with a dense
+    thicket of small regions confined to the top quarter, so a single greedy pass
+    puts everything in the thicket.
+    """
+    import numpy as np
+
+    from atlastrack.registration.landmarks_warp import salient_landmarks
+
+    h, w = 300, 400
+    labels = np.zeros((h, w), dtype=np.int32)
+    labels[20:280, 30:370] = 1  # the section
+    # A mosaic of TOUCHING regions across the top only. They must touch: junctions
+    # are branch points of the shared-boundary skeleton, so isolated islands
+    # produce none at all and would not exercise this in the first place.
+    region = 2
+    for yy in range(30, 100, 10):
+        for xx in range(40, 360, 10):
+            labels[yy:yy + 10, xx:xx + 10] = region
+            region += 1
+    from atlastrack.registration.landmarks_warp import _region_junctions
+
+    assert len(_region_junctions(labels)) > 100, "the thicket must dominate"
+
+    points = np.asarray(salient_landmarks(labels, max_points=12), dtype=float)
+    assert len(points) >= 8, f"expected a usable set, got {len(points)}"
+
+    top = sum(1 for _x, y in points if y < h / 3)
+    assert top <= len(points) * 0.6, (
+        f"{top}/{len(points)} points in the top third - the busy band has captured "
+        f"the budget again"
+    )
+
+    cells = {(int(3 * y / h), int(3 * x / w)) for x, y in points}
+    assert len(cells) >= 8, f"only {len(cells)} of 9 grid cells covered: {sorted(cells)}"
+
+
+def test_spread_select_without_a_shape_is_the_plain_greedy_pass() -> None:
+    """The coverage pass is opt-in, so existing callers keep their behaviour."""
+    from atlastrack.registration.landmarks_warp import _spread_select
+
+    cands = [(0.0, 0.0), (1.0, 1.0), (100.0, 100.0), (200.0, 200.0)]
+    assert _spread_select(cands, min_dist=50.0, max_points=4) == [
+        (0.0, 0.0), (100.0, 100.0), (200.0, 200.0)
+    ]
+
+
+def test_spread_select_still_honours_the_minimum_distance() -> None:
+    """Covering a cell must never justify two points on top of each other."""
+    from atlastrack.registration.landmarks_warp import _spread_select
+
+    # Two candidates in different cells but only 2 px apart, astride a boundary.
+    cands = [(199.0, 150.0), (201.0, 150.0), (20.0, 20.0)]
+    chosen = _spread_select(cands, min_dist=50.0, max_points=3, shape=(300, 400))
+    for i, (x1, y1) in enumerate(chosen):
+        for x2, y2 in chosen[i + 1:]:
+            assert (x1 - x2) ** 2 + (y1 - y2) ** 2 >= 50.0**2

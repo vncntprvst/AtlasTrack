@@ -1,3 +1,3 @@
 """atlastrack - guided histology→atlas registration with probe trajectory mapping."""
 
-__version__ = "0.9.4"
+__version__ = "0.9.5"

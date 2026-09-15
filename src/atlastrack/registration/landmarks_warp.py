@@ -120,17 +120,65 @@ def _silhouette_extremes(extent: np.ndarray) -> list[tuple[float, float]]:
     return out
 
 
+#: Grid the section is divided into for coverage. 3x3 is enough to separate
+#: dorsal / middle / ventral and left / centre / right, which is the distinction
+#: that was being lost, without demanding more points than a TPS needs.
+_COVERAGE_CELLS = 3
+
+
 def _spread_select(
-    cands: list[tuple[float, float]], min_dist: float, max_points: int
+    cands: list[tuple[float, float]],
+    min_dist: float,
+    max_points: int,
+    shape: tuple[int, int] | None = None,
 ) -> list[tuple[float, float]]:
-    """Greedily keep candidates (in priority order) that are >= min_dist apart."""
-    chosen: list[tuple[float, float]] = []
+    """Keep candidates >= ``min_dist`` apart, covering the section before crowding it.
+
+    **Two passes, because priority order alone does not spread.** The candidate
+    list is priority-ordered - silhouette tips, then region junctions, then
+    corners, then the geometric ring - and a real section offers a handful of tips
+    and *hundreds* of junctions, all of them where the atlas is finely parcellated:
+    the dorsal cortex and cerebellum. A single greedy pass therefore spends its
+    whole budget up there and never reaches the ring at all. Measured on two real
+    sections: 4 tips + 7 junctions + 1 other, **nine of the twelve in the top third
+    of the section**, and the ring - the thing meant to guarantee the rest is
+    pinned - contributing nothing.
+
+    So the first pass takes a candidate only if its grid cell is still empty,
+    which walks the same priority order but spreads it over the section; the
+    second fills whatever budget is left with the best remaining features,
+    wherever they are. A section whose tissue occupies only a few cells is
+    unaffected - pass one simply runs out and pass two behaves as before.
+
+    ``shape`` is ``(h, w)``; without it the coverage pass is skipped and this is
+    the original single greedy pass.
+    """
     d2 = min_dist * min_dist
-    for x, y in cands:
-        if all((x - cx) ** 2 + (y - cy) ** 2 >= d2 for cx, cy in chosen):
-            chosen.append((x, y))
+
+    def _fits(x: float, y: float, chosen: list[tuple[float, float]]) -> bool:
+        return all((x - cx) ** 2 + (y - cy) ** 2 >= d2 for cx, cy in chosen)
+
+    chosen: list[tuple[float, float]] = []
+    if shape is not None:
+        h, w = shape
+        used_cells: set[tuple[int, int]] = set()
+        for x, y in cands:
             if len(chosen) >= max_points:
                 break
+            cell = (
+                min(_COVERAGE_CELLS - 1, int(_COVERAGE_CELLS * y / max(h, 1))),
+                min(_COVERAGE_CELLS - 1, int(_COVERAGE_CELLS * x / max(w, 1))),
+            )
+            if cell in used_cells or not _fits(x, y, chosen):
+                continue
+            used_cells.add(cell)
+            chosen.append((x, y))
+
+    for x, y in cands:
+        if len(chosen) >= max_points:
+            break
+        if _fits(x, y, chosen):
+            chosen.append((x, y))
     return chosen
 
 
@@ -142,11 +190,13 @@ def salient_landmarks(
     Candidates are taken in priority order: the four silhouette **tips**, then
     **junctions** where region outlines meet (skeleton branch points), then
     high-curvature silhouette **corners**, then the geometric
-    :func:`auto_landmarks` ring as fill. A greedy spread keeps every point >= 10%
-    of the image apart, so the result favours grabbable features where they exist
-    (busy dorsal cortex) while the tips + ring guarantee the rest of the section
-    (cerebellum, brainstem) is still pinned. Returns ``(N, 2)`` section-local
-    ``(x, y)``; falls back to the plain ring on a degenerate (tiny) extent.
+    :func:`auto_landmarks` ring as fill. :func:`_spread_select` keeps every point
+    >= 10% of the image apart *and* covers the section before crowding it - see
+    there for why priority order alone is not enough, given that junctions
+    outnumber every other candidate by roughly fifty to one and sit almost
+    entirely in the finely parcellated dorsal half. Returns ``(N, 2)``
+    section-local ``(x, y)``; falls back to the plain ring on a degenerate
+    (tiny) extent.
     """
     extent = np.asarray(labels) > 0
     h, w = extent.shape
@@ -161,7 +211,7 @@ def salient_landmarks(
         + _silhouette_corners(extent)
         + ring
     )
-    chosen = _spread_select(cands, min_dist, max_points)
+    chosen = _spread_select(cands, min_dist, max_points, shape=(h, w))
     if len(chosen) < 4:  # last resort: never starve the TPS
         return auto_landmarks(extent)
     return _snap_into_extent(np.array(chosen, dtype=float), extent)

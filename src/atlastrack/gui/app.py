@@ -788,10 +788,20 @@ def _on_sections_detected(viewer: "napari.Viewer", state: "WorkflowState", secti
         lyr = viewer.layers[outline_name]
         lyr.data = labels
     else:
-        lyr = viewer.add_labels(labels, name=outline_name, opacity=0.85)
+        lyr = viewer.add_labels(
+            labels, name=outline_name, opacity=0.85,
+            blending=_section_outline_blending(),
+        )
 
     # --- Section number text layer ---
     _update_section_numbers(viewer, state, slide_idx)
+
+
+def _section_outline_blending() -> str:
+    """The blend every slide overlay uses. See :mod:`atlastrack.gui.overlay_style`."""
+    from atlastrack.gui.overlay_style import OVERLAY_BLENDING
+
+    return OVERLAY_BLENDING
 
 
 def _update_section_numbers(
@@ -813,7 +823,12 @@ def _update_section_numbers(
 
     # Use opacity=1, transparent face so only the text is drawn.
     # napari ≥ 0.5 renamed edge_color → border_color; try both.
-    _pt_kwargs: dict = {"size": 1, "face_color": "transparent", "opacity": 1.0}
+    from atlastrack.gui.overlay_style import OVERLAY_BLENDING
+
+    _pt_kwargs: dict = {
+        "size": 1, "face_color": "transparent", "opacity": 1.0,
+        "blending": OVERLAY_BLENDING,
+    }
     for _ec_key in ("border_color", "edge_color"):
         try:
             lyr = viewer.add_points(centroids, name=name, **{_ec_key: "transparent"}, **_pt_kwargs)
@@ -875,7 +890,10 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
             if outline in viewer.layers:
                 viewer.layers[outline].data = labels
             else:
-                viewer.add_labels(labels, name=outline, opacity=0.85)
+                viewer.add_labels(
+                    labels, name=outline, opacity=0.85,
+                    blending=_section_outline_blending(),
+                )
             _update_section_numbers(viewer, state, slide_idx)
 
     if state.project.slides:

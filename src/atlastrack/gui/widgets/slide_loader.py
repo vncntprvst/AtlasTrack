@@ -16,6 +16,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from atlastrack.gui.overlay_style import OVERLAY_BLENDING as _OVERLAY_BLENDING
 from atlastrack.gui.widgets.separators import section_header
 from atlastrack.gui.workflow import WorkflowState
 
@@ -582,6 +583,7 @@ class SlideLoaderWidget(QWidget):
             self._viewer.layers.remove(_DRAW_LAYER)
 
         draw_layer = self._viewer.add_shapes(
+            blending=_OVERLAY_BLENDING,
             name=_DRAW_LAYER,
             shape_type="rectangle",
             edge_color="lime",
@@ -780,6 +782,7 @@ class SlideLoaderWidget(QWidget):
             self._viewer.layers.remove(name)
         layer = self._viewer.add_shapes(
             rects,
+            blending=_OVERLAY_BLENDING,
             name=name,
             shape_type="rectangle",
             edge_color="yellow",
