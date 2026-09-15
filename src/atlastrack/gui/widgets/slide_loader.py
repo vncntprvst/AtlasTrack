@@ -26,6 +26,18 @@ if TYPE_CHECKING:
 _SECTION_LAYER = "Sections {}"
 # Name template for the section-number Points layer (must match app.py).
 _NUMBERS_LAYER = "Section numbers {}"
+#: The box-edit button's two states. It is a mode, not a one-shot action, so it
+#: has to say which one it is in - previously nothing did, and since nothing
+#: turned the mode off either, the boxes simply stayed yellow forever.
+BOX_EDIT_IDLE_TEXT = "Edit boxes (resize / move / delete)"
+BOX_EDIT_ACTIVE_TEXT = "Done editing boxes"
+
+#: Colour the button while editing, matching the yellow of the editable boxes so
+#: the canvas and the control agree about which mode is live.
+BOX_EDIT_ACTIVE_STYLE = (
+    "QPushButton { background-color: #b8960b; color: black; font-weight: bold; }"
+)
+
 # Temporary Shapes layer used only while the user draws a new rectangle.
 _DRAW_LAYER = "_draw_section_temp"
 # Editable rectangle layer for resize/move/add/delete of section boxes.
@@ -76,6 +88,7 @@ class SlideLoaderWidget(QWidget):
         self._on_sections_detected = on_sections_detected
         self._on_section_selected = on_section_selected
         self._box_layer = None  # editable rectangle Shapes layer
+        self._escape_bound = False  # Esc leaves box-edit mode while it is live
         self._syncing_boxes = False  # re-entrancy guard for the data handler
         self._committing_drawn = False  # same, for the draw-to-add handler
         self._build_ui()
@@ -164,16 +177,19 @@ class SlideLoaderWidget(QWidget):
         edit_box = QGroupBox("Edit section boxes")
         edit_layout = QVBoxLayout(edit_box)
 
-        boxes_btn = QPushButton("Edit boxes (resize / move / delete)")
+        boxes_btn = QPushButton(BOX_EDIT_IDLE_TEXT)
+        boxes_btn.setCheckable(True)
         boxes_btn.setToolTip(
             "Turn the detections into draggable rectangles:\n"
             "  • hover an edge or corner handle and drag to resize\n"
             "  • drag inside a box to move it\n"
             "  • press Delete to remove the selected box\n"
             "Edits are saved to the project as you go.\n"
+            "Click the button again or press Esc to leave edit mode.\n"
             "To add a box that detection missed, use 'Draw new bounding box'."
         )
-        boxes_btn.clicked.connect(self._edit_boxes)
+        boxes_btn.toggled.connect(self._on_edit_boxes_toggled)
+        self._boxes_btn = boxes_btn
         edit_layout.addWidget(boxes_btn)
 
         draw_btn = QPushButton("Draw new bounding box")
@@ -600,18 +616,110 @@ class SlideLoaderWidget(QWidget):
     # Editable boxes (resize / move / add / delete via napari Shapes)
     # ------------------------------------------------------------------
 
-    def _edit_boxes(self) -> None:
+    def _on_edit_boxes_toggled(self, on: bool) -> None:
+        """Enter or leave box-edit mode.
+
+        A toggle rather than a one-shot action: entering swaps the read-only
+        outline for editable yellow rectangles, and until this existed there was
+        no way back - the boxes stayed yellow and the section numbers, hidden on
+        entry, never came back.
+        """
+        if not on:
+            self._exit_box_edit()
+            return
+        if not self._edit_boxes():
+            # Refused (no slide, no sections, no viewer): do not leave the button
+            # stuck down advertising a mode that never started.
+            self._set_boxes_checked(False)
+
+    def _set_boxes_checked(self, on: bool) -> None:
+        """Set the button's state and appearance without re-firing ``toggled``."""
+        btn = getattr(self, "_boxes_btn", None)
+        if btn is None:
+            return
+        btn.blockSignals(True)
+        btn.setChecked(on)
+        btn.blockSignals(False)
+        btn.setText(BOX_EDIT_ACTIVE_TEXT if on else BOX_EDIT_IDLE_TEXT)
+        btn.setStyleSheet(BOX_EDIT_ACTIVE_STYLE if on else "")
+
+    def _exit_box_edit(self) -> None:
+        """Leave box-edit mode and restore the read-only display. Safe to call twice."""
+        self._set_boxes_checked(False)
+        self._unbind_box_edit_escape()
+        viewer = self._viewer
+        if viewer is None:
+            self._box_layer = None
+            return
+        slide_idx = self._state.active_slide_idx
+        if slide_idx is not None:
+            name = _BOX_LAYER.format(slide_idx)
+            if name in viewer.layers:
+                viewer.layers.remove(name)
+        self._box_layer = None
+        # Rebuild rather than just un-hide: the boxes may have been moved, added
+        # or deleted, so the static outline and the numbers are both stale.
+        self._refresh_static_section_display()
+
+    def _refresh_static_section_display(self) -> None:
+        """Redraw the read-only outline + number layers from the current sections.
+
+        Imported inside the method because ``app`` imports this module; by call
+        time both are loaded, so the cycle never materialises.
+        """
+        slide_idx = self._state.active_slide_idx
+        if self._viewer is None or slide_idx is None:
+            return
+        try:
+            from atlastrack.gui.app import _on_sections_detected
+
+            slide = self._state.project.slides[slide_idx]
+            for nm in (_SECTION_LAYER.format(slide_idx), _NUMBERS_LAYER.format(slide_idx)):
+                if nm in self._viewer.layers:
+                    self._viewer.layers[nm].visible = True
+            _on_sections_detected(self._viewer, self._state, slide.sections)
+        except Exception:  # a redraw failure must not trap the user in edit mode
+            pass
+
+    def _bind_box_edit_escape(self) -> None:
+        """Esc leaves box-edit mode, because the canvas has keyboard focus.
+
+        A Qt shortcut on this panel would not fire while the user is dragging a
+        rectangle in the viewer, which is exactly when they want out.
+        """
+        if self._viewer is None:
+            return
+        try:
+            def _escape(_viewer):
+                self._exit_box_edit()
+
+            self._viewer.bind_key("Escape", _escape, overwrite=True)
+            self._escape_bound = True
+        except Exception:
+            self._escape_bound = False
+
+    def _unbind_box_edit_escape(self) -> None:
+        if not getattr(self, "_escape_bound", False) or self._viewer is None:
+            return
+        try:
+            self._viewer.bind_key("Escape", None, overwrite=True)
+        except Exception:
+            pass
+        self._escape_bound = False
+
+    def _edit_boxes(self) -> bool:
+        """Build the editable rectangles. Returns False if the mode cannot start."""
         if self._viewer is None:
             self._status.setText("Viewer not available - cannot edit boxes.")
-            return
+            return False
         slide_idx = self._state.active_slide_idx
         if slide_idx is None:
             self._status.setText("Load a slide first.")
-            return
+            return False
         slide = self._state.project.slides[slide_idx]
         if not slide.sections:
             self._status.setText("Detect sections first, then edit the boxes.")
-            return
+            return False
 
         # Build one rectangle per section; carry the section index as a feature
         # so identity survives moves, additions and deletions.
@@ -662,10 +770,14 @@ class SlideLoaderWidget(QWidget):
 
         self._viewer.layers.selection.active = layer
         layer.mode = "select"
+        self._set_boxes_checked(True)
+        self._bind_box_edit_escape()
         self._status.setText(
             "Edit boxes: drag handles to resize, drag inside to move, "
-            "Delete to remove, rectangle tool to add."
+            f"Delete to remove, rectangle tool to add. Click '{BOX_EDIT_ACTIVE_TEXT}' "
+            "or press Esc when finished."
         )
+        return True
 
     def _on_box_selection_changed(self, *_args) -> None:
         """Mirror a single box selection into the section dropdown.
