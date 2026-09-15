@@ -69,3 +69,45 @@ def test_slide_bands_match_merge_placement() -> None:
 
 def test_slide_bands_single_source_spans_image() -> None:
     assert slide_bands([120]) == [(0, 120)]
+
+
+# --- large-image advisory -------------------------------------------------
+
+
+def test_an_ordinary_slide_gets_no_size_note() -> None:
+    """The note must stay rare, or it becomes noise people click through."""
+    from atlastrack.io.image import oversize_note
+
+    assert oversize_note(2000 * 2000) is None
+
+
+def test_the_note_appears_just_above_pillow_limit_and_not_at_it() -> None:
+    """The boundary is Pillow's, so pin both sides of it."""
+    from atlastrack.io.image import PILLOW_PIXEL_LIMIT, oversize_note
+
+    assert oversize_note(PILLOW_PIXEL_LIMIT) is None
+    assert oversize_note(PILLOW_PIXEL_LIMIT + 1) is not None
+
+
+def test_the_note_says_the_size_and_that_the_slide_still_works() -> None:
+    """A user who sees this needs to know it is not an error and not a limit.
+
+    Pillow's own warning says "decompression bomb DOS attack", which is alarming,
+    says nothing about their slide, and goes to stderr where it scrolls past.
+    """
+    from atlastrack.io.image import oversize_note
+
+    note = oversize_note(13927 * 7453)  # a real 2x whole-slide scan: 103.8 MP
+    assert note is not None
+    assert "103.8" in note, "the user's actual size must appear"
+    assert "works normally" in note, "must not read as a failure"
+    assert "longer" in note, "must set the expectation that detection is slower"
+
+
+def test_a_merged_canvas_is_judged_on_its_own_size() -> None:
+    """Two legal slides can merge into one canvas that crosses the line."""
+    from atlastrack.io.image import PILLOW_PIXEL_LIMIT, oversize_note
+
+    one = PILLOW_PIXEL_LIMIT * 2 // 3
+    assert oversize_note(one) is None
+    assert oversize_note(one * 2) is not None

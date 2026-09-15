@@ -1948,3 +1948,64 @@ def test_landmark_warp_apply_and_reset(qtbot, tmp_path) -> None:
         assert "Atlas landmarks 0" not in viewer.layers
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_a_large_slide_tells_the_user_in_the_app_not_just_on_stderr(qtbot, monkeypatch) -> None:
+    """The size advisory must reach the GUI, non-modally, with the real numbers.
+
+    Before this, a 103.8 MP slide produced only Pillow's DecompressionBombWarning
+    on stderr - the user saw a flicker, learned nothing, and then wondered why
+    Detect sections was slow. Non-modal for the reason in ``_info_merge``: a modal
+    box with no one to click it hangs headless runs.
+
+    Uses the real Pillow threshold and a real slide's dimensions. ``broadcast_to``
+    gives the 103.8 MP *shape* as a zero-copy view, so the test costs no memory -
+    the advisory only ever reads ``shape``.
+    """
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
+
+    state = WorkflowState()
+    widget = SlideLoaderWidget(state, viewer=None)
+    qtbot.addWidget(widget)
+
+    class _NoopWorker:
+        """Stands in for the estimate thread-worker; this test is about the notice."""
+
+        class _Sig:
+            def connect(self, *_a, **_k) -> None:
+                pass
+
+        returned = _Sig()
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(widget, "_estimate_worker", lambda img: _NoopWorker())
+
+    big = np.broadcast_to(np.zeros((1, 1, 3), dtype=np.uint8), (7453, 13927, 3))
+    widget._after_image_changed(big, 0)
+
+    dialog = getattr(widget, "_large_image_dialog", None)
+    assert dialog is not None, "a large slide must be reported in the app"
+    assert dialog.isModal() is False, "must not block; see the _info_merge hang"
+    status = widget._status.text()
+    assert "103.8 megapixels" in status, f"the real size must be shown, got: {status}"
+
+
+@pytest.mark.qt
+def test_an_ordinary_slide_raises_no_size_dialog(qtbot) -> None:
+    """The advisory must not fire on normal slides, or people learn to ignore it."""
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
+
+    state = WorkflowState()
+    widget = SlideLoaderWidget(state, viewer=None)
+    qtbot.addWidget(widget)
+    widget._estimate_worker = lambda img: type(
+        "W", (), {"returned": type("S", (), {"connect": lambda *a: None})(),
+                  "start": lambda self: None}
+    )()
+
+    widget._after_image_changed(np.zeros((40, 40, 3), dtype=np.uint8), 0)
+
+    assert getattr(widget, "_large_image_dialog", None) is None

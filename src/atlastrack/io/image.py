@@ -9,6 +9,51 @@ from pathlib import Path
 
 import numpy as np
 
+#: Pillow's own ceiling on decoded pixels. Above it Pillow warns ("could be
+#: decompression bomb DOS attack"); above **twice** it Pillow refuses to decode at
+#: all (``DecompressionBombError``). Both guard against a small file crafted to
+#: expand until it fills RAM - a real attack, and not what a slide scanner writes.
+#: A 2x whole-slide scan sits right on this line (13927x7453 RGB = 103.8 MP), and a
+#: larger one would hit the hard refusal, so the loader lifts the ceiling rather
+#: than let a legitimate slide be warned about cryptically or rejected outright.
+#: The size is reported to the user instead - see :func:`oversize_note`.
+PILLOW_PIXEL_LIMIT = 89_478_485
+
+
+def _lift_pillow_pixel_limit() -> None:
+    """Stop Pillow warning about, or refusing, a large but legitimate slide.
+
+    Done at load time rather than import time so merely importing this module does
+    not mutate global Pillow state. Best-effort: Pillow may be absent (a TIFF-only
+    install) and that must not stop a load.
+    """
+    try:
+        from PIL import Image
+
+        Image.MAX_IMAGE_PIXELS = None
+    except Exception:
+        pass
+
+
+def oversize_note(pixels: int) -> str | None:
+    """A plain-language note if an image of ``pixels`` px is unusually large.
+
+    Returns ``None`` for an ordinary image. Takes a pixel count rather than a path
+    so it applies equally to a merged multi-slide canvas, which has no file of its
+    own and can cross the line even when every source image is below it.
+
+    This exists because the only signal the user previously got was Pillow's
+    ``DecompressionBombWarning`` on stderr - which talks about a "DOS attack",
+    says nothing about what it means for their slide, and scrolls past.
+    """
+    if pixels <= PILLOW_PIXEL_LIMIT:
+        return None
+    return (
+        f"Large image: {pixels / 1e6:.1f} megapixels, above the {PILLOW_PIXEL_LIMIT / 1e6:.1f} MP "
+        f"point where image libraries start warning. It loads and works normally - "
+        f"but section detection scales with pixel count, so expect it to take longer."
+    )
+
 
 def load_image(path: str | Path) -> np.ndarray:
     """Load a 2D or 3D (H, W[, C]) image as a numpy array."""
@@ -20,6 +65,7 @@ def load_image(path: str | Path) -> np.ndarray:
         return np.asarray(tifffile.imread(str(path)))
 
     # Pillow / imageio handles png/jpg/etc.
+    _lift_pillow_pixel_limit()
     import imageio.v3 as iio
 
     return np.asarray(iio.imread(str(path)))

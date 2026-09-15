@@ -398,27 +398,51 @@ class SlideLoaderWidget(QWidget):
         same text is already in the status line, so there is nothing to gain from
         stopping the user to acknowledge it.
         """
+        # Parented to self, so Qt owns it; the reference is for testability.
+        self._merge_dialog = self._show_nonmodal("Slides merged", message)
+
+    def _show_nonmodal(self, title: str, message: str):
+        """Put ``message`` in the status line and show a non-blocking info box.
+
+        Returns the box, or ``None`` when Qt will not build one. Shared by every
+        advisory this panel raises, so none of them can reintroduce the blocking
+        dialog described above.
+        """
         self._status.setText(message)
         try:
             from qtpy.QtCore import Qt
             from qtpy.QtWidgets import QMessageBox
 
-            box = QMessageBox(
-                QMessageBox.Icon.Information, "Slides merged", message, parent=self
-            )
+            box = QMessageBox(QMessageBox.Icon.Information, title, message, parent=self)
             box.setModal(False)
             box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             box.show()
-            # Parented to self, so Qt owns it; the reference is for testability.
-            self._merge_dialog = box
+            return box
         except Exception:
-            pass
+            return None
+
+    def _info_large_image(self, message: str) -> None:
+        """Say plainly that this slide is big, and what that means for detection.
+
+        Pillow already noticed - it warned about a "decompression bomb DOS attack"
+        on stderr, where the user either misses it or is alarmed by it, and either
+        way learns nothing about their own slide. Same non-modal treatment as the
+        merge notice: informative, not something to acknowledge.
+        """
+        self._large_image_dialog = self._show_nonmodal("Large image", message)
 
     def _after_image_changed(self, img, slide_idx: int) -> None:
         """Shared post-load work: estimate min area and refresh the viewer."""
         self._status.setText(
             f"Loaded {img.shape[1]}×{img.shape[0]} px - estimating min area ..."
         )
+        # Raised here rather than in the loader so a merged canvas is covered too:
+        # it has no file of its own and can cross the line when no source image does.
+        from atlastrack.io.image import oversize_note
+
+        note = oversize_note(int(img.shape[0]) * int(img.shape[1]))
+        if note is not None:
+            self._info_large_image(note)
         # Auto-estimate in a worker so the UI stays responsive for large images.
         worker = self._estimate_worker(img)
         worker.returned.connect(lambda v: self._min_area.setValue(v))
