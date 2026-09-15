@@ -832,6 +832,15 @@ def _update_section_numbers(
     except Exception:
         pass
 
+    # Keep the numbers as the topmost layer. They are added when sections are
+    # detected or a project is loaded, and the atlas overlay arrives afterwards -
+    # so without this the labels end up underneath everything drawn later, which
+    # is how "the numbers are gone" starts.
+    try:
+        viewer.layers.move(viewer.layers.index(lyr), len(viewer.layers) - 1)
+    except Exception:
+        pass
+
 
 def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> None:
     """After loading a project, reload slide images and redraw section outlines.

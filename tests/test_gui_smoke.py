@@ -2082,3 +2082,69 @@ def test_auto_levels_never_collapses_the_range_on_a_flat_image(qtbot) -> None:
     lows, highs = widget.current_levels()
 
     assert highs[0] > lows[0], "a flat image must fall back to a usable range"
+
+
+@pytest.mark.qt
+def test_ordering_list_names_sections_by_their_stored_id(qtbot) -> None:
+    """Deleting a section must leave a visible gap, not renumber the survivors.
+
+    Numbering the rows 1..N invents ids that do not exist and hides ones that do:
+    on a slide whose sections are 0-7, 9-16, 18, 19 it showed a "Section 17" that
+    had been deleted and never showed the 19 that was still there. The row's place
+    in the list is already visible; the id is the only thing that says which piece
+    of tissue this is.
+    """
+    from atlastrack.gui.widgets.ordering_panel import OrderingPanelWidget
+
+    ids = [0, 1, 2, 3, 5, 8]  # 4, 6 and 7 deleted
+    state = WorkflowState()
+    sections = [
+        Section(index=i, slide_idx=0, bbox_px=(0, 60 * n, 40, 60 * n + 40), ap_order=i)
+        for n, i in enumerate(ids)
+    ]
+    state.project.slides.append(Slide(image_path="s.png", sections=sections))
+    state.active_slide_idx = 0
+
+    widget = OrderingPanelWidget(state)
+    qtbot.addWidget(widget)
+    widget._refresh_list()
+
+    rows = [widget._list.item(i).text() for i in range(widget._list.count())]
+    assert len(rows) == len(ids)
+    for row, section_id in zip(rows, ids):
+        assert row.startswith(f"Section {section_id} "), f"row {row!r} should name id {section_id}"
+    assert not any(r.startswith("Section 4 ") for r in rows), "a deleted id must not appear"
+    assert any(r.startswith("Section 8 ") for r in rows), "the highest id must appear"
+
+
+@pytest.mark.qt
+def test_section_numbers_stay_the_topmost_layer(qtbot) -> None:
+    """The atlas overlay is added after the numbers, so they must be raised.
+
+    Otherwise every layer drawn later sits on top of them, which is how "the
+    section numbers are gone" begins.
+    """
+    import napari
+
+    from atlastrack.gui.app import _update_section_numbers
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = WorkflowState()
+        sections = [
+            Section(index=i, slide_idx=0, bbox_px=(0, 60 * i, 40, 60 * i + 40), ap_order=i)
+            for i in (0, 2, 5)
+        ]
+        state.project.slides.append(Slide(image_path="s.png", sections=sections))
+        state.slide_images[0] = np.zeros((400, 100), dtype=np.uint8)
+        state.active_slide_idx = 0
+
+        _update_section_numbers(viewer, state, 0)
+        # Something drawn afterwards, as the atlas overlay is.
+        viewer.add_image(np.zeros((400, 100), dtype=np.uint8), name="Atlas overlay 0")
+        _update_section_numbers(viewer, state, 0)
+
+        assert viewer.layers[-1].name == "Section numbers 0"
+        assert [str(v) for v in viewer.layers[-1].text.values] == ["0", "2", "5"]
+    finally:
+        viewer.close()

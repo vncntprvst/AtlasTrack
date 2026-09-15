@@ -192,10 +192,20 @@ class OrderingPanelWidget(QWidget):
         return self._state.project.slides[slide_idx]
 
     def _item_text(self, section, position: int) -> str:
-        """One list row. ``position`` is the 1-based place in the AP order.
+        """One list row, naming the section by its **stored id**.
 
-        Counted from 1 for display; ``section.index`` stays the stored id that
-        names the transform sidecar and that shank picks point at.
+        Not by its 1-based place in the list. The place is already obvious - it is
+        the row - whereas the id is the only thing that identifies which piece of
+        tissue this is, and it is what the canvas labels, the Section dropdown and
+        the transform sidecar (``transforms/section_003.h5``) all use.
+
+        The difference shows the moment a section is deleted: with 18 sections
+        whose ids run 0-7, 9-16, 18, 19, numbering the rows 1..18 invents a
+        "Section 17" that no longer exists and never shows the 19 that does. Ids
+        leave the gaps visible, which is the information the user actually wants.
+
+        ``position`` is still taken so the caller's intent stays readable at the
+        call site, and so the end markers can be attached by row.
 
         An instance method rather than a static one because the bregma anchor the AP
         is shown against depends on the project's atlas.
@@ -206,7 +216,7 @@ class OrderingPanelWidget(QWidget):
             ap_str = f"AP {ap_bregma:+.0f} µm"
         else:
             ap_str = "AP -"
-        return f"Section {position}   ·   {ap_str}"
+        return f"Section {section.index}   ·   {ap_str}"
 
     def _apply_spacing(self) -> None:
         """Propagate evenly-spaced AP values from the anchor section outward."""

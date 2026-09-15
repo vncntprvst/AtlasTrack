@@ -1175,8 +1175,8 @@ class AtlasMatcherDialog(QDialog):
         severe = bool(reversed_pairs)
         self._order_label.setText(
             "Possible AP series problem to fix before registering: " + "; ".join(parts)
-            + "Try to set the section spacing and assign all, or "
-            "correct these sections by hand if needed)."
+            + ". Try to set the section spacing and assign all, or "
+            "correct these sections by hand if needed."
         )
         self._order_label.setStyleSheet(
             "QLabel { background: %s; color: #ffffff; padding: 4px; "
