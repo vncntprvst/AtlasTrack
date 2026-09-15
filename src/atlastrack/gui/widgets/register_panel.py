@@ -1194,10 +1194,20 @@ class RegisterPanelWidget(QWidget):
 
         from atlastrack.registration.landmarks_warp import salient_landmarks
 
+        from atlastrack.gui import crashlog
+
         section = self._require_registered_section()
+        crashlog.note(
+            f"place landmarks: combo={self._adjust_combo.count()} "
+            f"section={None if section is None else section.index}"
+        )
         if section is None:
             return
         labels = self._warp_labels_for(section, apply_landmarks=False)
+        crashlog.note(
+            f"place landmarks: labels={None if labels is None else labels.shape} "
+            f"atlas={self._state.atlas is not None} base_dir={self._reg_base_dir}"
+        )
         if labels is None:
             _error_dialog(self, "Atlas not loaded", "Click 'Show atlas overlay' first.")
             return
@@ -1244,6 +1254,11 @@ class RegisterPanelWidget(QWidget):
         layer.mouse_drag_callbacks.append(self._landmark_drag_modifier)
         self._lm_move_btn.setChecked(False)
         self._lm_add_btn.setChecked(False)
+        crashlog.note(
+            f"place landmarks: placed {len(layer.data)} points on '{name}', "
+            f"stack {list(self._viewer.layers).index(layer)}/{len(self._viewer.layers)}, "
+            f"visible={layer.visible}"
+        )
         self._status.setText(
             f"Section {section.index}: drag landmarks onto the tissue (warp); Ctrl+drag "
             f"or 'Move points' to relocate; 'Add points' + click to add, Delete to remove. "
