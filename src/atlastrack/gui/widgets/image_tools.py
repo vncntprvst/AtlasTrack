@@ -27,6 +27,18 @@ _CHANNELS = ("R", "G", "B")
 #: Spelled out for the tooltips - "R" alone never told anyone anything.
 _CHANNEL_NAMES = {"R": "Red", "G": "Green", "B": "Blue"}
 
+#: Percentiles "Auto" stretches between. **Not min/max**: any slide with a black
+#: background and one saturated pixel has min 0 and max 255 in every channel, so
+#: min/max returns the full range and Auto does nothing at all. That was not a
+#: corner case - both real slides measured came out at exactly 0.000/1.000 on
+#: every channel, so the button had never done anything useful.
+_AUTO_PERCENTILES = (1.0, 99.0)
+
+#: Cap on pixels sampled for those percentiles. Sorting 100 megapixels per channel
+#: to find a percentile is pointless when a regular subsample of a million agrees
+#: to three decimals.
+_AUTO_SAMPLE_MAX = 1_000_000
+
 #: What the two handles mean, in the words a microscope user would use. The old
 #: control was two bare spin boxes with an en dash between them, so the second
 #: number had no label at all and read as a mystery.
@@ -373,22 +385,44 @@ class ImageToolsWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _auto_levels(self) -> None:
+        """Stretch each channel between :data:`_AUTO_PERCENTILES` of its own values."""
         img = self._get_active_image()
         if img is None:
             return
         if img.ndim == 2:
-            lo = float(img.min()) / 255.0
-            hi = float(img.max()) / 255.0
+            lo, hi = self._auto_range(img)
             for i in range(len(_CHANNELS)):
                 self._set_channel_levels(i, lo, hi)
         else:
-            rgb = img[..., :3].astype(float)
+            rgb = img[..., :3]
             for i in range(min(3, rgb.shape[2])):
-                ch = rgb[..., i]
-                lo = float(ch.min()) / 255.0
-                hi = float(ch.max()) / 255.0
+                lo, hi = self._auto_range(rgb[..., i])
                 self._set_channel_levels(i, lo, hi)
-        self._save_levels()
+        # The handles are moved with signals blocked, so that setting three
+        # channels costs one redraw rather than three - which means the redraw has
+        # to be asked for explicitly here. Without it the sliders jump and the
+        # image does not follow, which is what "Auto does nothing" looked like.
+        self._emit_display_changed()
+
+    @staticmethod
+    def _auto_range(channel: np.ndarray) -> tuple[float, float]:
+        """Black/white points for one channel in [0, 1], from its own distribution.
+
+        Subsamples with a stride rather than sorting every pixel; a percentile does
+        not need all 100 million of them. Falls back to the full range if the two
+        percentiles land on the same value, which would otherwise collapse the
+        slider onto a single point and black out the channel.
+        """
+        flat = np.asarray(channel).reshape(-1)
+        if flat.size > _AUTO_SAMPLE_MAX:
+            flat = flat[:: max(1, flat.size // _AUTO_SAMPLE_MAX)]
+        lo, hi = (float(v) for v in np.percentile(flat, _AUTO_PERCENTILES))
+        # uint8 data is 0..255; anything already normalised is left alone.
+        if hi > 1.5:
+            lo, hi = lo / 255.0, hi / 255.0
+        if not hi > lo:
+            return 0.0, 1.0
+        return max(0.0, lo), min(1.0, hi)
 
     def _get_active_image(self) -> np.ndarray | None:
         idx = self._state.active_slide_idx

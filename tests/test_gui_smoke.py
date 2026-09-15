@@ -2009,3 +2009,76 @@ def test_an_ordinary_slide_raises_no_size_dialog(qtbot) -> None:
     widget._after_image_changed(np.zeros((40, 40, 3), dtype=np.uint8), 0)
 
     assert getattr(widget, "_large_image_dialog", None) is None
+
+
+@pytest.mark.qt
+def test_auto_levels_redraws_the_image(qtbot) -> None:
+    """Auto moves the handles with signals blocked, so it must ask for the redraw.
+
+    The regression this pins: the sliders jumped to their new values and the image
+    did not follow, which reads as "Auto does nothing". The old spin boxes redrew
+    as a side effect of ``valueChanged``; blocking signals to get one redraw
+    instead of three removed that, and nothing replaced it.
+    """
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
+
+    fired = []
+    state = WorkflowState()
+    rng = np.random.default_rng(0)
+    state.slide_images[0] = rng.integers(40, 200, (60, 80, 3), dtype=np.uint8)
+    state.active_slide_idx = 0
+
+    widget = ImageToolsWidget(state, on_display_changed=lambda: fired.append(1))
+    qtbot.addWidget(widget)
+
+    widget._auto_levels()
+
+    assert len(fired) == 1, f"expected exactly one redraw, got {len(fired)}"
+
+
+@pytest.mark.qt
+def test_auto_levels_is_not_defeated_by_one_black_and_one_white_pixel(qtbot) -> None:
+    """Percentiles, not min/max - or Auto is a no-op on every real slide.
+
+    A slide with a black background and any saturated pixel has min 0 and max 255
+    in every channel, so a min/max stretch returns the full range and changes
+    nothing. Both real slides measured came out at exactly 0.000/1.000.
+    """
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
+
+    state = WorkflowState()
+    # Shaped like a real slide: a dark background over much of the frame, tissue
+    # above it, and single outlier pixels at pure black and full saturation.
+    img = np.full((60, 80, 3), 10, dtype=np.uint8)
+    img[30:, :] = 180          # tissue
+    img[0, 0] = 0              # one pure-black pixel
+    img[0, 1] = 255            # one saturated pixel
+    state.slide_images[0] = img
+    state.active_slide_idx = 0
+
+    widget = ImageToolsWidget(state)
+    qtbot.addWidget(widget)
+
+    widget._auto_levels()
+    lows, highs = widget.current_levels()
+
+    assert (lows[0], highs[0]) != (0.0, 1.0), "min/max would return the full range"
+    assert highs[0] > lows[0], "the range must not collapse"
+
+
+@pytest.mark.qt
+def test_auto_levels_never_collapses_the_range_on_a_flat_image(qtbot) -> None:
+    """Both percentiles land on the same value; a zero-width range blacks it out."""
+    from atlastrack.gui.widgets.image_tools import ImageToolsWidget
+
+    state = WorkflowState()
+    state.slide_images[0] = np.full((40, 40, 3), 77, dtype=np.uint8)
+    state.active_slide_idx = 0
+
+    widget = ImageToolsWidget(state)
+    qtbot.addWidget(widget)
+
+    widget._auto_levels()
+    lows, highs = widget.current_levels()
+
+    assert highs[0] > lows[0], "a flat image must fall back to a usable range"
