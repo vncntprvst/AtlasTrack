@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -16,11 +17,26 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from superqt import QDoubleRangeSlider
 
 from atlastrack.gui.widgets.separators import section_header
 from atlastrack.gui.workflow import WorkflowState
 
 _CHANNELS = ("R", "G", "B")
+
+#: Spelled out for the tooltips - "R" alone never told anyone anything.
+_CHANNEL_NAMES = {"R": "Red", "G": "Green", "B": "Blue"}
+
+#: What the two handles mean, in the words a microscope user would use. The old
+#: control was two bare spin boxes with an en dash between them, so the second
+#: number had no label at all and read as a mystery.
+_LEVELS_HELP = (
+    "Display contrast only - it changes what you see, never the pixels used for "
+    "registration, measurement or export.\n"
+    "Left handle = black point: anything darker is shown as black.\n"
+    "Right handle = white point: anything brighter is shown as white.\n"
+    "Drag the handles closer together for more contrast."
+)
 
 
 class ImageToolsWidget(QWidget):
@@ -131,33 +147,43 @@ class ImageToolsWidget(QWidget):
 
         # Per-channel level controls
         levels_box = QGroupBox("Levels (display)")
+        levels_box.setToolTip(_LEVELS_HELP)
         levels_layout = QVBoxLayout(levels_box)
-        self._low_spins: list[QDoubleSpinBox] = []
-        self._high_spins: list[QDoubleSpinBox] = []
+        legend = QLabel("black point ←→ white point")
+        legend.setToolTip(_LEVELS_HELP)
+        levels_layout.addWidget(legend)
+
+        self._level_sliders: list[QDoubleRangeSlider] = []
+        self._level_readouts: list[QLabel] = []
         for ch in _CHANNELS:
             row = QHBoxLayout()
-            row.addWidget(QLabel(f"{ch}:"))
-            lo = QDoubleSpinBox()
-            lo.setRange(0.0, 1.0)
-            lo.setSingleStep(0.01)
-            lo.setValue(0.0)
-            lo.setFixedWidth(60)
-            hi = QDoubleSpinBox()
-            hi.setRange(0.0, 1.0)
-            hi.setSingleStep(0.01)
-            hi.setValue(1.0)
-            hi.setFixedWidth(60)
-            row.addWidget(lo)
-            row.addWidget(QLabel("–"))
-            row.addWidget(hi)
-            row.addStretch()
+            name = QLabel(f"{ch}:")
+            name.setFixedWidth(14)
+            name.setToolTip(f"{_CHANNEL_NAMES[ch]} channel.\n{_LEVELS_HELP}")
+            row.addWidget(name)
+
+            slider = QDoubleRangeSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0.0, 1.0)
+            slider.setValue((0.0, 1.0))
+            slider.setToolTip(f"{_CHANNEL_NAMES[ch]} channel.\n{_LEVELS_HELP}")
+            row.addWidget(slider, stretch=1)
+
+            readout = QLabel()
+            readout.setFixedWidth(74)
+            readout.setToolTip(f"{_CHANNEL_NAMES[ch]} black and white points.")
+            row.addWidget(readout)
+
             levels_layout.addLayout(row)
-            self._low_spins.append(lo)
-            self._high_spins.append(hi)
-            lo.valueChanged.connect(self._emit_display_changed)
-            hi.valueChanged.connect(self._emit_display_changed)
+            self._level_sliders.append(slider)
+            self._level_readouts.append(readout)
+            self._update_level_readout(len(self._level_sliders) - 1)
+            slider.valueChanged.connect(self._on_levels_slider_changed)
 
         auto_btn = QPushButton("Auto")
+        auto_btn.setToolTip(
+            "Set each channel's black and white points to the darkest and brightest "
+            "value actually present in the image."
+        )
         auto_btn.clicked.connect(self._auto_levels)
         levels_layout.addWidget(auto_btn)
         layout.addWidget(levels_box)
@@ -354,16 +380,14 @@ class ImageToolsWidget(QWidget):
             lo = float(img.min()) / 255.0
             hi = float(img.max()) / 255.0
             for i in range(len(_CHANNELS)):
-                self._low_spins[i].setValue(lo)
-                self._high_spins[i].setValue(hi)
+                self._set_channel_levels(i, lo, hi)
         else:
             rgb = img[..., :3].astype(float)
             for i in range(min(3, rgb.shape[2])):
                 ch = rgb[..., i]
                 lo = float(ch.min()) / 255.0
                 hi = float(ch.max()) / 255.0
-                self._low_spins[i].setValue(lo)
-                self._high_spins[i].setValue(hi)
+                self._set_channel_levels(i, lo, hi)
         self._save_levels()
 
     def _get_active_image(self) -> np.ndarray | None:
@@ -375,8 +399,7 @@ class ImageToolsWidget(QWidget):
     def _save_levels(self) -> None:
         from atlastrack.project.schema import ChannelLevels
 
-        low = [s.value() for s in self._low_spins]
-        high = [s.value() for s in self._high_spins]
+        low, high = self.current_levels()
         levels = ChannelLevels(low=low, high=high)
         if self._scope_section.isChecked():
             s_idx = self._state.active_section_idx
@@ -393,10 +416,30 @@ class ImageToolsWidget(QWidget):
 
     def current_levels(self) -> tuple[list[float], list[float]]:
         """Return (low, high) per-channel display cutoffs in [0, 1]."""
-        return (
-            [s.value() for s in self._low_spins],
-            [s.value() for s in self._high_spins],
-        )
+        lows: list[float] = []
+        highs: list[float] = []
+        for slider in self._level_sliders:
+            lo, hi = (float(v) for v in slider.value())
+            lows.append(lo)
+            highs.append(hi)
+        return lows, highs
+
+    def _set_channel_levels(self, i: int, lo: float, hi: float) -> None:
+        """Move one channel's handles without re-entering the change handler."""
+        slider = self._level_sliders[i]
+        slider.blockSignals(True)
+        slider.setValue((lo, hi))
+        slider.blockSignals(False)
+        self._update_level_readout(i)
+
+    def _update_level_readout(self, i: int) -> None:
+        lo, hi = (float(v) for v in self._level_sliders[i].value())
+        self._level_readouts[i].setText(f"{lo:.2f} - {hi:.2f}")
+
+    def _on_levels_slider_changed(self, *_args) -> None:
+        for i in range(len(self._level_sliders)):
+            self._update_level_readout(i)
+        self._emit_display_changed()
 
     def _emit_display_changed(self) -> None:
         self._save_levels()
