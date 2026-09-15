@@ -8,7 +8,7 @@ import pytest
 from skimage.draw import ellipse
 
 from atlastrack.sectioning.ordering import geometric_order, order_sections
-from atlastrack.sectioning.split import detect_sections
+from atlastrack.sectioning.split import detect_sections, estimate_min_area
 
 
 def _synth_composite(
@@ -258,3 +258,36 @@ def test_geometric_order_also_survives_staggered_columns() -> None:
         (360, 325, 460, 425),  # right col, bottom  -> 5
     ]
     assert geometric_order(boxes, column_first=True) == [0, 1, 2, 3, 4, 5]
+
+
+def test_passing_a_shared_foreground_changes_nothing() -> None:
+    """The whole point of sharing the mask is that results are untouched."""
+    from atlastrack.sectioning.split import binarize_slide
+
+    image = _synth_composite(rows=2, cols=3)
+    fg = binarize_slide(image)
+
+    assert estimate_min_area(image, fg=fg) == estimate_min_area(image)
+
+    plain = detect_sections(image, min_area_px=500)
+    shared = detect_sections(image, min_area_px=500, fg=fg)
+    assert [s.bbox_px for s in shared] == [s.bbox_px for s in plain]
+
+
+def test_a_foreground_from_a_different_slide_is_not_trusted() -> None:
+    """A stale cache must be recomputed, never used.
+
+    The mask is keyed on the array in the GUI, but nothing stops a caller passing
+    the previous slide's mask. Detecting one slide's sections against another
+    slide's tissue would be far worse than paying for the recompute.
+    """
+    from atlastrack.sectioning.split import binarize_slide
+
+    image = _synth_composite(rows=2, cols=3)
+    other = _synth_composite(rows=3, cols=4)  # different shape
+    stale = binarize_slide(other)
+    assert stale.shape != image.shape[:2]
+
+    expected = detect_sections(image, min_area_px=500)
+    got = detect_sections(image, min_area_px=500, fg=stale)
+    assert [s.bbox_px for s in got] == [s.bbox_px for s in expected]

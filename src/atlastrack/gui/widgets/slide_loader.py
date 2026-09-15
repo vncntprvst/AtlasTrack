@@ -89,6 +89,8 @@ class SlideLoaderWidget(QWidget):
         self._on_section_selected = on_section_selected
         self._box_layer = None  # editable rectangle Shapes layer
         self._escape_bound = False  # Esc leaves box-edit mode while it is live
+        # (image, foreground mask) from the min-area estimate, reused by detection.
+        self._fg_cache: tuple[np.ndarray, np.ndarray] | None = None
         self._syncing_boxes = False  # re-entrancy guard for the data handler
         self._committing_drawn = False  # same, for the draw-to-add handler
         self._build_ui()
@@ -461,24 +463,55 @@ class SlideLoaderWidget(QWidget):
             self._info_large_image(note)
         # Auto-estimate in a worker so the UI stays responsive for large images.
         worker = self._estimate_worker(img)
-        worker.returned.connect(lambda v: self._min_area.setValue(v))
-        worker.returned.connect(lambda v: self._status.setText(
-            f"{img.shape[1]}×{img.shape[0]} px  |  min area estimated: {v:,} px²"
-        ))
+        worker.returned.connect(lambda result: self._on_min_area_estimated(img, result))
         worker.start()
 
         if self._on_slide_loaded is not None:
             self._on_slide_loaded(slide_idx, img)
 
     def _estimate_worker(self, img: np.ndarray):
+        """Estimate min-area off the UI thread, keeping the mask it had to build."""
         from napari.qt.threading import thread_worker
 
         @thread_worker
         def _run():
-            from atlastrack.sectioning.split import estimate_min_area
-            return estimate_min_area(img)
+            from atlastrack.sectioning.split import binarize_slide, estimate_min_area
+
+            fg = binarize_slide(img)
+            return estimate_min_area(img, fg=fg), fg
 
         return _run()
+
+    def _on_min_area_estimated(self, img: np.ndarray, result) -> None:
+        """Take the estimate and keep its foreground mask for the detect run.
+
+        Handled on the main thread (this is the worker's ``returned`` signal), so
+        the cache is never written from the worker thread.
+        """
+        try:
+            value, fg = result
+        except (TypeError, ValueError):  # a stubbed or older worker returning an int
+            value, fg = result, None
+        if fg is not None:
+            self._fg_cache = (img, fg)
+        self._min_area.setValue(value)
+        self._status.setText(
+            f"{img.shape[1]}×{img.shape[0]} px  |  min area estimated: {value:,} px²"
+        )
+
+    def _cached_fg_for(self, img: np.ndarray):
+        """The foreground mask for *this exact array*, or None.
+
+        Identity (``is``), not equality: flipping a slide or merging another one
+        builds a **new** array, so this invalidates the cache exactly when the
+        pixels change, with no flag to keep in step. Holding the array reference
+        in the cache keeps it alive, so the identity test cannot be fooled by a
+        recycled object id.
+        """
+        cache = self._fg_cache
+        if cache is not None and cache[0] is img:
+            return cache[1]
+        return None
 
     # ------------------------------------------------------------------
     # Detection
@@ -500,6 +533,7 @@ class SlideLoaderWidget(QWidget):
             closing_radius_px=self._closing_r.value(),
             equalize_boxes=self._equalize_box.isChecked(),
             band_bounds=self._state.slide_bands.get(slide_idx),
+            fg=self._cached_fg_for(img),
         )
         worker.returned.connect(self._on_detected)
         worker.errored.connect(lambda e: self._status.setText(f"Error: {e}"))

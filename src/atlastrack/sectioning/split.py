@@ -68,6 +68,37 @@ def _binarize(gray: np.ndarray) -> np.ndarray:
     return fg
 
 
+def binarize_slide(image: np.ndarray) -> np.ndarray:
+    """Grayscale + Otsu a slide once, so callers can share the result.
+
+    :func:`estimate_min_area` and :func:`detect_sections` each need this and are
+    normally run back to back on the *same* array - the estimate to pre-fill the
+    min-area box when a slide loads, the detection when the user clicks. Doing it
+    twice costs a full-slide grayscale conversion plus a full-slide blur for a
+    result that cannot have changed in between: about 4 s of the 13 s a 100 MP
+    scan used to take. Pass the result back in as ``fg=`` to skip the repeat.
+
+    It depends only on the pixels, not on ``min_area_px`` or either morphology
+    radius, which is what makes it safe to reuse across both calls.
+    """
+    return _binarize(_to_gray(image))
+
+
+def _foreground_for(image: np.ndarray, fg: np.ndarray | None) -> np.ndarray:
+    """Use a caller-supplied foreground mask, or compute one.
+
+    A mask of the wrong shape is recomputed rather than trusted: the usual cause
+    is a stale cache from the slide before this one, and silently detecting
+    sections against the previous slide's tissue would be far worse than
+    spending the time again.
+    """
+    if fg is not None:
+        fg = np.asarray(fg)
+        if fg.shape == image.shape[:2]:
+            return fg
+    return binarize_slide(image)
+
+
 def detect_sections(
     image: np.ndarray,
     *,
@@ -80,6 +111,7 @@ def detect_sections(
     equalize_boxes: bool = True,
     box_min_frac: float = 0.85,
     margin_frac: float = 0.06,
+    fg: np.ndarray | None = None,
 ) -> list[DetectedSection]:
     """Find brain sections in a composite slide image.
 
@@ -122,9 +154,12 @@ def detect_sections(
         atlas contour there (most visibly along the bottom). Growth is capped at
         half the gap to the nearest other section so the margin never eats into a
         neighbour, and clipped to the image. 0 disables.
+    fg
+        A foreground mask from :func:`binarize_slide` for this same image. Skips
+        the grayscale + Otsu pass, which :func:`estimate_min_area` has usually
+        just done. Recomputed if its shape does not match ``image``.
     """
-    gray = _to_gray(image)
-    fg = _binarize(gray)
+    fg = _foreground_for(image, fg)
 
     if opening_radius_px > 0:
         fg = morphology.opening(fg, morphology.disk(opening_radius_px))
@@ -301,7 +336,7 @@ def section_mask_crop(section: DetectedSection) -> np.ndarray:
     return section.mask[y0:y1, x0:x1]
 
 
-def estimate_min_area(image: np.ndarray) -> int:
+def estimate_min_area(image: np.ndarray, *, fg: np.ndarray | None = None) -> int:
     """Estimate a reasonable ``min_area_px`` for this slide.
 
     Strategy
@@ -317,8 +352,7 @@ def estimate_min_area(image: np.ndarray) -> int:
        That value sits well below the biggest section (so nothing is excluded)
        while being large enough to reject most debris.
     """
-    gray = _to_gray(image)
-    fg = _binarize(gray)
+    fg = _foreground_for(image, fg)
     labeled = measure.label(fg, connectivity=2)
     h, w = fg.shape
     image_area = h * w

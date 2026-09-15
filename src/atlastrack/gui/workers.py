@@ -25,17 +25,22 @@ def detect_sections_worker(
     closing_radius_px: int = 0,
     equalize_boxes: bool = True,
     band_bounds: list[tuple[int, int]] | None = None,
+    fg: np.ndarray | None = None,
 ) -> list[OrderedSection]:
     """Detect and order sections in a slide image.
 
     ``band_bounds`` (per-source vertical bands of a merged multi-slide canvas)
     makes the ordering slide-aware so columns don't run across stacked slides.
+
+    ``fg`` is the foreground mask the min-area estimate already produced for this
+    image; passing it skips a repeat of the whole-slide grayscale + Otsu pass.
     """
     sections = detect_sections(
         image,
         min_area_px=min_area_px,
         closing_radius_px=closing_radius_px,
         equalize_boxes=equalize_boxes,
+        fg=fg,
     )
     return order_sections(sections, band_bounds=band_bounds)
 
