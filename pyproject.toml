@@ -39,7 +39,14 @@ dependencies = [
     "imageio>=2.33",
     "imagecodecs>=2024.1.1",
     "SimpleITK>=2.3",
-    "brainglobe-atlasapi>=2.0.6",
+    # Capped below 3.0: brainglobe-atlasapi 3.x stores atlases as OME-Zarr **v3**
+    # assets, which need zarr>=3 to open - and spikeinterface (the ephys extra)
+    # requires zarr<3, with no released version that lifts it. Installing 3.x
+    # therefore makes every atlas fail to load with "No valid Zarr group found",
+    # including ones already downloaded, because 3.x ignores the legacy
+    # ~/.brainglobe/<atlas>_v<ver>/ folders that 2.x reads. Revisit when
+    # spikeinterface supports zarr 3.
+    "brainglobe-atlasapi>=2.0.6,<3",
     "plotly>=5.19",
     "pydantic>=2.5,<3",
     "pydantic-settings>=2.1",
