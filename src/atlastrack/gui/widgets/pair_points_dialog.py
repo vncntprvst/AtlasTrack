@@ -2,16 +2,23 @@
 
 **Why a separate window rather than a mode in the napari canvas.** The canvas draws
 the atlas overlay *on top of* the tissue in one coordinate space, so a click there
-cannot say which of the two it meant. The first attempt asked the user to click
-"the atlas, then the tissue" in that shared space, which is not something the
-interface could show or the user could verify - there was no way to tell what a
-click had been taken as. Two panes remove the ambiguity by construction: the pane
-you click in *is* the answer.
+cannot say which of the two it meant, and nothing on screen could show what it had
+been taken as. Two panes remove the ambiguity by construction: the pane you click
+in *is* the answer.
 
-Both panes are drawn at the **section crop's** resolution, and the atlas slice is
-resampled to that same shape. Scene coordinates in either pane are therefore
-section-local pixels already - the exact frame ``ManualLandmarks`` stores - so no
-mapping is needed between what is clicked and what is saved.
+**Both panes show the registration you already ran.** The atlas pane is the
+registered atlas as it currently sits on this section - not a fresh coronal slice
+of the raw atlas. That matters twice over: it is what makes the outline line up
+with the tissue at all, and it is the frame ``ManualLandmarks`` is defined in -
+``source`` is a position *on the registered overlay*, ``target`` where it should
+have been. Drawing a raw plane here instead put every source point in the wrong
+frame, which is why the outline sat visibly off the tissue and lurched once a
+couple of pairs were applied.
+
+The atlas pane deliberately shows the overlay **without** any stored landmark warp
+(``apply_landmarks=False``): existing source points were recorded in that un-warped
+frame, so new ones have to be picked in it too. The tissue pane's overlay applies
+the warp, so it previews the result as pairs are placed.
 """
 from __future__ import annotations
 
@@ -37,13 +44,11 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-# Shared with the Atlas matcher on purpose: one way to turn an array into a
-# pixmap, window a section crop and draw region edges, so the two windows cannot
-# drift into showing the same slide differently.
+# Shared with the Atlas matcher on purpose: one way to turn an array into a pixmap
+# and window a section crop, so the two windows cannot drift into showing the same
+# slide differently.
 from atlastrack.gui.widgets.atlas_matcher import (
     _display_histology,
-    _display_reference,
-    _edges_pixmap,
     _ImagePane,
     _to_pixmap,
 )
@@ -57,15 +62,28 @@ if TYPE_CHECKING:  # pragma: no cover
 #: and both panes also pan with a left drag.
 _CLICK_SLOP_PX = 4.0
 
-#: Marker radius in scene (section) pixels, and the colours for each side.
+#: Marker radius in scene (section) pixels, and the colours for each role.
 _MARKER_R = 7.0
 _ATLAS_COLOR = "#ff5f5f"
 _TISSUE_COLOR = "#5fd35f"
 _PENDING_COLOR = "#ffd23f"
 
-#: At least this many pairs before a thin-plate spline is worth solving. Matches
-#: the check the Register panel applies to dragged landmarks.
+#: Atlas outline colour, and the dim fill under it so the pane has a silhouette to
+#: orient by rather than lines floating on black.
+_EDGE_RGB = (90, 230, 120)
+_EXTENT_GREY = 48
+
+#: At least this many completed pairs before a thin-plate spline is worth solving.
+#: Matches the check the Register panel applies to dragged landmarks.
 _MIN_PAIRS = 4
+
+#: Auto-placed atlas points, via the same helper "Place landmarks" uses, so both
+#: routes seed the same features.
+_AUTO_MAX_POINTS = 12
+
+#: Below this many pairs a TPS preview is not meaningful, so the overlay is left
+#: as the plain registered atlas.
+_MIN_PREVIEW_PAIRS = 3
 
 
 class _PickPane(_ImagePane):
@@ -102,20 +120,25 @@ class _PickPane(_ImagePane):
             self.scene().removeItem(item)
         self._markers.clear()
 
-    def add_marker(self, x: float, y: float, label: str, color: str) -> None:
-        """A ring plus its pair number, drawn above the image layers."""
+    def add_marker(
+        self, x: float, y: float, label: str, color: str, *, bold: bool = False
+    ) -> None:
+        """A ring plus its number, drawn above the image layers."""
         pen = QPen(QColor(color))
-        pen.setWidthF(2.0)
+        pen.setWidthF(3.0 if bold else 2.0)
         pen.setCosmetic(True)  # constant on screen, so zoom does not fatten it
+        radius = _MARKER_R * (1.5 if bold else 1.0)
         ring = self.scene().addEllipse(
-            x - _MARKER_R, y - _MARKER_R, 2 * _MARKER_R, 2 * _MARKER_R, pen, QBrush(Qt.NoBrush)
+            x - radius, y - radius, 2 * radius, 2 * radius, pen, QBrush(Qt.NoBrush)
         )
         ring.setZValue(10)
         self._markers.append(ring)
 
-        text = self.scene().addSimpleText(label, QFont("", 9))
+        font = QFont("", 9)
+        font.setBold(bold)
+        text = self.scene().addSimpleText(label, font)
         text.setBrush(QBrush(QColor(color)))
-        text.setPos(x + _MARKER_R, y - _MARKER_R * 2)
+        text.setPos(x + radius, y - radius * 2)
         text.setFlag(text.GraphicsItemFlag.ItemIgnoresTransformations, True)
         text.setZValue(11)
         self._markers.append(text)
@@ -125,9 +148,11 @@ class PairPointsDialog(QDialog):
     """Pair atlas features with tissue features for one section.
 
     Owns nothing expensive: it writes ``Section.manual_landmarks`` and
-    ``Section.plane`` and then hands back to the Register panel through
+    ``Section.plane``, then hands back to the Register panel through
     ``on_section_changed`` for the re-render / probe re-map / save, so there is
-    exactly one implementation of that step.
+    exactly one implementation of that step. ``warp_labels`` is the panel's own
+    ``_warp_labels_for``, reused so the overlay here and the overlay on the canvas
+    cannot come from two different code paths.
     """
 
     def __init__(
@@ -135,6 +160,7 @@ class PairPointsDialog(QDialog):
         state: WorkflowState,
         section: Section,
         *,
+        warp_labels: Callable[..., np.ndarray | None] | None = None,
         on_section_changed: Callable[[Section], None] | None = None,
         bregma_ap_um: float = 0.0,
         parent: QWidget | None = None,
@@ -142,23 +168,25 @@ class PairPointsDialog(QDialog):
         super().__init__(parent)
         self._state = state
         self._section = section
+        self._warp_labels = warp_labels
         self._on_section_changed = on_section_changed
         self._bregma_ap_um = float(bregma_ap_um)
 
-        # Pairs held as section-local (x, y). ``_pending`` is the half-finished
-        # one: which pane it came from decides which half of the pair it fills.
-        self._pairs: list[tuple[tuple[float, float], tuple[float, float]]] = []
-        self._pending: tuple[str, tuple[float, float]] | None = None
+        # Each entry is ``[source, target]``; ``target`` is None while the atlas
+        # side is placed but its tissue match is not - which is what auto-placing
+        # leaves behind, and what the user then works through.
+        self._pairs: list[list[tuple[float, float] | None]] = []
+        self._pending_tissue: tuple[float, float] | None = None
 
         self._crop: np.ndarray | None = None
-        self._annotation: np.ndarray | None = None
+        self._base_labels: np.ndarray | None = None
         self._updating = False
 
         self.setWindowTitle(f"Pair points - section {section.index}")
         self.setModal(False)  # a modal dialog would block the viewer behind it
-        self.resize(1100, 680)
+        self.resize(1150, 720)
         self._build_ui()
-        self._load_existing_landmarks()
+        self._load_existing()
         self._refresh_images(fit=True)
         self._refresh_markers()
 
@@ -167,17 +195,17 @@ class PairPointsDialog(QDialog):
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
 
-        hint = QLabel(
-            "Click a feature in one pane, then the same feature in the other. "
-            "The pane you click in says which side it is - order does not matter."
-        )
-        hint.setWordWrap(True)
-        outer.addWidget(hint)
+        self._hint = QLabel()
+        self._hint.setWordWrap(True)
+        outer.addWidget(self._hint)
 
         panes = QHBoxLayout()
         self._hist_pane = _PickPane()
         self._atlas_pane = _PickPane()
-        for title, pane in (("Section (tissue)", self._hist_pane), ("Atlas", self._atlas_pane)):
+        for title, pane in (
+            ("Section (tissue)", self._hist_pane),
+            ("Atlas as currently registered", self._atlas_pane),
+        ):
             box = QVBoxLayout()
             box.addWidget(QLabel(title))
             box.addWidget(pane, stretch=1)
@@ -201,35 +229,31 @@ class PairPointsDialog(QDialog):
         box = QGroupBox("Display")
         row = QHBoxLayout(box)
 
-        self._atlas_outlines = QCheckBox("Atlas outlines")
-        self._atlas_outlines.setChecked(True)
-        self._atlas_outlines.setToolTip("Region boundaries drawn on the atlas pane.")
-        self._atlas_outlines.toggled.connect(lambda _: self._refresh_images())
-        row.addWidget(self._atlas_outlines)
-
         self._overlay_check = QCheckBox("Atlas over tissue")
         self._overlay_check.setToolTip(
-            "Draw the atlas slice on top of the section, to judge the fit directly.\n"
-            "Off by default: it hides the tissue you are trying to click."
+            "Draw the registered atlas on the section, so the fit can be judged "
+            "directly.\nOff by default: it hides the tissue you are trying to click."
         )
         self._overlay_check.toggled.connect(self._on_overlay_toggled)
         row.addWidget(self._overlay_check)
 
-        self._overlay_outlines = QCheckBox("with outlines")
-        self._overlay_outlines.setChecked(True)
-        self._overlay_outlines.setEnabled(False)
-        self._overlay_outlines.toggled.connect(lambda _: self._refresh_images())
-        row.addWidget(self._overlay_outlines)
-
         row.addWidget(QLabel("Opacity:"))
         self._opacity = QSlider(Qt.Horizontal)
         self._opacity.setRange(0, 100)
-        self._opacity.setValue(45)
+        self._opacity.setValue(55)
         self._opacity.setEnabled(False)
-        self._opacity.setFixedWidth(120)
-        self._opacity.setToolTip("How strongly the atlas is painted over the tissue.")
+        self._opacity.setFixedWidth(130)
         self._opacity.valueChanged.connect(lambda _: self._refresh_images())
         row.addWidget(self._opacity)
+
+        self._preview_check = QCheckBox("Preview warp")
+        self._preview_check.setChecked(True)
+        self._preview_check.setToolTip(
+            "Bend the overlay through the pairs placed so far, as they are placed, "
+            "instead of waiting for Apply."
+        )
+        self._preview_check.toggled.connect(lambda _: self._refresh_images())
+        row.addWidget(self._preview_check)
         row.addStretch()
         return box
 
@@ -238,23 +262,23 @@ class PairPointsDialog(QDialog):
         box.setToolTip(
             "The plane first comes from the Atlas tab; this is where to nudge it "
             "against the tissue you are pairing against.\n"
-            "Moving these re-slices the atlas immediately - it does not re-register "
-            "the section until you press 'Apply plane'."
+            "These values describe the slice the NEXT registration will fit - the "
+            "panes above show the registration you already have, so they follow a "
+            "re-register, not a spin box."
         )
         grid = QGridLayout(box)
 
         self._ap_spin = QDoubleSpinBox()
         self._ap_spin.setRange(-20000.0, 20000.0)
         self._ap_spin.setSingleStep(25.0)
-        self._ap_spin.setSuffix(" µm")
-        self._ap_spin.setToolTip("AP position of the section centre, relative to bregma.")
+        self._ap_spin.setSuffix(" um")
         grid.addWidget(QLabel("AP from bregma:"), 0, 0)
         grid.addWidget(self._ap_spin, 0, 1)
 
         self._ml_spin = QDoubleSpinBox()
         self._ml_spin.setRange(-30.0, 30.0)
         self._ml_spin.setSingleStep(0.5)
-        self._ml_spin.setSuffix(" °")
+        self._ml_spin.setSuffix(" deg")
         self._ml_spin.setToolTip("Tilt about the DV axis: the medial edge moves anterior.")
         grid.addWidget(QLabel("ML tilt:"), 0, 2)
         grid.addWidget(self._ml_spin, 0, 3)
@@ -262,25 +286,22 @@ class PairPointsDialog(QDialog):
         self._dv_spin = QDoubleSpinBox()
         self._dv_spin.setRange(-30.0, 30.0)
         self._dv_spin.setSingleStep(0.5)
-        self._dv_spin.setSuffix(" °")
+        self._dv_spin.setSuffix(" deg")
         self._dv_spin.setToolTip("Tilt about the ML axis: the dorsal edge moves anterior.")
         grid.addWidget(QLabel("DV tilt:"), 0, 4)
         grid.addWidget(self._dv_spin, 0, 5)
 
-        for spin in (self._ap_spin, self._ml_spin, self._dv_spin):
-            spin.valueChanged.connect(self._on_plane_spin_changed)
-
         apply_plane = QPushButton("Apply plane")
         apply_plane.setToolTip(
-            "Write these values to the section (marked as a manual AP).\n"
-            "Re-running the registration itself is still 'Register all sections'."
+            "Write these values to the section as a manual AP.\n"
+            "Then re-run 'Register all sections' for the overlay to follow."
         )
         apply_plane.clicked.connect(self._apply_plane)
         grid.addWidget(apply_plane, 0, 6)
 
-        self._plane_status = QLabel("")
-        self._plane_status.setWordWrap(True)
-        grid.addWidget(self._plane_status, 1, 0, 1, 7)
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        grid.addWidget(self._status, 1, 0, 1, 7)
         return box
 
     def _build_pairs_box(self) -> QGroupBox:
@@ -291,12 +312,21 @@ class PairPointsDialog(QDialog):
         row.addWidget(self._pairs_label)
         row.addStretch()
 
-        undo = QPushButton("Undo last pair")
-        undo.clicked.connect(self._undo_pair)
+        auto = QPushButton("Auto-place atlas points")
+        auto.setToolTip(
+            "Drop points on distinctive atlas features - outline tips, region "
+            "junctions, corners - so there is something to work from.\n"
+            "Each then waits for you to click where it belongs on the tissue."
+        )
+        auto.clicked.connect(self._auto_place)
+        row.addWidget(auto)
+
+        undo = QPushButton("Undo")
+        undo.clicked.connect(self._undo)
         row.addWidget(undo)
 
         clear = QPushButton("Clear landmarks")
-        clear.setToolTip("Remove every pair on this section, including saved ones.")
+        clear.setToolTip("Remove every point on this section, including saved ones.")
         clear.clicked.connect(self._clear_landmarks)
         row.addWidget(clear)
 
@@ -311,7 +341,7 @@ class PairPointsDialog(QDialog):
         self._apply_btn = QPushButton("Apply landmark warp")
         self._apply_btn.setToolTip(
             f"Warp the atlas through these pairs, re-map probes and save. "
-            f"Needs at least {_MIN_PAIRS}."
+            f"Needs at least {_MIN_PAIRS} completed pairs."
         )
         self._apply_btn.clicked.connect(self._apply_landmarks)
         row.addWidget(self._apply_btn)
@@ -331,75 +361,88 @@ class PairPointsDialog(QDialog):
             return None
         return img[y0:y1, x0:x1]
 
-    def _current_plane(self):
-        """PlaneParams reflecting the spin boxes, without writing to the section."""
-        from atlastrack.project.schema import PlaneParams
+    def _registered_labels(self) -> np.ndarray | None:
+        """The registered atlas in section space, **without** any stored TPS.
 
-        base = self._section.plane
-        ap_abs = self._bregma_ap_um - float(self._ap_spin.value())
-        if base is None:
-            return PlaneParams(
-                ap_um=ap_abs,
-                ml_tilt_deg=float(self._ml_spin.value()),
-                dv_tilt_deg=float(self._dv_spin.value()),
-            )
-        return base.model_copy(
-            update={
-                "ap_um": ap_abs,
-                "ml_tilt_deg": float(self._ml_spin.value()),
-                "dv_tilt_deg": float(self._dv_spin.value()),
-            }
-        )
+        Without the TPS on purpose - see the module docstring: stored source points
+        live in this frame, so new ones must be picked in it.
+        """
+        if self._warp_labels is None:
+            return None
+        try:
+            return self._warp_labels(self._section, apply_landmarks=False)
+        except Exception:
+            return None
 
-    def _atlas_slice(self, out_shape: tuple[int, int]):
-        """``(reference, annotation)`` at the plane the spin boxes describe."""
-        from atlastrack.atlas.planes import anchoring_from_plane_params, resample_atlas_at_plane
+    def _complete_pairs(self) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        return [(s, t) for s, t in self._pairs if s is not None and t is not None]
 
-        atlas = self._state.atlas
-        if atlas is None:
-            return None, None
-        anchoring = anchoring_from_plane_params(atlas, self._current_plane())
-        return resample_atlas_at_plane(atlas, anchoring, out_shape)
+    def _atlas_rgba(self, labels: np.ndarray) -> np.ndarray:
+        """Outlines over a dim silhouette, as an RGBA image."""
+        from atlastrack.registration.transforms import annotation_boundaries
+
+        extent = np.asarray(labels) > 0
+        edges = annotation_boundaries(labels)
+        h, w = extent.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[extent] = (_EXTENT_GREY, _EXTENT_GREY, _EXTENT_GREY, 255)
+        rgba[edges] = (*_EDGE_RGB, 255)
+        return rgba
+
+    def _preview_labels(self, base: np.ndarray) -> np.ndarray:
+        """``base`` bent through the pairs placed so far, for the live overlay."""
+        pairs = self._complete_pairs()
+        if not self._preview_check.isChecked() or len(pairs) < _MIN_PREVIEW_PAIRS:
+            return base
+        try:
+            from atlastrack.registration.landmarks_warp import warp_label_image
+
+            source = np.array([s for s, _ in pairs], dtype=float)
+            target = np.array([t for _, t in pairs], dtype=float)
+            return warp_label_image(base, source, target)
+        except Exception:
+            return base
 
     def _refresh_images(self, *, fit: bool = False) -> None:
         crop = self._section_crop()
         if crop is None:
-            self._plane_status.setText("This section's slide image is not loaded.")
+            self._status.setText("This section's slide image is not loaded.")
             return
         self._crop = crop
         levels = self._section.levels or self._slide_levels()
         self._hist_pane.set_base(_to_pixmap(_display_histology(crop, levels)), fit=fit)
 
-        reference, annotation = self._atlas_slice(crop.shape[:2])
-        if reference is None:
-            self._plane_status.setText("Load an atlas to see the atlas pane.")
+        labels = self._registered_labels()
+        if labels is None:
+            self._base_labels = None
             self._atlas_pane.set_base(_to_pixmap(np.zeros(crop.shape[:2], np.uint8)), fit=fit)
-            self._atlas_pane.set_edges(None)
             self._hist_pane.set_overlay(None)
+            self._status.setText(
+                "No registered atlas for this section yet - run 'Register all "
+                "sections' first, so there is an overlay to correct."
+            )
+            self._update_hint()
             return
 
-        self._annotation = annotation
-        self._atlas_pane.set_base(_to_pixmap(_display_reference(reference)), fit=fit)
-        self._atlas_pane.set_edges(
-            _edges_pixmap(annotation) if self._atlas_outlines.isChecked() else None
-        )
+        self._base_labels = labels
+        self._atlas_pane.set_base(_to_pixmap(self._atlas_rgba(labels)), fit=fit)
 
         if self._overlay_check.isChecked():
+            shown = self._preview_labels(labels)
             self._hist_pane.set_overlay(
-                _to_pixmap(_display_reference(reference)), self._opacity.value() / 100.0
-            )
-            self._hist_pane.set_edges(
-                _edges_pixmap(annotation) if self._overlay_outlines.isChecked() else None
+                _to_pixmap(self._atlas_rgba(shown)), self._opacity.value() / 100.0
             )
         else:
             self._hist_pane.set_overlay(None)
-            self._hist_pane.set_edges(None)
 
-        ap_bregma = self._ap_spin.value()
-        self._plane_status.setText(
-            f"Atlas sliced at AP {ap_bregma:+.0f} µm from bregma, "
-            f"ML tilt {self._ml_spin.value():+.1f}°, DV tilt {self._dv_spin.value():+.1f}°."
+        done = len(self._complete_pairs())
+        previewing = self._preview_check.isChecked() and done >= _MIN_PREVIEW_PAIRS
+        self._status.setText(
+            f"Showing the registration already computed for section "
+            f"{self._section.index}."
+            + (" Overlay previews the warp." if previewing else "")
         )
+        self._update_hint()
 
     def _slide_levels(self):
         try:
@@ -407,56 +450,105 @@ class PairPointsDialog(QDialog):
         except Exception:
             return None
 
+    def _next_unmatched(self) -> int | None:
+        """Index of the first atlas point still waiting for its tissue match."""
+        for i, (source, target) in enumerate(self._pairs):
+            if source is not None and target is None:
+                return i
+        return None
+
     def _refresh_markers(self) -> None:
         self._hist_pane.clear_markers()
         self._atlas_pane.clear_markers()
-        for n, (source, target) in enumerate(self._pairs, start=1):
-            self._atlas_pane.add_marker(source[0], source[1], str(n), _ATLAS_COLOR)
-            self._hist_pane.add_marker(target[0], target[1], str(n), _TISSUE_COLOR)
-        if self._pending is not None:
-            side, (x, y) = self._pending
-            pane = self._atlas_pane if side == "atlas" else self._hist_pane
-            pane.add_marker(x, y, "?", _PENDING_COLOR)
+        nxt = self._next_unmatched()
+        for i, (source, target) in enumerate(self._pairs):
+            label = str(i + 1)
+            if source is not None:
+                color = _PENDING_COLOR if target is None else _ATLAS_COLOR
+                self._atlas_pane.add_marker(
+                    source[0], source[1], label, color, bold=(i == nxt)
+                )
+            if target is not None:
+                self._hist_pane.add_marker(target[0], target[1], label, _TISSUE_COLOR)
+        if self._pending_tissue is not None:
+            self._hist_pane.add_marker(
+                self._pending_tissue[0], self._pending_tissue[1], "?", _PENDING_COLOR, bold=True
+            )
 
-        n = len(self._pairs)
-        waiting = ""
-        if self._pending is not None:
-            other = "tissue" if self._pending[0] == "atlas" else "atlas"
-            waiting = f"   ·   waiting for the matching point on the {other}"
-        self._pairs_label.setText(f"{n} pair(s){waiting}")
-        self._apply_btn.setEnabled(n >= _MIN_PAIRS)
+        done = len(self._complete_pairs())
+        waiting = sum(1 for s, t in self._pairs if s is not None and t is None)
+        parts = [f"{done} complete"]
+        if waiting:
+            parts.append(f"{waiting} awaiting a tissue click")
+        self._pairs_label.setText("   -   ".join(parts))
+        self._apply_btn.setEnabled(done >= _MIN_PAIRS)
+        self._update_hint()
+
+    def _update_hint(self) -> None:
+        nxt = self._next_unmatched()
+        if nxt is not None:
+            self._hint.setText(
+                f"Point {nxt + 1} is marked on the atlas (bold). Click the same "
+                f"feature on the tissue to complete it."
+            )
+        elif self._pending_tissue is not None:
+            self._hint.setText("Now click the matching feature on the atlas.")
+        else:
+            self._hint.setText(
+                "Click a feature in one pane, then the same feature in the other - "
+                "the pane you click in says which side it is. Or press "
+                "'Auto-place atlas points' and just click the tissue side."
+            )
 
     # ------------------------------------------------------------- actions
 
     def _on_pane_clicked(self, side: str, x: float, y: float) -> None:
-        """First click arms a side; the second, from the other pane, completes it."""
         if self._crop is None:
             return
         h, w = self._crop.shape[:2]
         if not (0 <= x < w and 0 <= y < h):
             return  # outside the image: a stray click on the black surround
-        if self._pending is None:
-            self._pending = (side, (x, y))
-        elif self._pending[0] == side:
-            # Same pane twice: treat it as moving the pending point rather than
-            # silently pairing a feature with itself.
-            self._pending = (side, (x, y))
+
+        if side == "tissue":
+            nxt = self._next_unmatched()
+            if nxt is not None:
+                self._pairs[nxt][1] = (x, y)  # completes the highlighted atlas point
+            else:
+                self._pending_tissue = (x, y)
+        elif self._pending_tissue is not None:
+            self._pairs.append([(x, y), self._pending_tissue])
+            self._pending_tissue = None
         else:
-            first_side, first = self._pending
-            source, target = (first, (x, y)) if first_side == "atlas" else ((x, y), first)
-            self._pairs.append((source, target))
-            self._pending = None
+            self._pairs.append([(x, y), None])
+
+        self._refresh_markers()
+        self._refresh_images()
+
+    def _auto_place(self) -> None:
+        """Seed atlas-side points on salient features, each awaiting a tissue click."""
+        if self._base_labels is None:
+            self._status.setText("No registered atlas to place points on.")
+            return
+        from atlastrack.registration.landmarks_warp import salient_landmarks
+
+        points = salient_landmarks(self._base_labels, max_points=_AUTO_MAX_POINTS)
+        for x, y in np.asarray(points, dtype=float).reshape(-1, 2):
+            self._pairs.append([(float(x), float(y)), None])
+        self._status.setText(
+            f"Placed {len(points)} atlas points. Click each one's match on the "
+            f"tissue; the bold marker is the one being waited on."
+        )
         self._refresh_markers()
 
-    def _undo_pair(self) -> None:
-        if self._pending is not None:
-            self._pending = None
+    def _undo(self) -> None:
+        if self._pending_tissue is not None:
+            self._pending_tissue = None
         elif self._pairs:
             self._pairs.pop()
         self._refresh_markers()
+        self._refresh_images()
 
-    def _load_existing_landmarks(self) -> None:
-        """Show pairs already stored on the section, and the plane it already has."""
+    def _load_existing(self) -> None:
         self._updating = True
         try:
             plane = self._section.plane
@@ -473,30 +565,35 @@ class PairPointsDialog(QDialog):
         source = np.asarray(landmarks.source, dtype=float).reshape(-1, 2)
         target = np.asarray(landmarks.target, dtype=float).reshape(-1, 2)
         for s, t in zip(source, target, strict=False):
-            self._pairs.append(((float(s[0]), float(s[1])), (float(t[0]), float(t[1]))))
-
-    def _on_plane_spin_changed(self) -> None:
-        if self._updating:
-            return
-        self._refresh_images()
+            self._pairs.append([(float(s[0]), float(s[1])), (float(t[0]), float(t[1]))])
 
     def _apply_plane(self) -> None:
-        self._section.plane = self._current_plane()
+        from atlastrack.project.schema import PlaneParams
+
+        base = self._section.plane
+        update = {
+            "ap_um": self._bregma_ap_um - float(self._ap_spin.value()),
+            "ml_tilt_deg": float(self._ml_spin.value()),
+            "dv_tilt_deg": float(self._dv_spin.value()),
+        }
+        self._section.plane = (
+            PlaneParams(**update) if base is None else base.model_copy(update=update)
+        )
         self._section.ap_source = "manual"
         self._notify()
-        self._plane_status.setText(
-            f"Plane written to section {self._section.index}. "
-            f"Re-run 'Register all sections' to refit the atlas to the tissue."
+        self._status.setText(
+            f"Plane written to section {self._section.index}. Re-run 'Register all "
+            f"sections' for the overlay to follow it."
         )
 
     def _clear_landmarks(self) -> None:
         if self._pairs and not self._confirm(
             "Clear landmarks",
-            f"Remove all {len(self._pairs)} pair(s) from section {self._section.index}?",
+            f"Remove all {len(self._pairs)} point(s) from section {self._section.index}?",
         ):
             return
         self._pairs.clear()
-        self._pending = None
+        self._pending_tissue = None
         self._section.manual_landmarks = None
         self._notify()
         self._refresh_markers()
@@ -512,7 +609,7 @@ class PairPointsDialog(QDialog):
         self._section.manual_affine = None
         self._section.manual_landmarks = None
         self._pairs.clear()
-        self._pending = None
+        self._pending_tissue = None
         self._notify()
         self._refresh_markers()
         self._refresh_images()
@@ -520,24 +617,26 @@ class PairPointsDialog(QDialog):
     def _apply_landmarks(self) -> None:
         from atlastrack.project.schema import ManualLandmarks
 
-        if len(self._pairs) < _MIN_PAIRS:
+        pairs = self._complete_pairs()
+        if len(pairs) < _MIN_PAIRS:
             # Status line, not a message box: the Apply button is already disabled
             # below this count, so this is a backstop, and a modal box with no one
             # to click it is what hung the GUI tests once before (see _info_merge).
-            self._plane_status.setText(
-                f"Place at least {_MIN_PAIRS} pairs before warping "
-                f"({len(self._pairs)} so far)."
+            self._status.setText(
+                f"Complete at least {_MIN_PAIRS} pairs before warping "
+                f"({len(pairs)} so far)."
             )
             return
         self._section.manual_landmarks = ManualLandmarks(
-            source=[[s[0], s[1]] for s, _ in self._pairs],
-            target=[[t[0], t[1]] for _, t in self._pairs],
+            source=[[s[0], s[1]] for s, _ in pairs],
+            target=[[t[0], t[1]] for _, t in pairs],
         )
         self._section.manual_affine = None  # landmarks take precedence
         self._notify()
-        self._plane_status.setText(
-            f"Warped section {self._section.index} through {len(self._pairs)} pair(s)."
+        self._status.setText(
+            f"Warped section {self._section.index} through {len(pairs)} pair(s)."
         )
+        self._refresh_images()
 
     def _notify(self) -> None:
         """Hand the expensive part back to the Register panel."""
@@ -545,20 +644,22 @@ class PairPointsDialog(QDialog):
             try:
                 self._on_section_changed(self._section)
             except Exception as exc:  # a redraw failure must not close the dialog
-                self._plane_status.setText(f"Applied, but the redraw failed: {exc}")
+                self._status.setText(f"Applied, but the redraw failed: {exc}")
 
     # ------------------------------------------------------------- helpers
 
     def _confirm(self, title: str, text: str) -> bool:
-        """Ask before destroying work. Modal on purpose, and the one blocking call
-        here - tests patch this method rather than clicking it."""
+        """Ask before destroying work.
+
+        Modal on purpose, and the one blocking call here - tests patch this method
+        rather than clicking it.
+        """
         reply = QMessageBox.question(
             self, title, text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         return reply == QMessageBox.Yes
 
     def _on_overlay_toggled(self, on: bool) -> None:
-        self._overlay_outlines.setEnabled(on)
         self._opacity.setEnabled(on)
         self._refresh_images()
 

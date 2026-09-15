@@ -1377,6 +1377,9 @@ class RegisterPanelWidget(QWidget):
         dialog = PairPointsDialog(
             self._state,
             section,
+            # The panel's own warp, so the dialog shows the registration already
+            # computed rather than slicing the raw atlas afresh.
+            warp_labels=self._warp_labels_for,
             on_section_changed=self._after_pair_edit,
             bregma_ap_um=bregma_ap_for_display(self._state.project.atlas.name),
             parent=self,

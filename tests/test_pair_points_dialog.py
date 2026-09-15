@@ -1,10 +1,12 @@
 """The side-by-side landmark pairing window.
 
-The feature it replaces failed for one reason: in the napari canvas the atlas is
-drawn on top of the tissue, so a click could not say which of the two it meant and
-nothing on screen could show what it had been taken as. These tests pin the part
-that fixes it - the pane a click lands in *is* the answer - plus the destructive
-actions, which touch saved work.
+The feature it replaces failed for two reasons, both pinned here. In the napari
+canvas a click could not say whether it meant the atlas or the tissue. And the
+first version of this window sliced the **raw** atlas at the section's plane, so
+every source point was recorded in a frame the warp is not defined in - the
+outline sat visibly off the tissue and lurched once a few pairs were applied.
+``ManualLandmarks.source`` is a position on the *registered* overlay, so that is
+what the atlas pane must draw.
 """
 from __future__ import annotations
 
@@ -15,6 +17,14 @@ from atlastrack.gui.workflow import WorkflowState
 from atlastrack.project.schema import ManualLandmarks, Section, Slide
 
 pytestmark = pytest.mark.qt
+
+
+def _labels() -> np.ndarray:
+    """A small label image standing in for a registered atlas slice."""
+    labels = np.zeros((150, 200), dtype=np.int32)
+    labels[30:120, 40:160] = 1
+    labels[50:100, 70:130] = 2
+    return labels
 
 
 def _state(with_landmarks: bool = False) -> WorkflowState:
@@ -31,77 +41,121 @@ def _state(with_landmarks: bool = False) -> WorkflowState:
     return state
 
 
-def _dialog(qtbot, state, **kwargs):
+def _dialog(qtbot, state, *, warp=True, **kwargs):
     from atlastrack.gui.widgets.pair_points_dialog import PairPointsDialog
 
+    calls: list[dict] = []
+
+    def _warp_labels(section, *, apply_landmarks):
+        calls.append({"section": section.index, "apply_landmarks": apply_landmarks})
+        return _labels()
+
     section = state.project.slides[0].sections[0]
-    dialog = PairPointsDialog(state, section, **kwargs)
+    dialog = PairPointsDialog(
+        state, section, warp_labels=_warp_labels if warp else None, **kwargs
+    )
     dialog._confirm = lambda *a, **k: True  # never block on a modal prompt
     qtbot.addWidget(dialog)
-    return dialog, section
+    return dialog, section, calls
+
+
+def test_the_atlas_pane_uses_the_registration_already_computed(qtbot) -> None:
+    """It must ask the panel for the warped atlas, not slice the raw one."""
+    _dialog_, _section, calls = _dialog(qtbot, _state())
+    assert calls, "the dialog must ask for the registered atlas"
+    assert all(c["section"] == 3 for c in calls)
+
+
+def test_the_atlas_pane_excludes_any_stored_landmark_warp(qtbot) -> None:
+    """Stored source points were recorded pre-TPS, so new ones must be picked there.
+
+    Asking with ``apply_landmarks=True`` would show an already-bent atlas and
+    silently record source points in a frame the stored ones are not in.
+    """
+    _dialog_, _section, calls = _dialog(qtbot, _state(with_landmarks=True))
+    assert calls
+    assert all(c["apply_landmarks"] is False for c in calls), calls
 
 
 def test_a_pair_needs_one_click_in_each_pane(qtbot) -> None:
-    """One click arms; the second, from the *other* pane, completes the pair."""
-    dialog, _ = _dialog(qtbot, _state())
+    dialog, _s, _c = _dialog(qtbot, _state())
 
     dialog._on_pane_clicked("atlas", 100.0, 120.0)
-    assert dialog._pairs == [], "one click is not a pair"
-    assert dialog._pending is not None, "the first click must be held"
-    assert "tissue" in dialog._pairs_label.text(), "it must say which pane is next"
+    assert dialog._complete_pairs() == [], "one click is not a pair"
+    assert dialog._next_unmatched() == 0, "the atlas point waits for its tissue match"
 
     dialog._on_pane_clicked("tissue", 110.0, 130.0)
-    assert dialog._pairs == [((100.0, 120.0), (110.0, 130.0))]
-    assert dialog._pending is None
+    assert dialog._complete_pairs() == [((100.0, 120.0), (110.0, 130.0))]
 
 
 def test_the_pane_decides_the_side_so_either_order_works(qtbot) -> None:
-    """Source is always the atlas click and target the tissue one, whichever came first."""
-    dialog, _ = _dialog(qtbot, _state())
+    dialog, _s, _c = _dialog(qtbot, _state())
 
     dialog._on_pane_clicked("tissue", 50.0, 60.0)
     dialog._on_pane_clicked("atlas", 40.0, 55.0)
 
-    source, target = dialog._pairs[0]
+    source, target = dialog._complete_pairs()[0]
     assert source == (40.0, 55.0), "the atlas click is the source"
     assert target == (50.0, 60.0), "the tissue click is the target"
 
 
-def test_clicking_the_same_pane_twice_moves_the_point(qtbot) -> None:
-    """Never pair a feature with itself - that is a zero-displacement landmark."""
-    dialog, _ = _dialog(qtbot, _state())
+def test_several_atlas_points_queue_up_and_are_matched_in_order(qtbot) -> None:
+    """This is the auto-place workflow, done by hand: place, then match each."""
+    dialog, _s, _c = _dialog(qtbot, _state())
 
     dialog._on_pane_clicked("atlas", 10.0, 10.0)
     dialog._on_pane_clicked("atlas", 80.0, 90.0)
+    assert dialog._complete_pairs() == []
+    assert dialog._next_unmatched() == 0
 
-    assert dialog._pairs == [], "two clicks in one pane must not make a pair"
-    assert dialog._pending == ("atlas", (80.0, 90.0)), "the later click wins"
+    dialog._on_pane_clicked("tissue", 12.0, 12.0)
+    assert dialog._next_unmatched() == 1, "the queue advances"
+    dialog._on_pane_clicked("tissue", 82.0, 92.0)
+
+    assert dialog._complete_pairs() == [
+        ((10.0, 10.0), (12.0, 12.0)),
+        ((80.0, 90.0), (82.0, 92.0)),
+    ]
+
+
+def test_auto_place_seeds_atlas_points_awaiting_a_tissue_click(qtbot) -> None:
+    """'Why not apply some automatically' - so there is something to work from."""
+    dialog, _s, _c = _dialog(qtbot, _state())
+
+    dialog._auto_place()
+
+    assert len(dialog._pairs) >= 4, "auto-placement must produce a usable set"
+    assert dialog._complete_pairs() == [], "each still needs its tissue match"
+    assert dialog._next_unmatched() == 0
+    assert "tissue" in dialog._hint.text().lower()
 
 
 def test_clicks_outside_the_image_are_ignored(qtbot) -> None:
-    """Both panes sit on a black surround; a click there means nothing."""
-    dialog, _ = _dialog(qtbot, _state())
+    dialog, _s, _c = _dialog(qtbot, _state())
 
     dialog._on_pane_clicked("atlas", -5.0, 10.0)
     dialog._on_pane_clicked("atlas", 10.0, 999.0)
 
-    assert dialog._pending is None
     assert dialog._pairs == []
+    assert dialog._pending_tissue is None
 
 
 def test_landmarks_already_on_the_section_are_shown(qtbot) -> None:
-    """Opening on a section that has pairs must show them, not start empty."""
-    dialog, _ = _dialog(qtbot, _state(with_landmarks=True))
+    dialog, _s, _c = _dialog(qtbot, _state(with_landmarks=True))
 
-    assert dialog._pairs == [((10.0, 20.0), (12.0, 22.0)), ((30.0, 40.0), (33.0, 44.0))]
-    assert "2 pair" in dialog._pairs_label.text()
+    assert dialog._complete_pairs() == [
+        ((10.0, 20.0), (12.0, 22.0)),
+        ((30.0, 40.0), (33.0, 44.0)),
+    ]
+    assert "2 complete" in dialog._pairs_label.text()
 
 
 def test_apply_writes_the_pairs_and_drops_the_box_transform(qtbot) -> None:
-    """Landmarks and a box transform are mutually exclusive; landmarks win."""
     fired: list[int] = []
     state = _state()
-    dialog, section = _dialog(qtbot, state, on_section_changed=lambda s: fired.append(s.index))
+    dialog, section, _c = _dialog(
+        qtbot, state, on_section_changed=lambda s: fired.append(s.index)
+    )
     section.manual_affine = [[1.0, 0.0, 5.0], [0.0, 1.0, 5.0]]
 
     for n in range(4):
@@ -117,11 +171,24 @@ def test_apply_writes_the_pairs_and_drops_the_box_transform(qtbot) -> None:
     assert fired == [3], "the panel must be told to re-render and save"
 
 
+def test_half_finished_points_are_not_written(qtbot) -> None:
+    """Auto-placed points that were never matched must not become landmarks."""
+    state = _state()
+    dialog, section, _c = _dialog(qtbot, state)
+
+    for n in range(4):
+        dialog._on_pane_clicked("atlas", 10.0 + n, 20.0 + n)
+        dialog._on_pane_clicked("tissue", 11.0 + n, 21.0 + n)
+    dialog._on_pane_clicked("atlas", 99.0, 99.0)  # left unmatched
+    dialog._apply_landmarks()
+
+    assert len(section.manual_landmarks.source) == 4
+
+
 def test_apply_is_disabled_until_there_are_enough_pairs(qtbot) -> None:
-    """A thin-plate spline through fewer than four points is not worth offering."""
     from atlastrack.gui.widgets.pair_points_dialog import _MIN_PAIRS
 
-    dialog, _ = _dialog(qtbot, _state())
+    dialog, _s, _c = _dialog(qtbot, _state())
     assert dialog._apply_btn.isEnabled() is False
 
     for n in range(_MIN_PAIRS):
@@ -134,21 +201,22 @@ def test_apply_is_disabled_until_there_are_enough_pairs(qtbot) -> None:
 def test_apply_below_the_minimum_reports_without_a_modal_box(qtbot) -> None:
     """A message box with no one to click it is what hung the GUI suite before."""
     state = _state()
-    dialog, section = _dialog(qtbot, state)
+    dialog, section, _c = _dialog(qtbot, state)
 
     dialog._on_pane_clicked("atlas", 10.0, 20.0)
     dialog._on_pane_clicked("tissue", 11.0, 21.0)
     dialog._apply_landmarks()  # must return, not block
 
     assert section.manual_landmarks is None
-    assert "at least" in dialog._plane_status.text()
+    assert "at least" in dialog._status.text()
 
 
 def test_clear_removes_saved_landmarks_too(qtbot) -> None:
-    """Clearing has to reach the section, or they come back on reopen."""
     fired: list[int] = []
     state = _state(with_landmarks=True)
-    dialog, section = _dialog(qtbot, state, on_section_changed=lambda s: fired.append(s.index))
+    dialog, section, _c = _dialog(
+        qtbot, state, on_section_changed=lambda s: fired.append(s.index)
+    )
 
     dialog._clear_landmarks()
 
@@ -158,9 +226,8 @@ def test_clear_removes_saved_landmarks_too(qtbot) -> None:
 
 
 def test_reset_transform_clears_both_kinds_of_correction(qtbot) -> None:
-    """'Reset transform' means the registered overlay, so neither may remain."""
     state = _state(with_landmarks=True)
-    dialog, section = _dialog(qtbot, state)
+    dialog, section, _c = _dialog(qtbot, state)
     section.manual_affine = [[1.0, 0.0, 5.0], [0.0, 1.0, 5.0]]
 
     dialog._reset_transform()
@@ -170,27 +237,24 @@ def test_reset_transform_clears_both_kinds_of_correction(qtbot) -> None:
     assert dialog._pairs == []
 
 
-def test_it_opens_without_an_atlas_and_says_so(qtbot) -> None:
-    """The Register panel guards this, but the window must not crash on its own."""
-    dialog, _ = _dialog(qtbot, _state())
+def test_without_a_registration_it_says_to_register_first(qtbot) -> None:
+    """Rather than drawing a raw atlas plane that would not line up with anything."""
+    dialog, _s, _c = _dialog(qtbot, _state(), warp=False)
 
-    assert dialog._state.atlas is None
-    assert "atlas" in dialog._plane_status.text().lower()
-    # Pairing on the tissue side still works, so nothing is half-initialised.
-    dialog._on_pane_clicked("tissue", 10.0, 10.0)
-    assert dialog._pending is not None
+    assert "register" in dialog._status.text().lower()
+    assert dialog._base_labels is None
 
 
 def test_undo_takes_back_the_pending_click_first(qtbot) -> None:
-    """Undo should cancel a half-finished pair before destroying a finished one."""
-    dialog, _ = _dialog(qtbot, _state())
+    dialog, _s, _c = _dialog(qtbot, _state())
     dialog._on_pane_clicked("atlas", 10.0, 20.0)
     dialog._on_pane_clicked("tissue", 11.0, 21.0)
-    dialog._on_pane_clicked("atlas", 50.0, 50.0)
+    dialog._on_pane_clicked("tissue", 50.0, 50.0)  # no queue left, so it pends
 
-    dialog._undo_pair()
-    assert dialog._pending is None
-    assert len(dialog._pairs) == 1, "the finished pair must survive"
+    assert dialog._pending_tissue is not None
+    dialog._undo()
+    assert dialog._pending_tissue is None
+    assert len(dialog._complete_pairs()) == 1, "the finished pair must survive"
 
-    dialog._undo_pair()
+    dialog._undo()
     assert dialog._pairs == []
