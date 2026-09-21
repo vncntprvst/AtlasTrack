@@ -295,21 +295,26 @@ class RegisterPanelWidget(QWidget):
         )
         self._adjust_btn.toggled.connect(self._on_adjust_toggled)
         bg.addWidget(self._adjust_btn)
-        av.addWidget(box_group)
 
-        # Tool 2 - landmark TPS warp, grouped: place, edit (move/add), apply.
-        lm_group = QGroupBox("Landmarks")
-        lg = QVBoxLayout(lm_group)
+        # Lives here, not under Landmarks: it drops the automatic B-spline warp and
+        # gives back the undistorted atlas slice - the rigid starting point the box
+        # transform works on. It is what you reach for *before* nudging, whichever
+        # tool you then use.
         self._reset_morph_btn = QPushButton("Reset morph to plane (keep AP/ML)")
         self._reset_morph_btn.setToolTip(
             "Drop the automatic B-spline warp for this section but keep its atlas "
             "plane (AP/ML). The overlay returns to the undistorted atlas slice, so "
             "for hard sections (torn / missing tissue) you can redo the fit by hand "
-            "with landmarks instead of fighting a badly distorted outline. Clears "
-            "any existing manual correction; re-maps probes and saves."
+            "instead of fighting a badly distorted outline. Clears any existing "
+            "manual correction; re-maps probes and saves."
         )
         self._reset_morph_btn.clicked.connect(self._reset_morph)
-        lg.addWidget(self._reset_morph_btn)
+        bg.addWidget(self._reset_morph_btn)
+        av.addWidget(box_group)
+
+        # Tool 2 - landmark TPS warp, grouped: place, edit (move/add), apply.
+        lm_group = QGroupBox("Landmarks")
+        lg = QVBoxLayout(lm_group)
         self._place_lm_btn = QPushButton("Place landmarks")
         self._place_lm_btn.setToolTip(
             "Drop draggable correspondence points on the atlas overlay (6 around the "
@@ -323,6 +328,11 @@ class RegisterPanelWidget(QWidget):
         lg.addWidget(self._place_lm_btn)
 
         lm_row = QHBoxLayout()
+        self._lm_add_btn = QPushButton("Add points")
+        self._lm_add_btn.setCheckable(True)
+        self._lm_add_btn.setToolTip("Click in the viewer to add a landmark. Select a point + Delete removes it.")
+        self._lm_add_btn.toggled.connect(self._on_lm_add_toggled)
+        lm_row.addWidget(self._lm_add_btn)
         self._lm_move_btn = QPushButton("Move points")
         self._lm_move_btn.setCheckable(True)
         self._lm_move_btn.setToolTip(
@@ -331,11 +341,6 @@ class RegisterPanelWidget(QWidget):
         )
         self._lm_move_btn.toggled.connect(self._on_lm_move_toggled)
         lm_row.addWidget(self._lm_move_btn)
-        self._lm_add_btn = QPushButton("Add points")
-        self._lm_add_btn.setCheckable(True)
-        self._lm_add_btn.setToolTip("Click in the viewer to add a landmark. Select a point + Delete removes it.")
-        self._lm_add_btn.toggled.connect(self._on_lm_add_toggled)
-        lm_row.addWidget(self._lm_add_btn)
         lg.addLayout(lm_row)
 
         self._apply_lm_btn = QPushButton("Apply landmark warp")
@@ -350,7 +355,7 @@ class RegisterPanelWidget(QWidget):
         # side, which is the only way a click can say which of the two it meant.
         pair_group = QGroupBox("Pair points")
         pgl = QVBoxLayout(pair_group)
-        self._pair_btn = QPushButton("Open pair-points window...")
+        self._pair_btn = QPushButton("Open pair-points window")
         self._pair_btn.setToolTip(
             "Open a window with the section on the left and the atlas on the right.\n"
             "Click a feature in one pane, then the same feature in the other; the pane\n"

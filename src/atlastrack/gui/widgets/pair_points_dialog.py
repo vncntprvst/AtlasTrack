@@ -3,22 +3,27 @@
 **Why a separate window rather than a mode in the napari canvas.** The canvas draws
 the atlas overlay *on top of* the tissue in one coordinate space, so a click there
 cannot say which of the two it meant, and nothing on screen could show what it had
-been taken as. Two panes remove the ambiguity by construction: the pane you click
-in *is* the answer.
+been taken as. Two panes remove the ambiguity by construction: the pane a marker
+lives in *is* the side it belongs to.
 
 **Both panes show the registration you already ran.** The atlas pane is the
 registered atlas as it currently sits on this section - not a fresh coronal slice
 of the raw atlas. That matters twice over: it is what makes the outline line up
 with the tissue at all, and it is the frame ``ManualLandmarks`` is defined in -
 ``source`` is a position *on the registered overlay*, ``target`` where it should
-have been. Drawing a raw plane here instead put every source point in the wrong
-frame, which is why the outline sat visibly off the tissue and lurched once a
-couple of pairs were applied.
+have been.
 
-The atlas pane deliberately shows the overlay **without** any stored landmark warp
-(``apply_landmarks=False``): existing source points were recorded in that un-warped
-frame, so new ones have to be picked in it too. The tissue pane's overlay applies
-the warp, so it previews the result as pairs are placed.
+**Every pair is complete from the moment it exists.** Auto-placement drops each
+atlas point and its tissue counterpart at the *same* coordinate - a zero
+displacement, which warps nothing - and the user drags the tissue dot onto the real
+feature. The earlier design left the tissue side empty and made the user answer the
+points one at a time in a fixed order; a single mis-click then had nowhere to go but
+into the warp, and the outline tore. Anything can be dragged at any time, in either
+pane, in any order.
+
+Numbering follows the section rather than the order the algorithm happened to emit:
+outer ring first, counter-clockwise, then inward. Working through "1, 2, 3..." then
+walks steadily round the tissue instead of hopping across it.
 """
 from __future__ import annotations
 
@@ -58,54 +63,137 @@ if TYPE_CHECKING:  # pragma: no cover
     from atlastrack.project.schema import Section
 
 #: How far (view px) the pointer may travel between press and release and still
-#: count as a click rather than a pan. Generous: placing a landmark is deliberate,
-#: and both panes also pan with a left drag.
+#: count as a click rather than a pan or a drag.
 _CLICK_SLOP_PX = 4.0
+
+#: Grab radius for a marker, in **view** pixels, so a dot is equally easy to catch
+#: at any zoom.
+_GRAB_PX = 12.0
 
 #: Marker radius in scene (section) pixels, and the colours for each role.
 _MARKER_R = 7.0
 _ATLAS_COLOR = "#ff5f5f"
 _TISSUE_COLOR = "#5fd35f"
-_PENDING_COLOR = "#ffd23f"
+_MOVED_COLOR = "#ffd23f"
 
 #: Atlas outline colour, and the dim fill under it so the pane has a silhouette to
 #: orient by rather than lines floating on black.
 _EDGE_RGB = (90, 230, 120)
 _EXTENT_GREY = 48
 
-#: At least this many completed pairs before a thin-plate spline is worth solving.
-#: Matches the check the Register panel applies to dragged landmarks.
+#: At least this many pairs before a thin-plate spline is worth solving.
 _MIN_PAIRS = 4
 
-#: Auto-placed atlas points, via the same helper "Place landmarks" uses, so both
-#: routes seed the same features.
+#: Auto-placed atlas points, via the same helper "Place landmarks" uses.
 _AUTO_MAX_POINTS = 12
 
-#: Below this many pairs a TPS preview is not meaningful, so the overlay is left
-#: as the plain registered atlas.
+#: Below this many *moved* pairs a warp preview is not meaningful.
 _MIN_PREVIEW_PAIRS = 3
+
+#: A tissue dot still sitting on its atlas coordinate contributes nothing to the
+#: warp; this is how far it must move before it counts as answered.
+_MOVED_EPS_PX = 0.75
+
+#: Points beyond this fraction of the largest radius count as the outer ring, for
+#: numbering. Loose on purpose - it only decides the order dots are labelled in.
+_OUTER_RING_FRAC = 0.62
+
+
+def spatial_order(points: np.ndarray) -> list[int]:
+    """Indices of ``points`` ordered outer-ring-first, counter-clockwise, then in.
+
+    ``salient_landmarks`` emits in priority order - silhouette tips, then whichever
+    region junctions survived the spread - which is arbitrary on the page. Numbering
+    that order makes the user hop from one side of the section to the other and back.
+    Walking the outer ring first and then the interior keeps consecutive numbers
+    close together, which is the whole value of numbering them.
+    """
+    pts = np.asarray(points, dtype=float).reshape(-1, 2)
+    if len(pts) < 2:
+        return list(range(len(pts)))
+    centre = pts.mean(axis=0)
+    delta = pts - centre
+    radius = np.hypot(delta[:, 0], delta[:, 1])
+    # Screen y grows downward; negate it so "counter-clockwise" means what it looks
+    # like on screen rather than what it is in matrix coordinates.
+    angle = np.arctan2(-delta[:, 1], delta[:, 0])
+    largest = float(radius.max()) or 1.0
+    outer = radius >= _OUTER_RING_FRAC * largest
+
+    def ring(mask):
+        idx = np.nonzero(mask)[0]
+        return sorted(idx.tolist(), key=lambda i: float(angle[i]))
+
+    return ring(outer) + ring(~outer)
 
 
 class _PickPane(_ImagePane):
-    """An image pane that reports clicks in scene coordinates and draws markers.
+    """An image pane whose markers can be grabbed and dragged.
 
-    Left-drag still pans (inherited), so a click is distinguished from a drag by
-    how far the pointer moved - otherwise every attempt to pan would drop a point.
+    Left-drag still pans the view, so the pane has to decide on press whether the
+    pointer landed on a marker: if it did, panning is switched off for the duration
+    of that drag and re-armed on release.
     """
 
-    clicked = Signal(float, float)  # scene x, y
+    clicked = Signal(float, float)  # scene x, y, on empty space
+    drag_started = Signal(int)  # pair index
+    dragged = Signal(int, float, float)  # pair index, scene x, y
+    drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._press_pos = None
         self._markers: list = []
+        self._handles: list[tuple[int, float, float]] = []
+        self._drag_index: int | None = None
+
+    # -- geometry ------------------------------------------------------
+
+    def set_handles(self, handles: list[tuple[int, float, float]]) -> None:
+        """Grabbable positions, as ``(pair index, x, y)`` in scene coordinates."""
+        self._handles = list(handles)
+
+    def _handle_at(self, scene_x: float, scene_y: float) -> int | None:
+        """The pair whose marker is under the pointer, or None."""
+        if not self._handles:
+            return None
+        scale = abs(self.transform().m11()) or 1.0
+        reach = (_GRAB_PX / scale) ** 2
+        best, best_d2 = None, reach
+        for index, hx, hy in self._handles:
+            d2 = (hx - scene_x) ** 2 + (hy - scene_y) ** 2
+            if d2 <= best_d2:
+                best, best_d2 = index, d2
+        return best
+
+    # -- events --------------------------------------------------------
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._press_pos = event.pos()
+            point = self.mapToScene(event.pos())
+            index = self._handle_at(point.x(), point.y())
+            if index is not None:
+                self._drag_index = index
+                self.setDragMode(_ImagePane.NoDrag)
+                self.drag_started.emit(index)
+                return  # swallow it: this is a grab, not a pan
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_index is not None:
+            point = self.mapToScene(event.pos())
+            self.dragged.emit(self._drag_index, float(point.x()), float(point.y()))
+            return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:
+        if self._drag_index is not None and event.button() == Qt.LeftButton:
+            self._drag_index = None
+            self._press_pos = None
+            self.setDragMode(_ImagePane.ScrollHandDrag)
+            self.drag_finished.emit()
+            return
         super().mouseReleaseEvent(event)
         if event.button() != Qt.LeftButton or self._press_pos is None:
             return
@@ -115,33 +203,41 @@ class _PickPane(_ImagePane):
             point = self.mapToScene(event.pos())
             self.clicked.emit(float(point.x()), float(point.y()))
 
+    # -- markers -------------------------------------------------------
+
     def clear_markers(self) -> None:
         for item in self._markers:
             self.scene().removeItem(item)
         self._markers.clear()
 
-    def add_marker(
-        self, x: float, y: float, label: str, color: str, *, bold: bool = False
-    ) -> None:
+    def add_marker(self, x: float, y: float, label: str, color: str) -> None:
         """A ring plus its number, drawn above the image layers."""
         pen = QPen(QColor(color))
-        pen.setWidthF(3.0 if bold else 2.0)
+        pen.setWidthF(2.0)
         pen.setCosmetic(True)  # constant on screen, so zoom does not fatten it
-        radius = _MARKER_R * (1.5 if bold else 1.0)
         ring = self.scene().addEllipse(
-            x - radius, y - radius, 2 * radius, 2 * radius, pen, QBrush(Qt.NoBrush)
+            x - _MARKER_R, y - _MARKER_R, 2 * _MARKER_R, 2 * _MARKER_R,
+            pen, QBrush(Qt.NoBrush),
         )
         ring.setZValue(10)
         self._markers.append(ring)
 
-        font = QFont("", 9)
-        font.setBold(bold)
-        text = self.scene().addSimpleText(label, font)
+        text = self.scene().addSimpleText(label, QFont("", 9))
         text.setBrush(QBrush(QColor(color)))
-        text.setPos(x + radius, y - radius * 2)
+        text.setPos(x + _MARKER_R, y - _MARKER_R * 2)
         text.setFlag(text.GraphicsItemFlag.ItemIgnoresTransformations, True)
         text.setZValue(11)
         self._markers.append(text)
+
+    def add_link(self, x0: float, y0: float, x1: float, y1: float, color: str) -> None:
+        """Faint line from where a dot started to where it has been dragged."""
+        pen = QPen(QColor(color))
+        pen.setWidthF(1.0)
+        pen.setCosmetic(True)
+        pen.setStyle(Qt.DashLine)
+        line = self.scene().addLine(x0, y0, x1, y1, pen)
+        line.setZValue(9)
+        self._markers.append(line)
 
 
 class PairPointsDialog(QDialog):
@@ -149,10 +245,9 @@ class PairPointsDialog(QDialog):
 
     Owns nothing expensive: it writes ``Section.manual_landmarks`` and
     ``Section.plane``, then hands back to the Register panel through
-    ``on_section_changed`` for the re-render / probe re-map / save, so there is
-    exactly one implementation of that step. ``warp_labels`` is the panel's own
-    ``_warp_labels_for``, reused so the overlay here and the overlay on the canvas
-    cannot come from two different code paths.
+    ``on_section_changed`` for the re-render / probe re-map / save. ``warp_labels``
+    is the panel's own ``_warp_labels_for``, reused so the overlay here and the
+    overlay on the canvas cannot come from two different code paths.
     """
 
     def __init__(
@@ -172,19 +267,23 @@ class PairPointsDialog(QDialog):
         self._on_section_changed = on_section_changed
         self._bregma_ap_um = float(bregma_ap_um)
 
-        # Each entry is ``[source, target]``; ``target`` is None while the atlas
-        # side is placed but its tissue match is not - which is what auto-placing
-        # leaves behind, and what the user then works through.
-        self._pairs: list[list[tuple[float, float] | None]] = []
-        self._pending_tissue: tuple[float, float] | None = None
+        # Each entry is ``[source, target]``, both always set. A freshly placed pair
+        # has them equal - a zero displacement, which warps nothing and doubles as an
+        # anchor holding that part of the atlas still while other points are moved.
+        self._pairs: list[list[tuple[float, float]]] = []
+        # Whole-list snapshots, because "undo" has to reverse a drag as readily as an
+        # insertion, and a drag is a continuous stream of positions rather than one
+        # invertible step.
+        self._history: list[list[list[tuple[float, float]]]] = []
 
         self._crop: np.ndarray | None = None
         self._base_labels: np.ndarray | None = None
+        self._dragging = False
         self._updating = False
 
         self.setWindowTitle(f"Pair points - section {section.index}")
         self.setModal(False)  # a modal dialog would block the viewer behind it
-        self.resize(1150, 720)
+        self.resize(1150, 760)
         self._build_ui()
         self._load_existing()
         self._refresh_images(fit=True)
@@ -203,7 +302,8 @@ class PairPointsDialog(QDialog):
         self._hist_pane = _PickPane()
         self._atlas_pane = _PickPane()
         for title, pane in (
-            ("Section (tissue)", self._hist_pane),
+            ("Section (tissue) - drag each dot onto its feature",
+             self._hist_pane),
             ("Atlas as currently registered", self._atlas_pane),
         ):
             box = QVBoxLayout()
@@ -214,8 +314,13 @@ class PairPointsDialog(QDialog):
             panes.addWidget(wrap, stretch=1)
         outer.addLayout(panes, stretch=1)
 
-        self._hist_pane.clicked.connect(lambda x, y: self._on_pane_clicked("tissue", x, y))
-        self._atlas_pane.clicked.connect(lambda x, y: self._on_pane_clicked("atlas", x, y))
+        for pane, role in ((self._hist_pane, "target"), (self._atlas_pane, "source")):
+            pane.clicked.connect(lambda x, y: self._add_pair_at(x, y))
+            pane.drag_started.connect(lambda _i: self._snapshot())
+            pane.dragged.connect(
+                lambda i, x, y, role=role: self._move_point(role, i, x, y)
+            )
+            pane.drag_finished.connect(self._on_drag_finished)
 
         outer.addWidget(self._build_display_box())
         outer.addWidget(self._build_plane_box())
@@ -249,8 +354,8 @@ class PairPointsDialog(QDialog):
         self._preview_check = QCheckBox("Preview warp")
         self._preview_check.setChecked(True)
         self._preview_check.setToolTip(
-            "Bend the overlay through the pairs placed so far, as they are placed, "
-            "instead of waiting for Apply."
+            "Bend the overlay through the pairs as they are dragged, instead of "
+            "waiting for Apply."
         )
         self._preview_check.toggled.connect(lambda _: self._refresh_images())
         row.addWidget(self._preview_check)
@@ -312,18 +417,19 @@ class PairPointsDialog(QDialog):
         row.addWidget(self._pairs_label)
         row.addStretch()
 
-        auto = QPushButton("Auto-place atlas points")
+        auto = QPushButton("Auto-place points")
         auto.setToolTip(
             "Drop points on distinctive atlas features - outline tips, region "
-            "junctions, corners - so there is something to work from.\n"
-            "Each then waits for you to click where it belongs on the tissue."
+            "junctions, corners - with each tissue dot starting on top of its atlas "
+            "twin.\nDrag the tissue dots onto the real features, in any order."
         )
         auto.clicked.connect(self._auto_place)
         row.addWidget(auto)
 
-        undo = QPushButton("Undo")
-        undo.clicked.connect(self._undo)
-        row.addWidget(undo)
+        self._undo_btn = QPushButton("Undo")
+        self._undo_btn.setToolTip("Step back one change, including a drag.")
+        self._undo_btn.clicked.connect(self._undo)
+        row.addWidget(self._undo_btn)
 
         clear = QPushButton("Clear landmarks")
         clear.setToolTip("Remove every point on this section, including saved ones.")
@@ -341,7 +447,7 @@ class PairPointsDialog(QDialog):
         self._apply_btn = QPushButton("Apply landmark warp")
         self._apply_btn.setToolTip(
             f"Warp the atlas through these pairs, re-map probes and save. "
-            f"Needs at least {_MIN_PAIRS} completed pairs."
+            f"Needs at least {_MIN_PAIRS} pairs."
         )
         self._apply_btn.clicked.connect(self._apply_landmarks)
         row.addWidget(self._apply_btn)
@@ -364,8 +470,8 @@ class PairPointsDialog(QDialog):
     def _registered_labels(self) -> np.ndarray | None:
         """The registered atlas in section space, **without** any stored TPS.
 
-        Without the TPS on purpose - see the module docstring: stored source points
-        live in this frame, so new ones must be picked in it.
+        Without the TPS on purpose: stored source points live in that frame, so new
+        ones have to be picked in it too.
         """
         if self._warp_labels is None:
             return None
@@ -374,8 +480,12 @@ class PairPointsDialog(QDialog):
         except Exception:
             return None
 
-    def _complete_pairs(self) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-        return [(s, t) for s, t in self._pairs if s is not None and t is not None]
+    def _moved(self, pair) -> bool:
+        (sx, sy), (tx, ty) = pair
+        return abs(tx - sx) > _MOVED_EPS_PX or abs(ty - sy) > _MOVED_EPS_PX
+
+    def _moved_count(self) -> int:
+        return sum(1 for p in self._pairs if self._moved(p))
 
     def _atlas_rgba(self, labels: np.ndarray) -> np.ndarray:
         """Outlines over a dim silhouette, as an RGBA image."""
@@ -390,15 +500,21 @@ class PairPointsDialog(QDialog):
         return rgba
 
     def _preview_labels(self, base: np.ndarray) -> np.ndarray:
-        """``base`` bent through the pairs placed so far, for the live overlay."""
-        pairs = self._complete_pairs()
-        if not self._preview_check.isChecked() or len(pairs) < _MIN_PREVIEW_PAIRS:
+        """``base`` bent through every pair, for the live overlay.
+
+        Every pair, not just the dragged ones: a pair still sitting on its atlas
+        coordinate pins that spot, which is what stops one mis-dragged dot dragging
+        the whole outline with it.
+        """
+        if not self._preview_check.isChecked():
+            return base
+        if len(self._pairs) < _MIN_PAIRS or self._moved_count() < _MIN_PREVIEW_PAIRS:
             return base
         try:
             from atlastrack.registration.landmarks_warp import warp_label_image
 
-            source = np.array([s for s, _ in pairs], dtype=float)
-            target = np.array([t for _, t in pairs], dtype=float)
+            source = np.array([s for s, _ in self._pairs], dtype=float)
+            target = np.array([t for _, t in self._pairs], dtype=float)
             return warp_label_image(base, source, target)
         except Exception:
             return base
@@ -421,7 +537,6 @@ class PairPointsDialog(QDialog):
                 "No registered atlas for this section yet - run 'Register all "
                 "sections' first, so there is an overlay to correct."
             )
-            self._update_hint()
             return
 
         self._base_labels = labels
@@ -435,14 +550,17 @@ class PairPointsDialog(QDialog):
         else:
             self._hist_pane.set_overlay(None)
 
-        done = len(self._complete_pairs())
-        previewing = self._preview_check.isChecked() and done >= _MIN_PREVIEW_PAIRS
+        moved = self._moved_count()
+        previewing = (
+            self._preview_check.isChecked()
+            and len(self._pairs) >= _MIN_PAIRS
+            and moved >= _MIN_PREVIEW_PAIRS
+        )
         self._status.setText(
             f"Showing the registration already computed for section "
             f"{self._section.index}."
             + (" Overlay previews the warp." if previewing else "")
         )
-        self._update_hint()
 
     def _slide_levels(self):
         try:
@@ -450,101 +568,113 @@ class PairPointsDialog(QDialog):
         except Exception:
             return None
 
-    def _next_unmatched(self) -> int | None:
-        """Index of the first atlas point still waiting for its tissue match."""
-        for i, (source, target) in enumerate(self._pairs):
-            if source is not None and target is None:
-                return i
-        return None
-
     def _refresh_markers(self) -> None:
-        self._hist_pane.clear_markers()
-        self._atlas_pane.clear_markers()
-        nxt = self._next_unmatched()
+        for pane in (self._hist_pane, self._atlas_pane):
+            pane.clear_markers()
+
         for i, (source, target) in enumerate(self._pairs):
             label = str(i + 1)
-            if source is not None:
-                color = _PENDING_COLOR if target is None else _ATLAS_COLOR
-                self._atlas_pane.add_marker(
-                    source[0], source[1], label, color, bold=(i == nxt)
-                )
-            if target is not None:
-                self._hist_pane.add_marker(target[0], target[1], label, _TISSUE_COLOR)
-        if self._pending_tissue is not None:
+            moved = self._moved((source, target))
+            self._atlas_pane.add_marker(source[0], source[1], label, _ATLAS_COLOR)
             self._hist_pane.add_marker(
-                self._pending_tissue[0], self._pending_tissue[1], "?", _PENDING_COLOR, bold=True
+                target[0], target[1], label, _TISSUE_COLOR if moved else _MOVED_COLOR
             )
+            if moved:
+                # Where it started and where it is now, so the displacement each
+                # pair contributes is visible rather than inferred.
+                self._hist_pane.add_link(source[0], source[1], target[0], target[1],
+                                         _TISSUE_COLOR)
 
-        done = len(self._complete_pairs())
-        waiting = sum(1 for s, t in self._pairs if s is not None and t is None)
-        parts = [f"{done} complete"]
-        if waiting:
-            parts.append(f"{waiting} awaiting a tissue click")
-        self._pairs_label.setText("   -   ".join(parts))
-        self._apply_btn.setEnabled(done >= _MIN_PAIRS)
-        self._update_hint()
+        self._atlas_pane.set_handles([(i, s[0], s[1]) for i, (s, _t) in enumerate(self._pairs)])
+        self._hist_pane.set_handles([(i, t[0], t[1]) for i, (_s, t) in enumerate(self._pairs)])
 
-    def _update_hint(self) -> None:
-        nxt = self._next_unmatched()
-        if nxt is not None:
+        total, moved = len(self._pairs), self._moved_count()
+        self._pairs_label.setText(f"{total} pair(s)   -   {moved} moved")
+        self._apply_btn.setEnabled(total >= _MIN_PAIRS)
+        self._undo_btn.setEnabled(bool(self._history))
+        self._update_hint(total, moved)
+
+    def _update_hint(self, total: int, moved: int) -> None:
+        if total == 0:
             self._hint.setText(
-                f"Point {nxt + 1} is marked on the atlas (bold). Click the same "
-                f"feature on the tissue to complete it."
+                "Press 'Auto-place points', then drag each dot on the LEFT onto the "
+                "feature it marks on the RIGHT. Or click either pane to add a pair."
             )
-        elif self._pending_tissue is not None:
-            self._hint.setText("Now click the matching feature on the atlas.")
+        elif moved < total:
+            self._hint.setText(
+                f"{total - moved} dot(s) still sit on their atlas position (amber) "
+                f"and hold the atlas still there. Drag the ones you can identify - "
+                f"any order, and you can drag them again to correct."
+            )
         else:
             self._hint.setText(
-                "Click a feature in one pane, then the same feature in the other - "
-                "the pane you click in says which side it is. Or press "
-                "'Auto-place atlas points' and just click the tissue side."
+                "All pairs moved. Drag any dot to adjust, or 'Apply landmark warp'."
             )
 
-    # ------------------------------------------------------------- actions
+    # ------------------------------------------------------------- editing
 
-    def _on_pane_clicked(self, side: str, x: float, y: float) -> None:
+    def _snapshot(self) -> None:
+        """Remember the current pairs so the next change can be stepped back."""
+        self._history.append([[tuple(s), tuple(t)] for s, t in self._pairs])
+
+    def _add_pair_at(self, x: float, y: float) -> None:
+        """A click on empty canvas adds a pair, both halves on that coordinate."""
         if self._crop is None:
             return
         h, w = self._crop.shape[:2]
         if not (0 <= x < w and 0 <= y < h):
             return  # outside the image: a stray click on the black surround
-
-        if side == "tissue":
-            nxt = self._next_unmatched()
-            if nxt is not None:
-                self._pairs[nxt][1] = (x, y)  # completes the highlighted atlas point
-            else:
-                self._pending_tissue = (x, y)
-        elif self._pending_tissue is not None:
-            self._pairs.append([(x, y), self._pending_tissue])
-            self._pending_tissue = None
-        else:
-            self._pairs.append([(x, y), None])
-
+        self._snapshot()
+        self._pairs.append([(x, y), (x, y)])
+        self._reorder_pairs()
         self._refresh_markers()
         self._refresh_images()
 
+    def _move_point(self, role: str, index: int, x: float, y: float) -> None:
+        if not (0 <= index < len(self._pairs)) or self._crop is None:
+            return
+        h, w = self._crop.shape[:2]
+        x = float(min(max(x, 0.0), w - 1))
+        y = float(min(max(y, 0.0), h - 1))
+        self._dragging = True
+        self._pairs[index][0 if role == "source" else 1] = (x, y)
+        self._refresh_markers()
+
+    def _on_drag_finished(self) -> None:
+        """Recompute the (expensive) warp preview once, at the end of a drag."""
+        self._dragging = False
+        self._refresh_images()
+
+    def _reorder_pairs(self) -> None:
+        """Renumber outer-ring-first, counter-clockwise, by the atlas positions."""
+        if len(self._pairs) < 2:
+            return
+        order = spatial_order(np.array([s for s, _t in self._pairs], dtype=float))
+        self._pairs = [self._pairs[i] for i in order]
+
     def _auto_place(self) -> None:
-        """Seed atlas-side points on salient features, each awaiting a tissue click."""
         if self._base_labels is None:
             self._status.setText("No registered atlas to place points on.")
             return
         from atlastrack.registration.landmarks_warp import salient_landmarks
 
-        points = salient_landmarks(self._base_labels, max_points=_AUTO_MAX_POINTS)
-        for x, y in np.asarray(points, dtype=float).reshape(-1, 2):
-            self._pairs.append([(float(x), float(y)), None])
+        points = np.asarray(
+            salient_landmarks(self._base_labels, max_points=_AUTO_MAX_POINTS), dtype=float
+        ).reshape(-1, 2)
+        self._snapshot()
+        for x, y in points[spatial_order(points)]:
+            self._pairs.append([(float(x), float(y)), (float(x), float(y))])
         self._status.setText(
-            f"Placed {len(points)} atlas points. Click each one's match on the "
-            f"tissue; the bold marker is the one being waited on."
+            f"Placed {len(points)} pairs. Each tissue dot starts on its atlas "
+            f"position, so nothing is warped until you drag it."
         )
         self._refresh_markers()
+        self._refresh_images()
 
     def _undo(self) -> None:
-        if self._pending_tissue is not None:
-            self._pending_tissue = None
-        elif self._pairs:
-            self._pairs.pop()
+        if not self._history:
+            return
+        self._pairs = self._history.pop()
         self._refresh_markers()
         self._refresh_images()
 
@@ -566,6 +696,9 @@ class PairPointsDialog(QDialog):
         target = np.asarray(landmarks.target, dtype=float).reshape(-1, 2)
         for s, t in zip(source, target, strict=False):
             self._pairs.append([(float(s[0]), float(s[1])), (float(t[0]), float(t[1]))])
+        self._reorder_pairs()
+
+    # ------------------------------------------------------------- actions
 
     def _apply_plane(self) -> None:
         from atlastrack.project.schema import PlaneParams
@@ -589,11 +722,11 @@ class PairPointsDialog(QDialog):
     def _clear_landmarks(self) -> None:
         if self._pairs and not self._confirm(
             "Clear landmarks",
-            f"Remove all {len(self._pairs)} point(s) from section {self._section.index}?",
+            f"Remove all {len(self._pairs)} pair(s) from section {self._section.index}?",
         ):
             return
+        self._snapshot()
         self._pairs.clear()
-        self._pending_tissue = None
         self._section.manual_landmarks = None
         self._notify()
         self._refresh_markers()
@@ -606,10 +739,10 @@ class PairPointsDialog(QDialog):
             f"to the registered overlay?",
         ):
             return
+        self._snapshot()
         self._section.manual_affine = None
         self._section.manual_landmarks = None
         self._pairs.clear()
-        self._pending_tissue = None
         self._notify()
         self._refresh_markers()
         self._refresh_images()
@@ -617,24 +750,30 @@ class PairPointsDialog(QDialog):
     def _apply_landmarks(self) -> None:
         from atlastrack.project.schema import ManualLandmarks
 
-        pairs = self._complete_pairs()
-        if len(pairs) < _MIN_PAIRS:
+        if len(self._pairs) < _MIN_PAIRS:
             # Status line, not a message box: the Apply button is already disabled
             # below this count, so this is a backstop, and a modal box with no one
             # to click it is what hung the GUI tests once before (see _info_merge).
             self._status.setText(
-                f"Complete at least {_MIN_PAIRS} pairs before warping "
-                f"({len(pairs)} so far)."
+                f"Place at least {_MIN_PAIRS} pairs before warping "
+                f"({len(self._pairs)} so far)."
+            )
+            return
+        if self._moved_count() == 0:
+            self._status.setText(
+                "Every dot is still on its atlas position, so this warp would do "
+                "nothing. Drag the tissue dots onto their features first."
             )
             return
         self._section.manual_landmarks = ManualLandmarks(
-            source=[[s[0], s[1]] for s, _ in pairs],
-            target=[[t[0], t[1]] for _, t in pairs],
+            source=[[s[0], s[1]] for s, _ in self._pairs],
+            target=[[t[0], t[1]] for _, t in self._pairs],
         )
         self._section.manual_affine = None  # landmarks take precedence
         self._notify()
         self._status.setText(
-            f"Warped section {self._section.index} through {len(pairs)} pair(s)."
+            f"Warped section {self._section.index} through {len(self._pairs)} pair(s), "
+            f"{self._moved_count()} of them moved."
         )
         self._refresh_images()
 
