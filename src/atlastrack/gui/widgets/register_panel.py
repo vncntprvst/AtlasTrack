@@ -347,26 +347,21 @@ class RegisterPanelWidget(QWidget):
         self._apply_lm_btn.setToolTip("Warp the atlas through the dragged landmarks, re-map probes, save.")
         self._apply_lm_btn.clicked.connect(self._apply_landmarks)
         lg.addWidget(self._apply_lm_btn)
-        av.addWidget(lm_group)
-
-        # Tool 3 - pair points, in its own group. Separate from Landmarks above
-        # because it is a different way of working, not a button in that workflow:
-        # it opens a window of its own where the atlas and the tissue are side by
-        # side, which is the only way a click can say which of the two it meant.
-        pair_group = QGroupBox("Pair points")
-        pgl = QVBoxLayout(pair_group)
-        self._pair_btn = QPushButton("Open pair-points window")
+        # Same job as the buttons above - landmark correspondences - just done in a
+        # window where the atlas and the tissue sit side by side instead of stacked
+        # in one canvas. So it belongs at the end of this group, not in one of its own.
+        self._pair_btn = QPushButton("Open split panel window")
         self._pair_btn.setToolTip(
             "Open a window with the section on the left and the atlas on the right.\n"
-            "Click a feature in one pane, then the same feature in the other; the pane\n"
-            "you click in says which side it is. Existing landmarks are shown and can\n"
-            "be cleared, the manual transform can be reset, the atlas can be overlaid\n"
-            "on the tissue at any opacity, and the atlas plane (AP / ML / DV tilt) can\n"
-            "be nudged against the tissue you are pairing against."
+            "Place, move and delete landmark points in either pane, with the atlas\n"
+            "shown as it is currently registered. Existing landmarks are loaded and\n"
+            "can be cleared, the manual transform can be reset, the atlas can be\n"
+            "overlaid on the tissue at any opacity, and the atlas plane\n"
+            "(AP / ML / DV tilt) can be nudged against the tissue."
         )
         self._pair_btn.clicked.connect(self._open_pair_points)
-        pgl.addWidget(self._pair_btn)
-        av.addWidget(pair_group)
+        lg.addWidget(self._pair_btn)
+        av.addWidget(lm_group)
 
         # Reset applies to either tool - set it apart below a divider.
         divider = QFrame()

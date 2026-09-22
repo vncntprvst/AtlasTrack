@@ -71,10 +71,23 @@ _CLICK_SLOP_PX = 4.0
 _GRAB_PX = 12.0
 
 #: Marker radius in scene (section) pixels, and the colours for each role.
-_MARKER_R = 7.0
-_ATLAS_COLOR = "#ff5f5f"
-_TISSUE_COLOR = "#5fd35f"
-_MOVED_COLOR = "#ffd23f"
+#:
+#: **Filled discs with outlined numbers, not hollow rings with plain text.** A thin
+#: ring over a busy green outline and a same-coloured number beside it disappears
+#: into the anatomy at working zoom - which is exactly what happened. A solid disc
+#: reads as a marker at any size, and white text carrying a black outline stays
+#: legible over white matter, black background and green boundaries alike, so it
+#: never has to be guessed at from context.
+_MARKER_R = 6.0
+_SELECTED_R = 9.0
+_ATLAS_COLOR = "#ff5252"
+_TISSUE_COLOR = "#2fe36a"
+_MOVED_COLOR = "#ffc400"
+_SELECT_COLOR = "#ffffff"
+
+#: Number size, in points. Screen-constant (the item ignores view transforms), so
+#: this is a real on-screen size rather than something that shrinks as you zoom out.
+_NUMBER_PT = 11
 
 #: Atlas outline colour, and the dim fill under it so the pane has a silhouette to
 #: orient by rather than lines floating on black.
@@ -136,9 +149,12 @@ class _PickPane(_ImagePane):
     """
 
     clicked = Signal(float, float)  # scene x, y, on empty space
+    picked = Signal(int)  # a marker was clicked without being dragged
     drag_started = Signal(int)  # pair index
     dragged = Signal(int, float, float)  # pair index, scene x, y
     drag_finished = Signal()
+    delete_requested = Signal(int)  # right-click on a marker
+    delete_pressed = Signal()  # Delete / Backspace while this pane has focus
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -146,6 +162,8 @@ class _PickPane(_ImagePane):
         self._markers: list = []
         self._handles: list[tuple[int, float, float]] = []
         self._drag_index: int | None = None
+        self._drag_moved = False
+        self.setFocusPolicy(Qt.StrongFocus)  # so Delete reaches keyPressEvent
 
     # -- geometry ------------------------------------------------------
 
@@ -169,12 +187,17 @@ class _PickPane(_ImagePane):
     # -- events --------------------------------------------------------
 
     def mousePressEvent(self, event) -> None:
+        point = self.mapToScene(event.pos())
+        index = self._handle_at(point.x(), point.y())
+        if event.button() == Qt.RightButton and index is not None:
+            self.delete_requested.emit(index)
+            return
         if event.button() == Qt.LeftButton:
+            self.setFocus(Qt.MouseFocusReason)
             self._press_pos = event.pos()
-            point = self.mapToScene(event.pos())
-            index = self._handle_at(point.x(), point.y())
             if index is not None:
                 self._drag_index = index
+                self._drag_moved = False
                 self.setDragMode(_ImagePane.NoDrag)
                 self.drag_started.emit(index)
                 return  # swallow it: this is a grab, not a pan
@@ -182,6 +205,7 @@ class _PickPane(_ImagePane):
 
     def mouseMoveEvent(self, event) -> None:
         if self._drag_index is not None:
+            self._drag_moved = True
             point = self.mapToScene(event.pos())
             self.dragged.emit(self._drag_index, float(point.x()), float(point.y()))
             return
@@ -189,19 +213,31 @@ class _PickPane(_ImagePane):
 
     def mouseReleaseEvent(self, event) -> None:
         if self._drag_index is not None and event.button() == Qt.LeftButton:
+            index, moved = self._drag_index, self._drag_moved
             self._drag_index = None
             self._press_pos = None
             self.setDragMode(_ImagePane.ScrollHandDrag)
-            self.drag_finished.emit()
+            if moved:
+                self.drag_finished.emit()
+            else:
+                # Pressed and released on a marker without moving it: that is a
+                # selection, so Delete has something to act on.
+                self.picked.emit(index)
             return
         super().mouseReleaseEvent(event)
         if event.button() != Qt.LeftButton or self._press_pos is None:
             return
-        moved = (event.pos() - self._press_pos).manhattanLength()
+        travelled = (event.pos() - self._press_pos).manhattanLength()
         self._press_pos = None
-        if moved <= _CLICK_SLOP_PX:
+        if travelled <= _CLICK_SLOP_PX:
             point = self.mapToScene(event.pos())
             self.clicked.emit(float(point.x()), float(point.y()))
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            self.delete_pressed.emit()
+            return
+        super().keyPressEvent(event)
 
     # -- markers -------------------------------------------------------
 
@@ -210,23 +246,58 @@ class _PickPane(_ImagePane):
             self.scene().removeItem(item)
         self._markers.clear()
 
-    def add_marker(self, x: float, y: float, label: str, color: str) -> None:
-        """A ring plus its number, drawn above the image layers."""
-        pen = QPen(QColor(color))
-        pen.setWidthF(2.0)
-        pen.setCosmetic(True)  # constant on screen, so zoom does not fatten it
-        ring = self.scene().addEllipse(
-            x - _MARKER_R, y - _MARKER_R, 2 * _MARKER_R, 2 * _MARKER_R,
-            pen, QBrush(Qt.NoBrush),
-        )
-        ring.setZValue(10)
-        self._markers.append(ring)
+    def add_marker(
+        self, x: float, y: float, label: str, color: str, *, selected: bool = False
+    ) -> None:
+        """A filled disc and its number, drawn above the image layers."""
+        radius = _SELECTED_R if selected else _MARKER_R
 
-        text = self.scene().addSimpleText(label, QFont("", 9))
-        text.setBrush(QBrush(QColor(color)))
-        text.setPos(x + _MARKER_R, y - _MARKER_R * 2)
+        if selected:
+            # A white collar, so the selected dot is obvious against any colour.
+            collar = QPen(QColor(_SELECT_COLOR))
+            collar.setWidthF(2.5)
+            collar.setCosmetic(True)
+            halo = self.scene().addEllipse(
+                x - radius - 3, y - radius - 3, 2 * (radius + 3), 2 * (radius + 3),
+                collar, QBrush(Qt.NoBrush),
+            )
+            halo.setZValue(9)
+            self._markers.append(halo)
+
+        edge = QPen(QColor(0, 0, 0, 200))
+        edge.setWidthF(1.2)
+        edge.setCosmetic(True)  # constant on screen, so zoom does not fatten it
+        disc = self.scene().addEllipse(
+            x - radius, y - radius, 2 * radius, 2 * radius, edge, QBrush(QColor(color))
+        )
+        disc.setZValue(10)
+        self._markers.append(disc)
+
+        font = QFont("", _NUMBER_PT)
+        font.setBold(True)
+        pos_x, pos_y = x + radius, y - radius * 2.2
+
+        # The halo is a **separate, fatter copy drawn underneath**, not an outline
+        # pen on the glyph. A pen is centred on the glyph path, so at this size it
+        # eats the fill and the number comes out dark with a pale rim - the very
+        # thing that made these hard to read. Two passes keep the fill pure white.
+        halo = self.scene().addSimpleText(label, font)
+        halo_pen = QPen(QColor(0, 0, 0, 235))
+        halo_pen.setWidthF(3.5)
+        halo_pen.setCosmetic(True)
+        halo.setPen(halo_pen)
+        halo.setBrush(QBrush(QColor(0, 0, 0, 235)))
+        halo.setPos(pos_x, pos_y)
+        halo.setFlag(halo.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        halo.setZValue(11)
+        self._markers.append(halo)
+
+        text = self.scene().addSimpleText(label, font)
+        text.setPen(QPen(Qt.NoPen))
+        text.setBrush(QBrush(QColor(_SELECT_COLOR)))
+        text.setPos(pos_x, pos_y)
         text.setFlag(text.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        text.setZValue(11)
+        text.setZValue(12)
         self._markers.append(text)
 
     def add_link(self, x0: float, y0: float, x1: float, y1: float, color: str) -> None:
@@ -278,6 +349,7 @@ class PairPointsDialog(QDialog):
 
         self._crop: np.ndarray | None = None
         self._base_labels: np.ndarray | None = None
+        self._selected: int | None = None
         self._dragging = False
         self._updating = False
 
@@ -316,11 +388,14 @@ class PairPointsDialog(QDialog):
 
         for pane, role in ((self._hist_pane, "target"), (self._atlas_pane, "source")):
             pane.clicked.connect(lambda x, y: self._add_pair_at(x, y))
+            pane.picked.connect(self._select_pair)
             pane.drag_started.connect(lambda _i: self._snapshot())
             pane.dragged.connect(
                 lambda i, x, y, role=role: self._move_point(role, i, x, y)
             )
             pane.drag_finished.connect(self._on_drag_finished)
+            pane.delete_requested.connect(self._delete_pair)
+            pane.delete_pressed.connect(self._delete_selected)
 
         outer.addWidget(self._build_display_box())
         outer.addWidget(self._build_plane_box())
@@ -575,9 +650,13 @@ class PairPointsDialog(QDialog):
         for i, (source, target) in enumerate(self._pairs):
             label = str(i + 1)
             moved = self._moved((source, target))
-            self._atlas_pane.add_marker(source[0], source[1], label, _ATLAS_COLOR)
+            chosen = i == self._selected
+            self._atlas_pane.add_marker(
+                source[0], source[1], label, _ATLAS_COLOR, selected=chosen
+            )
             self._hist_pane.add_marker(
-                target[0], target[1], label, _TISSUE_COLOR if moved else _MOVED_COLOR
+                target[0], target[1], label,
+                _TISSUE_COLOR if moved else _MOVED_COLOR, selected=chosen,
             )
             if moved:
                 # Where it started and where it is now, so the displacement each
@@ -594,22 +673,27 @@ class PairPointsDialog(QDialog):
         self._undo_btn.setEnabled(bool(self._history))
         self._update_hint(total, moved)
 
+    #: One line, always on screen, saying what the mouse and keyboard do here.
+    _CONTROLS = (
+        "Click empty space to add a pair  ·  drag a dot to move it  ·  "
+        "click a dot then Delete, or right-click it, to remove it."
+    )
+
     def _update_hint(self, total: int, moved: int) -> None:
         if total == 0:
-            self._hint.setText(
+            lead = (
                 "Press 'Auto-place points', then drag each dot on the LEFT onto the "
-                "feature it marks on the RIGHT. Or click either pane to add a pair."
+                "feature it marks on the RIGHT."
             )
         elif moved < total:
-            self._hint.setText(
+            lead = (
                 f"{total - moved} dot(s) still sit on their atlas position (amber) "
-                f"and hold the atlas still there. Drag the ones you can identify - "
-                f"any order, and you can drag them again to correct."
+                f"and hold the atlas still there. Drag the ones you can identify, in "
+                f"any order."
             )
         else:
-            self._hint.setText(
-                "All pairs moved. Drag any dot to adjust, or 'Apply landmark warp'."
-            )
+            lead = "All pairs moved. Drag any dot to adjust, or 'Apply landmark warp'."
+        self._hint.setText(f"{lead}\n{self._CONTROLS}")
 
     # ------------------------------------------------------------- editing
 
@@ -627,6 +711,26 @@ class PairPointsDialog(QDialog):
         self._snapshot()
         self._pairs.append([(x, y), (x, y)])
         self._reorder_pairs()
+        self._selected = None  # renumbering invalidates an index-based selection
+        self._refresh_markers()
+        self._refresh_images()
+
+    def _select_pair(self, index: int) -> None:
+        """Clicking a dot selects the pair, so Delete knows what to remove."""
+        self._selected = index if 0 <= index < len(self._pairs) else None
+        self._refresh_markers()
+
+    def _delete_selected(self) -> None:
+        if self._selected is not None:
+            self._delete_pair(self._selected)
+
+    def _delete_pair(self, index: int) -> None:
+        """Remove one pair. Both halves go: a correspondence is not half a thing."""
+        if not (0 <= index < len(self._pairs)):
+            return
+        self._snapshot()
+        del self._pairs[index]
+        self._selected = None
         self._refresh_markers()
         self._refresh_images()
 
@@ -675,6 +779,7 @@ class PairPointsDialog(QDialog):
         if not self._history:
             return
         self._pairs = self._history.pop()
+        self._selected = None
         self._refresh_markers()
         self._refresh_images()
 
@@ -727,6 +832,7 @@ class PairPointsDialog(QDialog):
             return
         self._snapshot()
         self._pairs.clear()
+        self._selected = None
         self._section.manual_landmarks = None
         self._notify()
         self._refresh_markers()
@@ -743,6 +849,7 @@ class PairPointsDialog(QDialog):
         self._section.manual_affine = None
         self._section.manual_landmarks = None
         self._pairs.clear()
+        self._selected = None
         self._notify()
         self._refresh_markers()
         self._refresh_images()
@@ -801,6 +908,14 @@ class PairPointsDialog(QDialog):
     def _on_overlay_toggled(self, on: bool) -> None:
         self._opacity.setEnabled(on)
         self._refresh_images()
+
+    def keyPressEvent(self, event) -> None:
+        from qtpy.QtCore import Qt as _Qt
+
+        if event.key() in (_Qt.Key_Delete, _Qt.Key_Backspace):
+            self._delete_selected()
+            return
+        super().keyPressEvent(event)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

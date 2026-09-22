@@ -317,3 +317,79 @@ def test_reset_transform_clears_both_kinds_of_correction(qtbot) -> None:
     assert section.manual_affine is None
     assert section.manual_landmarks is None
     assert dialog._pairs == []
+
+
+# ------------------------------------------------------- select and delete
+
+
+def test_clicking_a_dot_selects_it_and_delete_removes_the_pair(qtbot) -> None:
+    """The split-panel window has to offer the same edits as the main canvas.
+
+    Placing was there, moving was there, removing was not - so a mis-placed point
+    could only be undone, never deleted once other work had been done on top of it.
+    """
+    dialog, _s, _c = _dialog(qtbot, _state())
+    dialog._auto_place()
+    total = len(dialog._pairs)
+    doomed = tuple(dialog._pairs[2][0])
+
+    dialog._select_pair(2)
+    assert dialog._selected == 2
+
+    dialog._delete_selected()
+
+    assert len(dialog._pairs) == total - 1
+    assert doomed not in [tuple(s) for s, _t in dialog._pairs]
+    assert dialog._selected is None, "the selection must not outlive the pair"
+
+
+def test_right_clicking_a_dot_deletes_it_outright(qtbot) -> None:
+    """Two clicks for a routine removal is a lot when clearing up a dozen points."""
+    dialog, _s, _c = _dialog(qtbot, _state())
+    dialog._auto_place()
+    total = len(dialog._pairs)
+
+    dialog._delete_pair(0)
+
+    assert len(dialog._pairs) == total - 1
+
+
+def test_deleting_a_pair_can_be_undone(qtbot) -> None:
+    dialog, _s, _c = _dialog(qtbot, _state())
+    dialog._auto_place()
+    total = len(dialog._pairs)
+
+    dialog._delete_pair(1)
+    dialog._undo()
+
+    assert len(dialog._pairs) == total
+
+
+def test_delete_with_nothing_selected_does_nothing(qtbot) -> None:
+    dialog, _s, _c = _dialog(qtbot, _state())
+    dialog._auto_place()
+    total = len(dialog._pairs)
+
+    dialog._delete_selected()
+
+    assert len(dialog._pairs) == total
+
+
+def test_adding_a_pair_drops_a_stale_selection(qtbot) -> None:
+    """Adding renumbers spatially, so an index-based selection stops meaning anything."""
+    dialog, _s, _c = _dialog(qtbot, _state())
+    dialog._auto_place()
+    dialog._select_pair(3)
+
+    dialog._add_pair_at(88.0, 99.0)
+
+    assert dialog._selected is None
+
+
+def test_the_hint_always_states_the_controls(qtbot) -> None:
+    """Add / move / delete are not discoverable from the panes themselves."""
+    dialog, _s, _c = _dialog(qtbot, _state())
+    for _ in range(2):
+        text = dialog._hint.text().lower()
+        assert "add" in text and "drag" in text and "delete" in text, text
+        dialog._auto_place()
