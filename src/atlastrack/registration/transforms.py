@@ -14,6 +14,8 @@ Two transform modes:
 """
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,6 +25,14 @@ import numpy as np
 from atlastrack.atlas.planes import Anchoring
 from atlastrack.io.ccf_coords import MIDLINE_ML_UM
 from atlastrack.project.schema import PlaneParams, RegistrationResult
+
+#: Serialises reads of the ``.h5`` transform sidecars. The HDF5 library bundled
+#: inside SimpleITK is built without thread safety: two concurrent ``ReadTransform``
+#: calls fail with ``H5Gopen2 failed`` and can leave the library spinning in
+#: "infinite loop closing library". Reading is ~17 ms of a ~270 ms warp, so holding
+#: this for the read alone costs nothing and lets everything after it run in
+#: parallel across sections.
+_HDF5_LOCK = threading.Lock()
 
 if TYPE_CHECKING:
     import SimpleITK as sitk
@@ -153,9 +163,140 @@ def _invert_displacement(
     return sitk.DisplacementFieldTransform(inverse_disp)
 
 
+#: Recently warped label images, keyed by everything that determines them. See
+#: :func:`_warp_key`. Each entry is one section's labels (~2-3 MB at 25 um), so
+#: this comfortably holds a full slide without growing without bound.
+_WARP_CACHE: OrderedDict[tuple, np.ndarray] = OrderedDict()
+_WARP_CACHE_MAX = 48
+_WARP_CACHE_LOCK = threading.Lock()
+
+
+def _warp_key(
+    result: RegistrationResult,
+    atlas: BrainGlobeAtlas,
+    section_shape: tuple[int, int],
+    project_dir: Path | None,
+    source_shape: tuple[int, int, int] | None,
+) -> tuple:
+    """Everything the warped labels depend on - including the sidecar's contents.
+
+    The transform file is identified by path **and** modification time and size,
+    because re-registering a section rewrites the same path: keying on the path
+    alone would keep serving the old overlay after a new fit.
+    """
+    stamp = None
+    path_str = result.bspline_transform_path
+    if path_str is not None:
+        path = Path(path_str)
+        if project_dir is not None and not path.is_absolute():
+            path = project_dir / path
+        try:
+            st = path.stat()
+            stamp = (str(path.resolve()), st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = (str(path), None, None)
+    return (
+        tuple(float(v) for v in result.anchoring),
+        tuple(int(v) for v in result.output_size_px),
+        stamp,
+        tuple(int(v) for v in section_shape),
+        getattr(atlas, "atlas_name", None),
+        id(atlas),
+        tuple(int(v) for v in atlas.annotation.shape),
+        None if source_shape is None else tuple(int(v) for v in source_shape),
+    )
+
+
+def clear_warp_cache() -> None:
+    """Forget every cached overlay, e.g. after loading a different atlas."""
+    with _WARP_CACHE_LOCK:
+        _WARP_CACHE.clear()
+
+
 def warp_annotation_to_section(
     result: RegistrationResult,
-    atlas: "BrainGlobeAtlas",
+    atlas: BrainGlobeAtlas,
+    section_shape: tuple[int, int],
+    *,
+    project_dir: Path | None = None,
+    source_shape: tuple[int, int, int] | None = None,
+) -> np.ndarray:
+    """Render the registered atlas annotation in a section's pixel grid.
+
+    Cached: the same section is re-rendered constantly - every 'Place landmarks',
+    every re-draw after a box edit, and every refresh of the split-panel window,
+    which used to spend ~270 ms per drag release recomputing a result that could
+    not have changed. A copy is returned so callers may modify it freely.
+    """
+    key = _warp_key(result, atlas, section_shape, project_dir, source_shape)
+    with _WARP_CACHE_LOCK:
+        hit = _WARP_CACHE.get(key)
+        if hit is not None:
+            _WARP_CACHE.move_to_end(key)
+            return hit.copy()
+    labels = _warp_annotation_to_section_uncached(
+        result, atlas, section_shape, project_dir=project_dir, source_shape=source_shape
+    )
+    with _WARP_CACHE_LOCK:
+        _WARP_CACHE[key] = labels.copy()
+        while len(_WARP_CACHE) > _WARP_CACHE_MAX:
+            _WARP_CACHE.popitem(last=False)
+    return labels
+
+
+def warp_annotations_to_sections(
+    jobs: list[tuple[RegistrationResult, tuple[int, int]]],
+    atlas: BrainGlobeAtlas,
+    *,
+    project_dir: Path | None = None,
+    source_shape: tuple[int, int, int] | None = None,
+    max_workers: int | None = None,
+) -> list[np.ndarray | Exception]:
+    """Warp many sections at once, in parallel. One entry per job, in order.
+
+    A failed section yields its exception in place of labels, so one bad sidecar
+    does not cost the others their overlay.
+
+    **Why the thread split.** ITK already runs each filter on every core, so
+    sections launched side by side simply fight over the same 32 threads: that
+    measured 1.8x. Giving each worker its share of ITK's threads instead measured
+    2.9x on the same 18 sections, bit-identical to the serial result. ITK's
+    thread count is process-wide, so it is restored before returning.
+    """
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    import SimpleITK as sitk
+
+    if not jobs:
+        return []
+
+    def _one(job):
+        result, shape = job
+        try:
+            return warp_annotation_to_section(
+                result, atlas, shape, project_dir=project_dir, source_shape=source_shape
+            )
+        except Exception as exc:  # returned, not raised - see docstring
+            return exc
+
+    cores = os.cpu_count() or 1
+    workers = max_workers or max(1, min(len(jobs), cores // 4))
+    if workers <= 1:
+        return [_one(job) for job in jobs]
+
+    previous = sitk.ProcessObject.GetGlobalDefaultNumberOfThreads()
+    sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(max(1, cores // workers))
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(_one, jobs))
+    finally:
+        sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(previous)
+
+
+def _warp_annotation_to_section_uncached(
+    result: RegistrationResult,
+    atlas: BrainGlobeAtlas,
     section_shape: tuple[int, int],
     *,
     project_dir: Path | None = None,
@@ -171,7 +312,7 @@ def warp_annotation_to_section(
     B-spline was stored the plane annotation is returned resized to the section
     (i.e. the un-refined plane), which is still a useful sanity overlay.
     """
-    from atlastrack.atlas.planes import resample_atlas_at_plane, rescale_atlas_anchoring
+    from atlastrack.atlas.planes import annotation_at_plane, rescale_atlas_anchoring
 
     anchoring = Anchoring.from_iterable(result.anchoring)
     # ``result.anchoring`` counts voxels of the atlas the fit was computed on. When
@@ -184,7 +325,7 @@ def warp_annotation_to_section(
                 anchoring, source_shape=source_shape, target_shape=target_shape
             )
     h_slice, w_slice = result.output_size_px
-    _, ann_slice = resample_atlas_at_plane(atlas, anchoring, (int(h_slice), int(w_slice)))
+    ann_slice = annotation_at_plane(atlas, anchoring, (int(h_slice), int(w_slice)))
 
     h_sec, w_sec = int(section_shape[0]), int(section_shape[1])
     if result.bspline_transform_path is None:
@@ -288,7 +429,8 @@ def build_registered_transform(
         path = Path(result.bspline_transform_path)
         if project_dir is not None and not path.is_absolute():
             path = project_dir / path
-        bspline = sitk.ReadTransform(str(path))
+        with _HDF5_LOCK:
+            bspline = sitk.ReadTransform(str(path))
     ma = None if manual_affine is None else np.asarray(manual_affine, dtype=float).reshape(3, 3)
     lm = None
     if manual_landmarks is not None:

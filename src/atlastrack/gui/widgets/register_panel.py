@@ -727,7 +727,7 @@ class RegisterPanelWidget(QWidget):
         from atlastrack.registration.manual import section_to_world
         from atlastrack.registration.transforms import (
             annotation_boundaries,
-            warp_annotation_to_section,
+            warp_annotations_to_sections,
         )
 
         registered = [
@@ -748,16 +748,26 @@ class RegisterPanelWidget(QWidget):
 
         count = 0
         first_error: Exception | None = None
-        for section in registered:
+        # All the warps first, in parallel and off any per-section redraw - that is
+        # where the time goes (~0.3 s a section). Layers are then built on this
+        # thread, which is the only one napari may touch.
+        warped = warp_annotations_to_sections(
+            [
+                (sec.registration, (sec.bbox_px[3] - sec.bbox_px[1],
+                                    sec.bbox_px[2] - sec.bbox_px[0]))
+                for sec in registered
+            ],
+            atlas,
+            project_dir=base_dir,
+        )
+        for section, labels in zip(registered, warped, strict=True):
             x0, y0, x1, y1 = section.bbox_px
-            shape = (y1 - y0, x1 - x0)
             try:
+                if isinstance(labels, Exception):
+                    raise labels
                 # Labels are already clipped to the warped atlas extent inside
                 # warp_annotation_to_section (removes the inverse-extrapolation
                 # stripes while keeping outlines over damaged tissue).
-                labels = warp_annotation_to_section(
-                    section.registration, atlas, shape, project_dir=base_dir
-                )
                 # Landmark TPS warp is baked into the label image; the box-handle
                 # affine rides on the layer's affine (live, free). Mutually exclusive.
                 if section.manual_landmarks is not None:

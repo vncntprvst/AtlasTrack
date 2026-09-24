@@ -220,8 +220,29 @@ def resample_atlas_at_plane(
     for B-spline registration. ``annotation_slice`` (uint, nearest-neighbor)
     carries integer region labels.
     """
-    reference = sample_plane(atlas.reference.astype(np.float32), anchoring, out_shape, order=1)
-    annotation = sample_plane(
-        atlas.annotation.astype(np.int32), anchoring, out_shape, order=0
-    ).astype(atlas.annotation.dtype)
-    return reference, annotation
+    # Sampled straight from the stored volumes into the output dtype. Casting the
+    # volume first (``atlas.reference.astype(np.float32)``) copies the *whole* 3D
+    # atlas - 154 MB for the reference and 308 MB for the uint32 annotation at
+    # 25 um - to read one plane out of it, and this runs once per section: it was
+    # most of the cost of "Show atlas overlay". map_coordinates interpolates in
+    # double internally either way, so the slice is bit-identical.
+    reference = sample_plane(
+        atlas.reference, anchoring, out_shape, order=1, out_dtype=np.float32
+    )
+    return reference, annotation_at_plane(atlas, anchoring, out_shape)
+
+
+def annotation_at_plane(
+    atlas: "BrainGlobeAtlas",
+    anchoring: Anchoring,
+    out_shape: tuple[int, int],
+) -> np.ndarray:
+    """Just the annotation slice at ``anchoring`` - nearest-neighbour, native dtype.
+
+    For callers that only draw region outlines: resampling the reference as well,
+    then discarding it, doubled the work of every overlay redraw.
+    """
+    annotation = atlas.annotation
+    return sample_plane(
+        annotation, anchoring, out_shape, order=0, out_dtype=annotation.dtype
+    )
