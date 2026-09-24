@@ -243,3 +243,115 @@ def test_sidecar_reads_are_serialised() -> None:
     source = inspect.getsource(transforms.build_registered_transform)
     assert "with _HDF5_LOCK:" in source
     assert "sitk.ReadTransform" in source.split("with _HDF5_LOCK:")[1].split("\n")[1]
+
+
+# ------------------------------------------------------------- disk cache
+
+
+def _fresh_session(transforms) -> None:
+    """What a new launch looks like: memory cache empty, files on disk kept."""
+    transforms.clear_warp_cache()
+
+
+def test_a_new_session_reads_the_overlay_from_disk(counted, tmp_path) -> None:
+    """The point of the disk cache: the second project load does not re-warp."""
+    transforms, calls = counted
+    atlas, result = _FakeAtlas(), _result(tmp_path)
+
+    first = transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=tmp_path)
+    cache = tmp_path / "transforms" / ("section_000" + transforms.OVERLAY_CACHE_SUFFIX)
+    assert cache.exists(), "the overlay must be written beside its sidecar"
+
+    _fresh_session(transforms)
+    second = transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=tmp_path)
+
+    assert len(calls) == 1, "a new session recomputed instead of reading the file"
+    assert np.array_equal(first, second) and first.dtype == second.dtype
+
+
+def test_changing_the_warp_code_invalidates_every_cached_file(counted, tmp_path, monkeypatch) -> None:
+    """The dangerous failure: a fixed bug whose old output keeps being served.
+
+    A cache keyed only on inputs would show the pre-fix overlay indefinitely, with
+    nothing on screen to say so. The key carries a fingerprint of the producing code.
+    """
+    transforms, calls = counted
+    atlas, result = _FakeAtlas(), _result(tmp_path)
+    transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=tmp_path)
+
+    _fresh_session(transforms)
+    monkeypatch.setattr(transforms, "_FINGERPRINT", "code-after-a-bugfix")
+    transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=tmp_path)
+
+    assert len(calls) == 2, "an overlay from older code was served"
+
+
+def test_the_fingerprint_covers_the_warp_code() -> None:
+    """Guard the guard: it must actually hash the functions that make the overlay."""
+    import inspect
+
+    from atlastrack.registration import transforms
+
+    source = inspect.getsource(transforms._overlay_code_fingerprint)
+    for name in ("_warp_annotation_to_section_uncached", "_warped_atlas_extent",
+                 "_invert_displacement", "annotation_at_plane", "sample_plane"):
+        assert name in source, f"{name} is not part of the cache fingerprint"
+
+
+def test_a_corrupt_cache_file_is_rebuilt_not_trusted(counted, tmp_path) -> None:
+    transforms, calls = counted
+    atlas, result = _FakeAtlas(), _result(tmp_path)
+    transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=tmp_path)
+    cache = tmp_path / "transforms" / ("section_000" + transforms.OVERLAY_CACHE_SUFFIX)
+    cache.write_bytes(b"not an npz at all")
+
+    _fresh_session(transforms)
+    labels = transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=tmp_path)
+
+    assert len(calls) == 2
+    assert labels.shape == (20, 30)
+
+
+def test_a_failed_write_still_draws_the_overlay(counted, tmp_path, monkeypatch) -> None:
+    """A read-only or full project folder is a reason to skip caching, not to fail."""
+    import tempfile
+
+    transforms, _calls = counted
+
+    def _boom(*_a, **_k):
+        raise PermissionError("read-only project folder")
+
+    monkeypatch.setattr(tempfile, "mkstemp", _boom)
+    labels = transforms.warp_annotation_to_section(
+        _result(tmp_path), _FakeAtlas(), (20, 30), project_dir=tmp_path
+    )
+    assert labels.shape == (20, 30)
+
+
+def test_a_moved_project_folder_keeps_its_cache(counted, tmp_path) -> None:
+    """The disk key uses the sidecar's name, not its absolute path."""
+    import shutil
+
+    transforms, calls = counted
+    atlas = _FakeAtlas()
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    result = _result(old_dir)
+    transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=old_dir)
+
+    new_dir = tmp_path / "moved"
+    shutil.copytree(old_dir, new_dir, copy_function=shutil.copy2)  # keeps mtimes
+    _fresh_session(transforms)
+    transforms.warp_annotation_to_section(result, atlas, (20, 30), project_dir=new_dir)
+
+    assert len(calls) == 1, "moving the project folder threw its cache away"
+
+
+def test_no_sidecar_means_no_cache_file(counted, tmp_path) -> None:
+    """A section reset to its plane has no B-spline: cheap, and nothing to sit beside."""
+    transforms, _calls = counted
+    result = _result(tmp_path).model_copy(update={"bspline_transform_path": None})
+
+    transforms.warp_annotation_to_section(result, _FakeAtlas(), (20, 30), project_dir=tmp_path)
+
+    assert not list(tmp_path.rglob("*" + transforms.OVERLAY_CACHE_SUFFIX))

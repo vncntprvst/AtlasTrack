@@ -208,9 +208,157 @@ def _warp_key(
 
 
 def clear_warp_cache() -> None:
-    """Forget every cached overlay, e.g. after loading a different atlas."""
+    """Forget every overlay cached in memory. Files on disk are left alone."""
     with _WARP_CACHE_LOCK:
         _WARP_CACHE.clear()
+
+
+# --------------------------------------------------------------------------
+# On-disk overlay cache
+# --------------------------------------------------------------------------
+#
+# One ``<sidecar>.overlay.npz`` beside each ``section_NNN.h5``, so every project
+# load after the first gets its overlays back in milliseconds instead of re-running
+# the inverse warp (~0.3 s a section). It is disposable: delete it and it is rebuilt.
+#
+# **The dangerous failure is a stale file, not a missing one.** A cache keyed only
+# on its inputs would keep serving the old overlay after the warp code itself is
+# fixed, with nothing on screen to say so. So the key also carries a fingerprint of
+# the *source* of every function that produces the result, plus the versions of the
+# libraries doing the maths; change any of them and every cached file misses.
+
+#: Bump if the overlay changes for a reason the source fingerprint cannot see (a
+#: data file, say). Code changes to the functions below invalidate on their own.
+_OVERLAY_CACHE_VERSION = 1
+
+#: Suffix of the cache file written next to each transform sidecar.
+OVERLAY_CACHE_SUFFIX = ".overlay.npz"
+
+_FINGERPRINT: str | None = None
+
+
+def _overlay_code_fingerprint() -> str:
+    """Hash of the code and libraries that produce a warped overlay. Computed once."""
+    global _FINGERPRINT
+    if _FINGERPRINT is not None:
+        return _FINGERPRINT
+    import hashlib
+    import inspect
+
+    import scipy
+    import SimpleITK as sitk
+
+    from atlastrack.atlas import planes
+
+    parts = [
+        f"v{_OVERLAY_CACHE_VERSION}",
+        f"sitk={sitk.Version_VersionString()}",
+        f"scipy={scipy.__version__}",
+        f"numpy={np.__version__}",
+    ]
+    for fn in (
+        _warp_annotation_to_section_uncached,
+        _warped_atlas_extent,
+        _invert_displacement,
+        build_registered_transform,
+        planes.annotation_at_plane,
+        planes.sample_plane,
+        planes.rescale_atlas_anchoring,
+    ):
+        try:
+            parts.append(inspect.getsource(fn))
+        except (OSError, TypeError):
+            # No source (a frozen build): fall back to the package version, which
+            # still changes with every release that could have changed the code.
+            from atlastrack import __version__
+
+            parts.append(f"{fn.__qualname__}@{__version__}")
+    _FINGERPRINT = hashlib.sha256("\n".join(parts).encode()).hexdigest()
+    return _FINGERPRINT
+
+
+def _sidecar_path(result: RegistrationResult, project_dir: Path | None) -> Path | None:
+    if result.bspline_transform_path is None:
+        return None
+    path = Path(result.bspline_transform_path)
+    if project_dir is not None and not path.is_absolute():
+        path = project_dir / path
+    return path
+
+
+def _disk_digest(
+    result: RegistrationResult,
+    atlas: BrainGlobeAtlas,
+    section_shape: tuple[int, int],
+    sidecar: Path,
+    source_shape: tuple[int, int, int] | None,
+) -> str | None:
+    """Everything the overlay depends on, portable across sessions and folders.
+
+    Unlike the in-memory key this uses the sidecar's *name*, not its absolute path,
+    so a project folder that is moved or copied keeps its cache.
+    """
+    import hashlib
+
+    try:
+        st = sidecar.stat()
+    except OSError:
+        return None
+    metadata = getattr(atlas, "metadata", None) or {}
+    key = (
+        tuple(float(v) for v in result.anchoring),
+        tuple(int(v) for v in result.output_size_px),
+        sidecar.name, st.st_mtime_ns, st.st_size,
+        tuple(int(v) for v in section_shape),
+        getattr(atlas, "atlas_name", None),
+        str(metadata.get("version")),
+        tuple(int(v) for v in atlas.annotation.shape),
+        None if source_shape is None else tuple(int(v) for v in source_shape),
+        _overlay_code_fingerprint(),
+    )
+    return hashlib.sha256(repr(key).encode()).hexdigest()
+
+
+def _cache_file(sidecar: Path) -> Path:
+    return sidecar.with_name(sidecar.stem + OVERLAY_CACHE_SUFFIX)
+
+
+def _load_cached_overlay(path: Path, digest: str) -> np.ndarray | None:
+    """The cached labels if the file matches ``digest`` exactly, else None."""
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            if str(data["digest"]) != digest:
+                return None
+            return np.asarray(data["labels"])
+    except Exception:  # missing, truncated, or from an older layout: just rebuild
+        return None
+
+
+def _save_cached_overlay(path: Path, digest: str, labels: np.ndarray) -> None:
+    """Write atomically, and never let a failed write break the overlay itself.
+
+    Atomic because a crash mid-write must not leave a file that loads as garbage;
+    silent because a read-only or full project folder is a reason to skip caching,
+    not a reason to refuse to draw.
+    """
+    import contextlib
+    import os
+    import tempfile
+
+    try:
+        fd, tmp = tempfile.mkstemp(
+            prefix=path.stem + ".", suffix=".tmp", dir=str(path.parent)
+        )
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                np.savez_compressed(fh, digest=np.asarray(digest), labels=labels)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+    except Exception:
+        return
 
 
 def warp_annotation_to_section(
@@ -234,9 +382,22 @@ def warp_annotation_to_section(
         if hit is not None:
             _WARP_CACHE.move_to_end(key)
             return hit.copy()
-    labels = _warp_annotation_to_section_uncached(
-        result, atlas, section_shape, project_dir=project_dir, source_shape=source_shape
-    )
+
+    labels = None
+    sidecar = _sidecar_path(result, project_dir)
+    digest = cache_file = None
+    if sidecar is not None:
+        digest = _disk_digest(result, atlas, section_shape, sidecar, source_shape)
+        if digest is not None:
+            cache_file = _cache_file(sidecar)
+            labels = _load_cached_overlay(cache_file, digest)
+    if labels is None:
+        labels = _warp_annotation_to_section_uncached(
+            result, atlas, section_shape, project_dir=project_dir, source_shape=source_shape
+        )
+        if cache_file is not None and digest is not None:
+            _save_cached_overlay(cache_file, digest, labels)
+
     with _WARP_CACHE_LOCK:
         _WARP_CACHE[key] = labels.copy()
         while len(_WARP_CACHE) > _WARP_CACHE_MAX:
