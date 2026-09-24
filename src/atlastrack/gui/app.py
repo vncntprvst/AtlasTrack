@@ -51,6 +51,7 @@ def launch() -> None:
     viewer.window.add_dock_widget(panel, area="left", name="Registration", tabify=False)
     viewer.window.add_dock_widget(viz_panel, area="right", name="3D & Export", tabify=False)
     _hide_layer_panels(viewer)
+    _defer_layer_controls(viewer)
     _install_welcome_overlay(viewer)
     _size_main_window(viewer)
     napari.run()
@@ -173,6 +174,85 @@ def _hide_layer_panels(viewer: "napari.Viewer") -> None:
                 dock.setVisible(False)
     except Exception:
         pass
+
+
+def _defer_layer_controls(viewer: "napari.Viewer") -> bool:
+    """Build napari's per-layer control widgets only while their dock is shown.
+
+    napari builds a full Qt controls panel for every layer the moment it is added,
+    whether or not anyone can see it. This app keeps that dock hidden, and "Show
+    atlas overlay" adds a layer per section, so those panels were built for nothing:
+    measured at roughly 0.3-0.45 s of an 18-section overlay.
+
+    This does not change napari. It swaps which of napari's own handlers answer the
+    layer events: building is skipped while the dock is hidden and done on demand
+    when it is shown - napari's Window menu can show it - so the controls are still
+    there for anyone who opens them. If napari's internals are not shaped the way
+    this expects, nothing is touched and napari behaves exactly as before; returns
+    whether the lazy version is in place.
+    """
+    from types import SimpleNamespace
+
+    try:
+        qt_viewer = viewer.window._qt_viewer
+        container = qt_viewer.controls
+        dock = qt_viewer.dockLayerControls
+        widgets = container.widgets
+        empty = container.empty_widget
+        eager_add, eager_remove, eager_display = (
+            container._add, container._remove, container._display
+        )
+        layers = viewer.layers
+        inserted, removed = layers.events.inserted, layers.events.removed
+        active = layers.selection.events.active
+    except Exception:
+        return False
+
+    def _ensure(layer) -> None:
+        if layer is not None and layer not in widgets:
+            eager_add(SimpleNamespace(value=layer))
+
+    def _on_active(event) -> None:
+        layer = event.value
+        if layer is not None and dock.isVisible():
+            _ensure(layer)
+        container.setCurrentWidget(widgets.get(layer, empty) if layer is not None else empty)
+
+    def _on_removed(event) -> None:
+        if event.value in widgets:
+            eager_remove(event)
+
+    def _on_dock_visibility(visible: bool) -> None:
+        if not visible:
+            return
+        layer = layers.selection.active
+        _ensure(layer)
+        container.setCurrentWidget(widgets.get(layer, empty) if layer is not None else empty)
+
+    try:
+        inserted.disconnect(eager_add)
+        removed.disconnect(eager_remove)
+        active.disconnect(eager_display)
+        active.connect(_on_active)
+        removed.connect(_on_removed)
+        dock.visibilityChanged.connect(_on_dock_visibility)
+    except Exception:
+        # Put napari's own wiring back exactly as it was, whatever got through.
+        for emitter, ours, theirs in (
+            (inserted, None, eager_add),
+            (removed, _on_removed, eager_remove),
+            (active, _on_active, eager_display),
+        ):
+            try:
+                if ours is not None:
+                    emitter.disconnect(ours)
+                emitter.connect(theirs)
+            except Exception:
+                pass
+        return False
+    # Held here so nothing can collect the closures while the viewer lives.
+    container._atlastrack_lazy_controls = (_on_active, _on_removed, _on_dock_visibility)
+    return True
 
 
 # Target aspect ratio (width : height) for the main window. 16:9 keeps the
