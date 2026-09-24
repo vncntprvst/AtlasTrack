@@ -500,3 +500,59 @@ def test_prematch_does_not_prompt_when_nothing_was_set_by_hand(qtbot, monkeypatc
 
     assert asked == []
     assert started
+
+
+@pytest.mark.qt
+def test_the_current_sheet_is_drawn_above_its_neighbours(qtbot) -> None:
+    """Navigating the stack must show the chosen section whole, not buried.
+
+    Every sheet used to sit at the same depth, so each covered the one drawn
+    before it and the current section disappeared under a neighbour, with the
+    neighbours' outlines drawn across it.
+    """
+    from qtpy.QtWidgets import QGraphicsPixmapItem, QGraphicsPolygonItem
+
+    state = _state(aps=[10000.0 + 40.0 * i for i in range(6)], n=6)  # heavy overlap
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._pos = 2
+    dlg._refresh_stack()
+    pane = dlg._stack_pane
+
+    # Sheets are placed by AP, not by position; find the current one by its span.
+    current_x = next(x0 for x0, _x1, pos in pane._hit if pos == 2)
+    items = pane.scene().items()
+    pixmaps = [i for i in items if isinstance(i, QGraphicsPixmapItem)]
+    outlines = [i for i in items if isinstance(i, QGraphicsPolygonItem)]
+    assert len(pixmaps) == 6
+    current_image = next(i for i in pixmaps if abs(i.pos().x() - current_x) < 1e-6)
+
+    assert all(current_image.zValue() > p.zValue() for p in pixmaps if p is not current_image)
+    top_outline = max(outlines, key=lambda o: o.zValue())
+    assert top_outline.zValue() > current_image.zValue(), "its own outline must frame it"
+    assert all(o.zValue() < current_image.zValue() for o in outlines if o is not top_outline),         "a neighbour's outline would cross the current image"
+
+
+@pytest.mark.qt
+def test_double_click_on_the_raised_sheet_picks_it_not_its_neighbour(qtbot) -> None:
+    """The click must go to what is visible on top."""
+    state = _state(aps=[10000.0 + 40.0 * i for i in range(6)], n=6)
+    dlg = _dialog(qtbot, state)
+    dlg._stack_radio.setChecked(True)
+    dlg._pos = 2
+    dlg._refresh_stack()
+    pane = dlg._stack_pane
+    spans = {pos: (x0, x1) for x0, x1, pos in pane._hit}
+    a0, a1 = spans[2]
+
+    # A neighbour drawn after the current sheet that overlaps it: before the fix,
+    # that neighbour was on top there and took the click.
+    b0, b1 = spans[3]
+    lo, hi = max(a0, b0), min(a1, b1)
+    assert lo < hi, "the fixture must actually overlap"
+    assert pane._sheet_at((lo + hi) / 2.0) == 2
+
+    # Where only the neighbour is, the neighbour is still what you get.
+    outside = (b0 + a0) / 2.0 if b0 < a0 else (a1 + b1) / 2.0
+    assert not (a0 <= outside <= a1)
+    assert pane._sheet_at(outside) != 2

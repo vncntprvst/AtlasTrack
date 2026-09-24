@@ -225,6 +225,13 @@ _STACK_THUMB_H = 210
 # Row height and label width are measured from the rendered text, not guessed.
 _STACK_LABEL_PAD = 14.0
 
+#: Depth of the current section's sheet. Every other sheet's image sits at 1 and
+#: its outline at 2, and items at equal depth stack in drawing order - so each sheet
+#: covered the one before it, and the section you had navigated to was buried
+#: under its right-hand neighbours with their outlines drawn across it. Above all
+#: of them, it is always shown whole.
+_STACK_CURRENT_Z = 10.0
+
 
 class _StackPane(QGraphicsView):
     """The AP series drawn as a row of parallel sheets, positioned **by AP**.
@@ -250,6 +257,7 @@ class _StackPane(QGraphicsView):
         self.setBackgroundBrush(Qt.black)
         self._hit: list[tuple[float, float, int]] = []  # (x0, x1, position)
         self._label_boxes: list[tuple[float, float, int, int]] = []  # (x0, x1, row, pos)
+        self._current_pos: int | None = None
 
     def set_series(
         self,
@@ -266,6 +274,7 @@ class _StackPane(QGraphicsView):
         self._scene.clear()
         self._hit = []
         self._label_boxes = []
+        self._current_pos = current_pos
         if not entries:
             self._scene.setSceneRect(0, 0, 1, 1)
             return
@@ -338,7 +347,7 @@ class _StackPane(QGraphicsView):
                 item = QGraphicsPixmapItem(sheet["pixmap"])
                 item.setTransform(QTransform(1.0, _STACK_SHEAR, 0.0, 1.0, 0.0, 0.0))
                 item.setPos(x, 0.0)
-                item.setZValue(1.0)
+                item.setZValue(_STACK_CURRENT_Z if is_current else 1.0)
                 self._scene.addItem(item)
 
             outline = QGraphicsPolygonItem(
@@ -355,7 +364,7 @@ class _StackPane(QGraphicsView):
             pen.setWidthF(4.0 if is_current else 2.0)
             pen.setCosmetic(True)
             outline.setPen(pen)
-            outline.setZValue(2.0)
+            outline.setZValue(_STACK_CURRENT_Z + 1.0 if is_current else 2.0)
             self._scene.addItem(outline)
 
             label_y = baseline + sheet["row"] * row_h
@@ -385,14 +394,24 @@ class _StackPane(QGraphicsView):
         if not self._scene.sceneRect().isEmpty():
             self.fitInView(self._scene.sceneRect(), Qt.KeepAspectRatio)
 
+    def _sheet_at(self, x: float) -> int | None:
+        """Position of the sheet drawn on top at scene ``x``, or None.
+
+        The current sheet first, because it is raised above the rest; after that,
+        later sheets over earlier ones - the order they are drawn in.
+        """
+        ordered = sorted(self._hit, key=lambda h: h[2] == self._current_pos)
+        for x0, x1, pos in reversed(ordered):
+            if x0 <= x <= x1:
+                return pos
+        return None
+
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 (Qt signature)
         """Double-click a sheet to jump to that section."""
-        x = self.mapToScene(event.pos()).x()
-        # Later sheets are drawn on top, so pick the last one whose span contains x.
-        for x0, x1, pos in reversed(self._hit):
-            if x0 <= x <= x1:
-                self.section_clicked.emit(pos)
-                return
+        pos = self._sheet_at(self.mapToScene(event.pos()).x())
+        if pos is not None:
+            self.section_clicked.emit(pos)
+            return
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event) -> None:  # noqa: N802 (Qt signature)
