@@ -650,6 +650,11 @@ class RegisterPanelWidget(QWidget):
             if sec.registration is not None
             and getattr(sec.registration, "used_mask_fallback", False)
         ]
+        plane_kept = [
+            sec.index for sec in sections
+            if sec.registration is not None
+            and getattr(sec.registration, "morph_fallback", False)
+        ]
         self._progress.setValue(100)
         self._reg_btn.setEnabled(True)
         self._refresh_residuals()
@@ -665,6 +670,11 @@ class RegisterPanelWidget(QWidget):
             msg += (
                 f"  ·  section(s) {fallback} needed an unmasked retry - check "
                 "their alignment"
+            )
+        if plane_kept:
+            msg += (
+                f"  ·  section(s) {plane_kept} kept the plain plane - the morph fitted "
+                "worse; place landmarks by hand"
             )
         path = self._ensure_project_path()
         if path is not None:

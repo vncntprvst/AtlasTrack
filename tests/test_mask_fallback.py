@@ -56,7 +56,7 @@ def test_masked_failure_is_retried_without_the_mask(monkeypatch, section_rgb):
 
     reg = pipeline.register_section_image(
         section_rgb, _FakeAtlas(), anchoring=_anchoring(), use_masks=True,
-        boundary_snap=False,
+        boundary_snap=False, plane_fallback=False,
     )[0]
 
     assert calls == [True, False], "expected one masked attempt then one unmasked"
@@ -74,7 +74,7 @@ def test_successful_masked_fit_does_not_set_the_flag(monkeypatch, section_rgb):
 
     reg = pipeline.register_section_image(
         section_rgb, _FakeAtlas(), anchoring=_anchoring(), use_masks=True,
-        boundary_snap=False,
+        boundary_snap=False, plane_fallback=False,
     )[0]
 
     assert reg.used_mask_fallback is False
@@ -90,7 +90,7 @@ def test_an_unrelated_failure_still_propagates(monkeypatch, section_rgb):
     with pytest.raises(ValueError, match="something else entirely"):
         pipeline.register_section_image(
             section_rgb, _FakeAtlas(), anchoring=_anchoring(), use_masks=True,
-            boundary_snap=False,
+            boundary_snap=False, plane_fallback=False,
         )
 
 
@@ -106,7 +106,7 @@ def test_no_retry_when_masks_were_already_off(monkeypatch, section_rgb):
     with pytest.raises(RuntimeError):
         pipeline.register_section_image(
             section_rgb, _FakeAtlas(), anchoring=_anchoring(), use_masks=False,
-            boundary_snap=False,
+            boundary_snap=False, plane_fallback=False,
         )
 
     assert calls == [False], "an unmasked failure has no safer setting to retry"

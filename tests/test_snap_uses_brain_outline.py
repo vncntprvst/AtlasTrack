@@ -104,7 +104,7 @@ def test_the_pipeline_hands_the_snap_the_annotation_not_a_reference_threshold(mo
 
 
 def test_no_snap_means_no_annotation_sampling(monkeypatch):
-    """Switching the snap off must not cost an extra annotation resample."""
+    """Switching the snap and the plane check off must not cost an annotation resample."""
     from atlastrack.atlas import planes
 
     atlas = _FakeAtlas()
@@ -123,6 +123,6 @@ def test_no_snap_means_no_annotation_sampling(monkeypatch):
         np.zeros((40, 50, 3), np.float32), atlas,
         anchoring=Anchoring(5.0, 0.0, 0.0, 0.0, 0.0, 50.0, 0.0, 40.0, 0.0),
         reference_volume=atlas.reference, use_masks=False, prealign=False,
-        boundary_snap=False,
+        boundary_snap=False, plane_fallback=False,
     )
     assert calls == []

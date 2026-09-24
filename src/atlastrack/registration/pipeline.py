@@ -303,11 +303,15 @@ def register_section_image(
     use_masks: bool = True,
     prealign: bool = True,
     boundary_snap: bool = True,
-) -> tuple[RegistrationResult, object]:
+    plane_fallback: bool = True,
+) -> tuple[RegistrationResult, object | None]:
     """Run the M3 registration on one section.
 
     Returns the persistable :class:`RegistrationResult` plus the in-memory
-    SimpleITK transform (caller writes it to a sidecar if desired).
+    SimpleITK transform (caller writes it to a sidecar if desired). The transform
+    is ``None`` when ``plane_fallback`` found the morph fitting the tissue worse
+    than the plain plane (``RegistrationResult.morph_fallback``): the caller then
+    stores no sidecar, exactly as "Reset morph to plane" leaves a section.
 
     ``reference_volume`` lets the caller pass ``atlas.reference`` directly (the
     raw uint16 volume, no copy); the slice is interpolated into float32 on the
@@ -398,11 +402,17 @@ def register_section_image(
         result.used_mask_fallback = True
 
     transform = result.transform
-    if boundary_snap:
+    morph_fallback = False
+    if boundary_snap or plane_fallback:
         from atlastrack.atlas.planes import annotation_at_plane
 
         brain = annotation_at_plane(atlas, anchoring, out_shape) > 0
-        transform = _apply_boundary_snap(transform, brain, section_image, out_shape)
+        if boundary_snap:
+            transform = _apply_boundary_snap(transform, brain, section_image, out_shape)
+        if plane_fallback and _plane_fits_better(transform, brain, section_image, out_shape):
+            logger.warning("morph fits the tissue worse than the plane; keeping the plane")
+            transform = None
+            morph_fallback = True
 
     reg = RegistrationResult(
         anchoring=list(anchoring.as_tuple()),
@@ -410,8 +420,57 @@ def register_section_image(
         bspline_transform_path=None,
         residual=result.residual_rms,
         used_mask_fallback=getattr(result, "used_mask_fallback", False),
+        morph_fallback=morph_fallback,
     )
     return reg, transform
+
+
+#: How much better the plane's tissue Dice must be before the morph is dropped.
+#: The morphs that went wrong on a real slide lost to the plane by 0.18-0.21; a
+#: near-tie is noise in the tissue mask, not a failed fit.
+_PLANE_FALLBACK_MARGIN = 0.05
+
+
+def _plane_fits_better(
+    transform: object,
+    atlas_brain: np.ndarray,
+    section_image: np.ndarray,
+    out_shape: tuple[int, int],
+) -> bool:
+    """Whether the unwarped plane overlaps the tissue clearly better than the morph.
+
+    Compares the Dice of each atlas brain outline against the section's tissue.
+    When the morph loses to no morph at all, by more than
+    :data:`_PLANE_FALLBACK_MARGIN`, the fit has gone wrong - a brainstem
+    torn away from the cerebellum dragged the whole atlas onto the cerebellum -
+    and the plane is the better place to start landmarks from. It is the automatic
+    form of what the user did by hand with "Reset morph to plane". Any error means
+    no verdict and the morph is kept.
+    """
+    try:
+        from atlastrack.registration.masks import section_tissue_mask
+        from atlastrack.registration.transforms import _warped_atlas_extent
+
+        brain = np.asarray(atlas_brain, dtype=bool)
+        if not brain.any():
+            return False
+        tissue = section_tissue_mask(section_image)
+        morphed = _warped_atlas_extent(transform, brain, brain.shape, out_shape)
+        if brain.shape != tuple(out_shape):
+            from skimage.transform import resize
+
+            plane = resize(brain, out_shape, order=0, preserve_range=True,
+                           anti_aliasing=False).astype(bool)
+        else:
+            plane = brain
+
+        def dice(a: np.ndarray) -> float:
+            return 2.0 * float((a & tissue).sum()) / max(float(a.sum() + tissue.sum()), 1.0)
+
+        return dice(plane) > dice(morphed) + _PLANE_FALLBACK_MARGIN
+    except Exception as exc:
+        logger.warning("plane fallback check skipped: {}", exc)
+        return False
 
 
 def _apply_boundary_snap(
@@ -531,9 +590,10 @@ def register_project_with_atlas(
 
             import SimpleITK as sitk
 
-            tfm_path = transforms_dir / f"section_{section.index:03d}.h5"
-            sitk.WriteTransform(sitk_transform, str(tfm_path))
-            reg.bspline_transform_path = str(tfm_path.relative_to(transforms_dir.parent))
+            if sitk_transform is not None:
+                tfm_path = transforms_dir / f"section_{section.index:03d}.h5"
+                sitk.WriteTransform(sitk_transform, str(tfm_path))
+                reg.bspline_transform_path = str(tfm_path.relative_to(transforms_dir.parent))
             section.registration = reg
 
             registered[(slide_idx, section.index)] = RegisteredSectionTransform(

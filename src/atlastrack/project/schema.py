@@ -271,6 +271,9 @@ class RegistrationResult(BaseModel):
     # so it is worth a visual check. Defaults False, so projects written before
     # this field load unchanged.
     used_mask_fallback: bool = False
+    # True when the automatic morph fitted the tissue worse than the plain plane
+    # and was dropped: the section is left as "Reset morph to plane" leaves it.
+    morph_fallback: bool = False
 
 
 class ChannelLevels(BaseModel):

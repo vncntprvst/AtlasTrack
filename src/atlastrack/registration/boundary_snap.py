@@ -46,7 +46,11 @@ import numpy as np
 # mean silhouette Dice 0.894 -> 0.935, worst-case Jacobian +0.11 (fold-free).
 _N_BOUNDARY = 56
 _N_INTERIOR = 16
-_DROP_FRAC = 0.06
+# 0.06 -> 0.10: at 0.06 the snap refused to stretch the atlas across the opened
+# fourth ventricle to a brainstem detached from the cerebellum, and those sections
+# stayed up to 70 px short. At 0.10 they reach it (Dice 0.85 -> 0.88 on the one
+# where the pieces still touch); no other section of the slide changed by > 0.001.
+_DROP_FRAC = 0.10
 _SMOOTHING = 2000.0
 _SMOOTHING_ESCALATION = (2000.0, 4000.0, 8000.0)
 _JAC_EPS = 0.02  # require min Jacobian determinant above this to accept a field

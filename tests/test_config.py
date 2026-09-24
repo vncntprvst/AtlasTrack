@@ -171,7 +171,7 @@ def test_version_command() -> None:
 
 def test_version_string() -> None:
     from atlastrack import __version__
-    assert __version__ == "0.9.12"
+    assert __version__ == "0.9.13"
 
 
 @pytest.mark.qt

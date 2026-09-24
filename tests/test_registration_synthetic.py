@@ -47,8 +47,10 @@ def _structured_atlas(ap: int = 60, dv: int = 40, ml: int = 80) -> SimpleNamespa
     """Atlas whose coronal slices are all identical brain-like patterns."""
     slice_2d = _brain_slice(h=dv, w=ml)
     reference = np.broadcast_to(slice_2d[np.newaxis], (ap, dv, ml)).copy().astype(np.float32)
-    annotation = np.zeros((ap, dv, ml), dtype=np.int32)
-    annotation[:, dv // 2:, :] = 1  # ventral half = region 1
+    # The brain is labelled where the reference shows it (the plane fallback and
+    # the boundary snap read its outline): dorsal half region 2, ventral region 1.
+    annotation = np.where(slice_2d[np.newaxis] > 0, 2, 0).repeat(ap, axis=0).astype(np.int32)
+    annotation[:, dv // 2:, :] = np.where(annotation[:, dv // 2:, :] > 0, 1, 0)
     return SimpleNamespace(
         reference=reference,
         annotation=annotation,
@@ -78,12 +80,7 @@ def _affine_warp(img: np.ndarray, *, tx: float = 3.0, ty: float = -2.0, angle_de
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_register_project_with_atlas(tmp_path: Path) -> None:
-    """Full pipeline: structured atlas + synthetic warp → RegistrationResult on section."""
-    atlas = _structured_atlas()
-    reference_slice, _ = resample_atlas_at_plane(atlas, _ANCHORING, out_shape=(40, 80))
-    section_image = _affine_warp(reference_slice)
-
+def _project_with_one_section():
     plane = PlaneParams(
         ap_um=500.0,
         midline_px=40.0,
@@ -104,11 +101,25 @@ def test_register_project_with_atlas(tmp_path: Path) -> None:
             )
         ],
     )
-    project = Project(
+    return Project(
         atlas=AtlasRef(),
         slides=[Slide(image_path="fake_slide.png", sections=[section])],
         probes=[probe],
     )
+
+
+def _section_image() -> np.ndarray:
+    reference_slice, _ = resample_atlas_at_plane(
+        _structured_atlas(), _ANCHORING, out_shape=(40, 80)
+    )
+    return _affine_warp(reference_slice)
+
+
+def test_register_project_with_atlas(tmp_path: Path) -> None:
+    """Full pipeline: structured atlas + synthetic warp → RegistrationResult on section."""
+    atlas = _structured_atlas()
+    section_image = _section_image()
+    project = _project_with_one_section()
 
     register_project_with_atlas(
         project,
@@ -134,6 +145,29 @@ def test_register_project_with_atlas(tmp_path: Path) -> None:
     assert shank.entry_ccf_um is not None
     assert all(np.isfinite(shank.tip_ccf_um)), f"tip CCF not finite: {shank.tip_ccf_um}"
     assert all(np.isfinite(shank.entry_ccf_um)), f"entry CCF not finite: {shank.entry_ccf_um}"
+
+
+def test_a_morph_dropped_for_the_plane_writes_no_sidecar(tmp_path: Path, monkeypatch) -> None:
+    """The section keeps its plane, as "Reset morph to plane" leaves it."""
+    from atlastrack.registration import pipeline
+
+    monkeypatch.setattr(pipeline, "_plane_fits_better", lambda *a, **k: True)
+    project = _project_with_one_section()
+    register_project_with_atlas(
+        project,
+        _structured_atlas(),
+        section_images={0: _section_image()},
+        transforms_dir=tmp_path / "transforms",
+        bspline_grid=(6, 6),
+        max_iterations=60,
+    )
+
+    reg = project.slides[0].sections[0].registration
+    assert reg is not None and reg.morph_fallback
+    assert reg.bspline_transform_path is None
+    assert list((tmp_path / "transforms").glob("*.h5")) == []
+    shank = project.probes[0].shanks[0]
+    assert shank.tip_ccf_um is not None and all(np.isfinite(shank.tip_ccf_um))
 
 
 def test_registration_reduces_mse() -> None:

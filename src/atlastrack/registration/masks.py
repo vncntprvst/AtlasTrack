@@ -29,12 +29,25 @@ def _gray(image: np.ndarray) -> np.ndarray:
     return (arr - lo) / (hi - lo) if hi > lo else arr * 0.0
 
 
-def section_tissue_mask(image: np.ndarray, *, close_iter: int = 12) -> np.ndarray:
-    """Clean boolean tissue mask: Otsu split, fill, close, keep largest body.
+#: A second tissue body is kept when it is at least this fraction of the largest.
+_MIN_BODY_FRAC = 0.10
+
+
+def section_tissue_mask(
+    image: np.ndarray, *, close_iter: int = 12, min_body_frac: float = _MIN_BODY_FRAC
+) -> np.ndarray:
+    """Clean boolean tissue mask: Otsu split, fill, close, keep the section's bodies.
 
     The section sits on a near-black background, so a low Otsu fraction captures
-    even dim cortex; heavy closing + largest-component selection yields one solid
-    silhouette and drops debris / neighbouring-section fragments.
+    even dim cortex; heavy closing yields solid silhouettes. The largest body is
+    always kept, and so is any other body at least ``min_body_frac`` of its size
+    that stays clear of the crop border. Debris is smaller than that, and a
+    neighbouring section's fragment intrudes from the border.
+
+    Keeping only the largest body dropped a brainstem that had come away from the
+    cerebellum - a third of the tissue on those sections - so the metric mask, the
+    pre-alignment and the boundary snap all fitted the whole atlas brain onto the
+    cerebellum alone.
     """
     from scipy import ndimage as ndi
     from skimage.filters import threshold_otsu
@@ -54,8 +67,14 @@ def section_tissue_mask(image: np.ndarray, *, close_iter: int = 12) -> np.ndarra
     lbl, n = ndi.label(m)
     if n == 0:
         return np.ones(g.shape, dtype=bool)
-    sizes = ndi.sum(np.ones_like(lbl), lbl, index=range(1, n + 1))
-    return lbl == (int(np.argmax(sizes)) + 1)
+    sizes = np.asarray(ndi.sum(np.ones_like(lbl), lbl, index=range(1, n + 1)))
+    largest = int(np.argmax(sizes)) + 1
+    border = np.unique(np.concatenate([lbl[0], lbl[-1], lbl[:, 0], lbl[:, -1]]))
+    keep = [
+        i + 1 for i, s in enumerate(sizes)
+        if i + 1 == largest or (s >= min_body_frac * sizes.max() and i + 1 not in border)
+    ]
+    return np.isin(lbl, keep)
 
 
 def section_label_mask(

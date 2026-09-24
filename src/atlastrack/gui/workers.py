@@ -479,9 +479,10 @@ def register_worker_progressive(
             continue
         logger.info("Section {} done (residual={})", section.index, reg.residual)
 
-        tfm_path = tfm_dir / f"section_{section.index:03d}.h5"
-        sitk.WriteTransform(sitk_tf, str(tfm_path))
-        reg.bspline_transform_path = str(tfm_path.relative_to(tfm_dir.parent))
+        if sitk_tf is not None:  # None: the morph lost to the plane, keep the plane
+            tfm_path = tfm_dir / f"section_{section.index:03d}.h5"
+            sitk.WriteTransform(sitk_tf, str(tfm_path))
+            reg.bspline_transform_path = str(tfm_path.relative_to(tfm_dir.parent))
         section.registration = reg
 
         registered[(slide_idx, section.index)] = RegisteredSectionTransform(
