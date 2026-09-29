@@ -17,10 +17,12 @@ def _anchoring9(ap_origin: float) -> list[float]:
     return [ap_origin, 0, 0, 20.0, 0, 0, 0.0, 0, 0]
 
 
-def _project_with_planes(planes: dict[int, float]) -> Project:
+def _project_with_planes(planes: dict[int, float], sources: dict | None = None) -> Project:
+    sources = sources or {}
     secs = [
         Section(index=i, slide_idx=0, bbox_px=(0, 0, 10, 10),
-                plane=PlaneParams(ap_um=ap) if ap is not None else None)
+                plane=PlaneParams(ap_um=ap) if ap is not None else None,
+                ap_source=sources.get(i, "manual" if ap is not None else None))
         for i, ap in planes.items()
     ]
     return Project(slides=[Slide(image_path="x.png", sections=secs)])
@@ -90,6 +92,43 @@ def test_unassigned_section_interpolates_shift(monkeypatch) -> None:
     assert pipeline._ap_center(out[2]) == 240.0          # pinned exact
     # section 1 (ds 110) shift interpolated between +100 and +120 -> +110 -> 220.
     assert np.isclose(pipeline._ap_center(out[1]), 220.0)
+
+
+def test_after_a_pre_match_hand_edits_carry_the_neighbours(monkeypatch) -> None:
+    """Pre-match gives every section a DeepSlice AP; those are not anchors.
+
+    Sections 0 and 2 are corrected by hand (+100 and +120). Section 1 still has
+    the AP the pre-match wrote, and must follow its corrected neighbours (+110)
+    instead of staying pinned at DeepSlice's raw value.
+    """
+    anchorings = {0: _anchoring9(90.0), 1: _anchoring9(100.0), 2: _anchoring9(110.0)}
+    proj = _project_with_planes({0: -5000.0, 1: -5100.0, 2: -5200.0},
+                                sources={1: "deepslice"})
+    _patch_user_anchoring(monkeypatch, {-5000.0: 200.0, -5100.0: 110.0, -5200.0: 240.0})
+
+    out = pipeline.guide_anchorings_with_planes(anchorings, proj, _FakeAtlas())
+    assert pipeline._ap_center(out[0]) == 200.0
+    assert pipeline._ap_center(out[2]) == 240.0
+    assert np.isclose(pipeline._ap_center(out[1]), 220.0)
+
+
+def test_even_spacing_and_unrecorded_sources_still_pin(monkeypatch) -> None:
+    anchorings = {0: _anchoring9(90.0), 1: _anchoring9(100.0)}
+    proj = _project_with_planes({0: -5000.0, 1: -5100.0},
+                                sources={0: "even_spacing", 1: None})
+    _patch_user_anchoring(monkeypatch, {-5000.0: 150.0, -5100.0: 300.0})
+
+    out = pipeline.guide_anchorings_with_planes(anchorings, proj, _FakeAtlas())
+    assert pipeline._ap_center(out[0]) == 150.0
+    assert pipeline._ap_center(out[1]) == 300.0
+
+
+def test_a_pre_match_alone_is_left_as_predicted() -> None:
+    anchorings = {0: _anchoring9(90.0), 1: _anchoring9(100.0)}
+    proj = _project_with_planes({0: -5000.0, 1: -5100.0},
+                                sources={0: "deepslice", 1: "deepslice"})
+    out = pipeline.guide_anchorings_with_planes(anchorings, proj, _FakeAtlas())
+    assert out is anchorings
 
 
 def test_no_anchors_returns_unchanged() -> None:

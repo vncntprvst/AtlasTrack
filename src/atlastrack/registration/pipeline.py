@@ -184,6 +184,13 @@ def guide_anchorings_with_planes(
     correction. This guarantees a pinned section lands on its value while still
     letting DeepSlice place the rest. Returns the dict unchanged when there are no
     manual anchors.
+
+    An AP that DeepSlice itself wrote (the Atlas matcher's pre-match, so
+    ``ap_source == "deepslice"``) is not an anchor: it is the prediction, not
+    something the user set. Counting it as one pinned every section after a
+    pre-match, so correcting a few APs by hand moved only those sections and left
+    their neighbours at DeepSlice's raw AP. Hand-set and even-spacing APs (and
+    ones from before the source was recorded) are anchors.
     """
     sec_by_idx = {
         section.index: section
@@ -194,11 +201,18 @@ def guide_anchorings_with_planes(
     def user_center(section) -> float:
         return _ap_center(anchoring_from_plane_params(atlas, section.plane).as_tuple())
 
+    def pinned(section) -> bool:
+        return (
+            section is not None
+            and section.plane is not None
+            and getattr(section, "ap_source", None) != "deepslice"
+        )
+
     # Per assigned section: (DeepSlice AP centre, exact shift onto the user's AP).
     anchors: list[tuple[float, float]] = []
     for idx, anch in anchorings.items():
         section = sec_by_idx.get(idx)
-        if section is not None and section.plane is not None:
+        if pinned(section):
             anchors.append((_ap_center(anch), user_center(section) - _ap_center(anch)))
     if not anchors:
         return anchorings
@@ -209,7 +223,7 @@ def guide_anchorings_with_planes(
     corrected: dict = {}
     for idx, anch in anchorings.items():
         section = sec_by_idx.get(idx)
-        if section is not None and section.plane is not None:
+        if pinned(section):
             shift = user_center(section) - _ap_center(anch)  # exact
         else:
             shift = float(np.interp(_ap_center(anch), ds_list, shift_list))

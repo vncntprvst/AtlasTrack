@@ -30,6 +30,34 @@ Given one or more slide images and a little guidance:
 5. **Exports** per-channel CSV (CCF µm or Paxinos stereotaxic mm), an interactive
    3-D HTML page, a HERBS `.pkl`, or your section series with atlas outlines.
 
+## How a section is fitted
+
+DeepSlice alone places each section with a *linear* fit: an atlas plane, tilted,
+shifted and scaled, but not bent. On real tissue that is rarely enough. AtlasTrack
+uses DeepSlice only to choose the plane, then fits the atlas to the tissue:
+
+1. **Plane.** DeepSlice sees one tight crop per section, with your flips
+   applied, numbered in your section order. It uses those numbers to keep the
+   series in front-to-back order and to share one tilt across it. Any AP you set
+   by hand (or by even spacing) is an **anchor**: that section's plane slides
+   along AP to exactly your value, keeping DeepSlice's tilt. Sections without an
+   anchor shift by interpolating their neighbouring anchors' corrections, so
+   one anchor corrects the offset of the whole series and two or more also its
+   spacing. APs that DeepSlice wrote itself are predictions, not anchors.
+2. **Scale and shift.** The atlas slice's silhouette is moved and scaled onto
+   the tissue's (centre and size, no rotation).
+3. **Warp.** elastix bends the atlas onto the section (a B-spline, mutual
+   information), comparing tissue pixels only - fluorescent labels are masked
+   out - with a bending penalty that keeps it smooth.
+4. **Edge snap.** The atlas brain's outline is pulled onto the tissue border,
+   with the interior held still. Pushes too large to be a fit (torn or missing
+   tissue) are skipped, and a warp that would fold is rejected.
+5. **Check.** If the result overlaps the tissue clearly worse than the plain
+   plane, the plane is kept instead, for you to fit by hand.
+
+Box and landmark corrections are applied on top. Re-registering a section
+clears them, since they corrected the fit it replaces.
+
 Atlases come from BrainGlobe: Allen CCFv3, CCFv3-BBP Augmented, Chon/Kim Unified
 (Franklin-Paxinos names), and any other BrainGlobe id. All cover the same volume,
 so regions can be re-named from a different atlas without re-registering.

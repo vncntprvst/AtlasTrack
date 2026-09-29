@@ -19,6 +19,42 @@ You give it one or multiple image(s) of brain sections. It:
 The defaults settings should be good enough to do most of registration. 
 Most of the work is looking at each section, checking the atlas matching, and correcting warping. 
 
+### How a section is fitted
+
+If you have tried DeepSlice on its own, it only places each section with a
+*linear* fit: an atlas plane, tilted, shifted and scaled, but never bent. Real
+tissue is stretched and squashed by cutting and mounting, so that alone rarely
+lines up. Here DeepSlice only chooses the plane; the fit is done after it.
+
+1. **The plane.** DeepSlice gets one tight crop per section, with your flips
+   applied, **numbered in the section order you set**. It uses those numbers to
+   keep the series in front-to-back order and to share one tilt across it - which
+   is why setting the order first matters (Recipe 5.4).
+   - **Anchors.** Any AP you set by hand, or by even spacing, pins that section:
+     its plane slides along AP to exactly your value, keeping DeepSlice's tilt.
+   - **Interpolation.** Sections without an anchor shift by interpolating the
+     corrections of their neighbouring anchors. One anchor fixes the offset of the
+     whole series; two or more also fix its spacing.
+   - APs that **Pre-match all** wrote are DeepSlice's own predictions, not
+     anchors. So after a pre-match, correcting a few sections by hand also carries
+     the sections between them.
+   - Without DeepSlice, the plane is simply the AP (and tilt) you set.
+2. **Scale and shift.** The atlas slice's silhouette is moved and scaled onto
+   your tissue's: same centre, same size, no rotation.
+3. **Warp.** elastix bends the atlas onto the section (a B-spline fit by mutual
+   information). It compares tissue pixels only - bright fluorescent labels are
+   masked out, since the atlas has nothing like them - and a bending penalty keeps
+   the warp smooth.
+4. **Edge snap.** The outline of the atlas brain is pulled onto the border of the
+   tissue, with the inside held still. A push too large to be a fit - torn or
+   missing tissue - is skipped, and a warp that would fold is rejected.
+5. **Check.** If the result overlaps the tissue clearly worse than the plain
+   plane did, the plane is kept instead and the Register panel names the section,
+   for you to fit by hand (Recipe 5.7).
+
+Your box and landmark corrections (Recipe 5.7) sit on top of this fit.
+Re-registering a section clears them, because they corrected the fit it replaces.
+
 ---
 
 ## 2. Ideas and coordinates
@@ -170,8 +206,10 @@ set the spacing, **Apply spacing** to fill in the series.
 - It fixes the *order* but not the *spacing*, so the app checks the result and
   warns if sections come back out of order or too close together. Fix those before
   registering.
-- Any AP you set by hand also **guides** it: one pinned section sets the overall
-  offset, two or more set offset and scale.
+- An AP you set by hand also **guides** it at registration: one pinned section
+  sets the overall offset, two or more set offset and spacing. After a pre-match,
+  correct just the sections that came out wrong - the ones between them follow
+  (see *How a section is fitted* in section 1).
 
 ### 5.6 Register
 
@@ -182,12 +220,19 @@ worth knowing:
   the run.
 - **Regularized registration (elastix)** - keeps the atlas outline on the tissue.
   Recommended, and on when the elastix extra is installed.
-- **Keep hand-corrected sections on re-run** - so a re-run does not throw away
-  corrections you made by hand.
+- **Keep hand-corrected sections on re-run** - so **Register all sections** skips
+  sections you corrected by hand. Off (the default), a re-run replaces their fit
+  and clears the corrections, which belonged to the old fit.
 
 Then **Register ▸ Register all sections**. Watch the progress, then check the
 **residuals** table (lower is a better fit) and switch on **Show atlas overlay on
 sections** to see the outlines on your tissue.
+
+**Only some sections.** Select them in the table - click one, **Ctrl**+click to
+add or remove, **Shift**+click for a range - or with the same clicks on the
+sections in the image. The button becomes **Register selected sections**, and
+registers those even if they are hand-corrected. **Esc** in the table, or a click
+on empty canvas, goes back to all.
 
 ### 5.7 Hand-correct a section
 
