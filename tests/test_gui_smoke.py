@@ -1720,8 +1720,11 @@ def test_reload_repopulates_widgets(qtbot) -> None:
         assert "probeA" in probe_picker._status.text()
         assert ephys_panel._probe_combo.count() == 1
 
-        # Register: residuals table has the one registered section.
-        assert register_panel._residuals_table.rowCount() == 1
+        # Register: every section is listed; only the registered one has a residual.
+        table = register_panel._residuals_table
+        residuals = [table.item(r, 2).text() for r in range(table.rowCount())]
+        assert len(residuals) == 2
+        assert sum(r != "-" for r in residuals) == 1
     finally:
         viewer.close()
 

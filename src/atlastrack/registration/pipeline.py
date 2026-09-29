@@ -219,6 +219,22 @@ def guide_anchorings_with_planes(
     return corrected
 
 
+def clear_manual_correction(section: Section) -> bool:
+    """Drop a section's landmarks and box correction; True if it had any.
+
+    Called when a section is registered afresh. Landmarks are stored as positions
+    on the registered overlay, and a box correction as an affine on top of it, so
+    both describe a fix to the *old* morph. Laid over the new one they no longer
+    correct anything: they pull an outline that already fits back out of place -
+    on a real slide, the dorsal edge of two well-fitted sections went 25-70 px
+    past the tissue.
+    """
+    had = section.manual_landmarks is not None or section.manual_affine is not None
+    section.manual_landmarks = None
+    section.manual_affine = None
+    return had
+
+
 def _resolve_engine(engine: str) -> str:
     """Map ``"auto"`` to the best available engine; validate explicit choices."""
     from atlastrack.registration.elastix_bspline import ELASTIX_AVAILABLE
@@ -594,6 +610,7 @@ def register_project_with_atlas(
                 tfm_path = transforms_dir / f"section_{section.index:03d}.h5"
                 sitk.WriteTransform(sitk_transform, str(tfm_path))
                 reg.bspline_transform_path = str(tfm_path.relative_to(transforms_dir.parent))
+            clear_manual_correction(section)
             section.registration = reg
 
             registered[(slide_idx, section.index)] = RegisteredSectionTransform(

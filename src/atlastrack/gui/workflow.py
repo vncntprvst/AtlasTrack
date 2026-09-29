@@ -92,6 +92,27 @@ class WorkflowState:
         self.active_slide_idx = None
         self.active_section_idx = None
 
+    def has_unsaved_changes(self) -> bool:
+        """Whether the project in memory differs from what is saved on disk.
+
+        Compared against the file itself rather than a dirty flag: the project is
+        saved from several places (the Project menu, and auto-saves after
+        registration, adjustments and ephys edits), and a flag every one of them
+        had to clear would drift. A project never saved counts as changed once it
+        holds anything, and an unreadable file counts as changed, so the answer
+        errs toward asking.
+        """
+        current = self.project.model_dump_json()
+        if self.project_path is None:
+            return current != Project().model_dump_json()
+        try:
+            from atlastrack.project.io import load_project
+
+            saved = load_project(self.project_path)
+        except Exception:  # noqa: BLE001 - missing / unreadable file
+            return True
+        return saved.model_dump_json() != current
+
     def seed_deepslice_cache_from_project(self) -> int:
         """Rebuild the in-memory DeepSlice cache from what the project stored.
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -45,6 +47,11 @@ OVERLAY_CONTOUR_RGBA = (1.0, 1.0, 1.0, 1.0)
 #: active label matches "Apply landmark warp" beneath it.
 BOX_TRANSFORM_IDLE_TEXT = "Move / scale / rotate overlay"
 BOX_TRANSFORM_ACTIVE_TEXT = "Apply box transform"
+
+#: The register button names what it will do: everything, or the sections picked
+#: in the table / on the canvas.
+REGISTER_ALL_TEXT = "Register all sections"
+REGISTER_SELECTED_TEXT = "Register selected sections ({n})"
 
 
 def style_overlay_layer(layer) -> None:
@@ -200,8 +207,9 @@ class RegisterPanelWidget(QWidget):
             "When re-running registration, skip sections that have a manual atlas "
             "correction (box transform or landmarks) so their fit - including a "
             "'Reset morph to plane' - isn't recomputed and lost. Off = re-register "
-            "every section. Clear a section's correction with 'Reset adjustment' to "
-            "force it to re-register while this is on."
+            "every section, which clears their landmarks and box corrections (they "
+            "were fixes to the old morph). While this is on, select a section in the "
+            "table to re-register it anyway."
         )
         params_layout.addWidget(self._preserve_manual)
 
@@ -234,8 +242,14 @@ class RegisterPanelWidget(QWidget):
         # Held for the Parameters dialog; intentionally NOT added to the panel.
         self._params_box = params_box
 
-        self._reg_btn = QPushButton("Register all sections")
+        self._reg_btn = QPushButton(REGISTER_ALL_TEXT)
         self._reg_btn.setFixedHeight(34)
+        self._reg_btn.setToolTip(
+            "Register every section, or only the ones selected in the table below "
+            "(or Ctrl-/Shift-clicked on the canvas). Re-registering a section "
+            "replaces its morph and clears its landmarks and box correction, which "
+            "were fixes to the old morph."
+        )
         self._reg_btn.clicked.connect(self._run_registration)
         layout.addWidget(self._reg_btn)
 
@@ -250,12 +264,28 @@ class RegisterPanelWidget(QWidget):
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
 
-        layout.addWidget(QLabel("Per-section residuals:"))
+        layout.addWidget(QLabel("Sections - select some to register only those:"))
         self._residuals_table = QTableWidget(0, 3)
         self._residuals_table.setHorizontalHeaderLabels(
             ["Section", "AP from bregma µm", "Residual"]
         )
         self._residuals_table.setMaximumHeight(160)
+        self._residuals_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._residuals_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._residuals_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self._residuals_table.setToolTip(
+            "Click a section to register only it; Ctrl+click adds or removes one, "
+            "Shift+click selects a range. The same clicks work on the sections in "
+            "the canvas. Esc, or a plain click on empty canvas, clears the selection "
+            "and the button goes back to registering all sections."
+        )
+        self._residuals_table.itemSelectionChanged.connect(self._update_register_button)
+        self._select_anchor: int | None = None
+        from qtpy.QtGui import QKeySequence
+        from qtpy.QtWidgets import QShortcut
+
+        clear = QShortcut(QKeySequence("Esc"), self._residuals_table)
+        clear.activated.connect(self.clear_section_selection)
         layout.addWidget(self._residuals_table)
 
         self._overlay_btn = QPushButton("Show atlas overlay on sections")
@@ -495,6 +525,20 @@ class RegisterPanelWidget(QWidget):
             )
             return
 
+        # A selection narrows what is registered, not what DeepSlice sees: it
+        # predicts better from the whole series, so it still gets every section.
+        selected = self.selected_sections()
+        self._register_only = None
+        if selected:
+            self._register_only = [i for i in selected if i in section_images]
+            if not self._register_only:
+                _error_dialog(
+                    self, "Nothing to register",
+                    "None of the selected sections has an AP position yet. Assign "
+                    "one in the Atlas tab, or enable 'Predict planes with DeepSlice'."
+                )
+                return
+
         # Ensure a persistent project location so the transforms (and the
         # auto-saved project) survive a reload, instead of a temp dir.
         project_path = self._ensure_project_path()
@@ -586,8 +630,15 @@ class RegisterPanelWidget(QWidget):
             anchorings = guide_anchorings_with_planes(
                 anchorings, self._state.project, atlas
             )
-        n = len(anchorings) if anchorings else len(section_images)
-        self._status.setText(f"Starting registration of {n} section(s)")
+        only = getattr(self, "_register_only", None)
+        # Sections picked by hand are re-registered even when "Keep hand-corrected
+        # sections" is on: choosing them is the request to redo them.
+        preserve = self._preserve_manual.isChecked() and not only
+        if only:
+            section_images = {i: section_images[i] for i in only}
+        self._run_sections = set(section_images)
+        self._cleared_sections: list[int] = []
+        self._status.setText(f"Starting registration of {len(section_images)} section(s)")
 
         from atlastrack.gui.workers import register_worker_progressive
 
@@ -604,7 +655,7 @@ class RegisterPanelWidget(QWidget):
             use_masks=self._use_mask.isChecked(),
             prealign=self._prealign.isChecked(),
             boundary_snap=self._boundary_snap.isChecked(),
-            preserve_manual=self._preserve_manual.isChecked(),
+            preserve_manual=preserve,
             refine_tilt=self._refine_tilt.isChecked(),
         )
         worker.yielded.connect(self._on_progress)
@@ -625,6 +676,8 @@ class RegisterPanelWidget(QWidget):
         # 8/8 - 100% while half the sections had silently failed.
         if "failed" in info:
             self._failed_sections = list(info["failed"])
+        if "cleared_manual" in info:
+            self._cleared_sections = list(info["cleared_manual"])
 
     def _ensure_project_path(self) -> "Path | None":
         """Return the project path, defaulting to one next to the input data."""
@@ -641,27 +694,52 @@ class RegisterPanelWidget(QWidget):
         self._state.project = project
         sections = [sec for slide in project.slides for sec in slide.sections]
         n = sum(1 for sec in sections if sec.registration is not None)
+        # Report on this run's sections only: a run over a selection must not
+        # re-announce what an earlier run left on the others.
+        run = getattr(self, "_run_sections", None)
+        this_run = [sec for sec in sections if run is None or sec.index in run]
         unregistered = [
-            sec.index for sec in sections
+            sec.index for sec in this_run
             if sec.registration is None and sec.plane is not None
         ]
         fallback = [
-            sec.index for sec in sections
+            sec.index for sec in this_run
             if sec.registration is not None
             and getattr(sec.registration, "used_mask_fallback", False)
         ]
         plane_kept = [
-            sec.index for sec in sections
+            sec.index for sec in this_run
             if sec.registration is not None
             and getattr(sec.registration, "morph_fallback", False)
         ]
+        cleared = list(getattr(self, "_cleared_sections", []))
         self._progress.setValue(100)
         self._reg_btn.setEnabled(True)
         self._refresh_residuals()
+        # The landmark layer and overlay of a cleared section still show the old
+        # correction; drop the one and redraw the other from the new morph.
+        for sec in sections:
+            if sec.index not in cleared:
+                continue
+            lm_name = f"Atlas landmarks {sec.index}"
+            if lm_name in self._viewer.layers:
+                self._viewer.layers.remove(lm_name)
+            if f"Atlas overlay {sec.index}" in self._viewer.layers:
+                try:
+                    self._rerender_section_overlay(sec)
+                except Exception:  # noqa: BLE001 - "Show atlas overlay" redraws it
+                    pass
 
         # Auto-save so the registration (results + transform sidecars) persists
         # and can be reloaded without re-running.
         msg = f"Done - {n} of {len(sections)} section(s) registered"
+        if run is not None and len(run) < len(sections):
+            msg += f" (this run: {sorted(run)})"
+        if cleared:
+            msg += (
+                f"  ·  cleared the landmarks / box correction of section(s) {cleared} "
+                "- they corrected the previous morph"
+            )
         if unregistered:
             # Loudly, and in the count itself: a run that leaves sections
             # unregistered used to still read "Done" over a 100% progress bar.
@@ -709,18 +787,103 @@ class RegisterPanelWidget(QWidget):
         rows = []
         for slide in self._state.project.slides:
             for sec in slide.sections:
-                if sec.registration is None:
-                    continue
-                a = sec.registration.anchoring  # (ox,oy,oz,ux,uy,uz,vx,vy,vz) voxels
-                ap_idx = a[0] + 0.5 * a[3] + 0.5 * a[6]  # AP of the plane centre
-                ap_bregma = bregma_ap - ap_idx * ap_res
-                rows.append((sec.ap_order, sec.index, ap_bregma, sec.registration.residual))
-        rows.sort(key=lambda r: r[0])
-        self._residuals_table.setRowCount(len(rows))
+                # Every section is listed - an unregistered one can be picked to
+                # register too - with "-" where there is no result yet.
+                ap_bregma = res = None
+                if sec.registration is not None:
+                    a = sec.registration.anchoring  # (ox,oy,oz,ux,uy,uz,vx,vy,vz) voxels
+                    ap_idx = a[0] + 0.5 * a[3] + 0.5 * a[6]  # AP of the plane centre
+                    ap_bregma = bregma_ap - ap_idx * ap_res
+                    res = sec.registration.residual
+                rows.append((sec.ap_order, sec.index, ap_bregma, res))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        selected = set(self.selected_sections())
+        table = self._residuals_table
+        table.blockSignals(True)
+        table.clearSelection()
+        table.setRowCount(len(rows))
         for i, (_order, idx, ap, res) in enumerate(rows):
-            self._residuals_table.setItem(i, 0, QTableWidgetItem(str(idx)))
-            self._residuals_table.setItem(i, 1, QTableWidgetItem(f"{ap:+.0f}" if ap == ap else "-"))
-            self._residuals_table.setItem(i, 2, QTableWidgetItem(f"{res:.4f}" if res is not None else "-"))
+            item = QTableWidgetItem(str(idx))
+            item.setData(Qt.UserRole, idx)
+            table.setItem(i, 0, item)
+            table.setItem(
+                i, 1, QTableWidgetItem(f"{ap:+.0f}" if ap is not None and ap == ap else "-")
+            )
+            table.setItem(i, 2, QTableWidgetItem(f"{res:.4f}" if res is not None else "-"))
+        table.blockSignals(False)
+        self._set_selection(selected)
+
+    # --- which sections to register ------------------------------------
+
+    def _row_of(self, section_index: int | None) -> int:
+        table = self._residuals_table
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            if item is not None and item.data(Qt.UserRole) == section_index:
+                return row
+        return -1
+
+    def selected_sections(self) -> list[int]:
+        """Section indices selected for registration, in table (AP) order."""
+        table = self._residuals_table
+        out = []
+        for row in sorted({i.row() for i in table.selectedIndexes()}):
+            item = table.item(row, 0)
+            if item is not None and item.data(Qt.UserRole) is not None:
+                out.append(int(item.data(Qt.UserRole)))
+        return out
+
+    def _set_selection(self, indices) -> None:
+        from qtpy.QtCore import QItemSelection, QItemSelectionModel
+
+        table = self._residuals_table
+        selection = QItemSelection()
+        for idx in indices:
+            row = self._row_of(idx)
+            if row >= 0:
+                selection.select(table.model().index(row, 0),
+                                 table.model().index(row, table.columnCount() - 1))
+        table.selectionModel().select(
+            selection, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows
+        )
+        self._update_register_button()
+
+    def _update_register_button(self) -> None:
+        n = len(self.selected_sections())
+        self._reg_btn.setText(REGISTER_SELECTED_TEXT.format(n=n) if n else REGISTER_ALL_TEXT)
+
+    def pick_section_for_registration(self, section_index: int) -> None:
+        """A plain click on a section: it alone is selected."""
+        self._select_anchor = section_index
+        self._set_selection([section_index])
+
+    def toggle_section_selection(self, section_index: int) -> None:
+        """Ctrl+click: add the section to the selection, or take it out."""
+        current = self.selected_sections()
+        if section_index in current:
+            current.remove(section_index)
+        else:
+            current.append(section_index)
+        self._select_anchor = section_index
+        self._set_selection(current)
+
+    def extend_section_selection(self, section_index: int) -> None:
+        """Shift+click: select every section from the last one picked to this one."""
+        a = self._row_of(self._select_anchor)
+        b = self._row_of(section_index)
+        if b < 0:
+            return
+        if a < 0:
+            self.pick_section_for_registration(section_index)
+            return
+        table = self._residuals_table
+        rows = range(min(a, b), max(a, b) + 1)
+        self._set_selection([int(table.item(r, 0).data(Qt.UserRole)) for r in rows])
+
+    def clear_section_selection(self) -> None:
+        self._select_anchor = None
+        self._residuals_table.clearSelection()
+        self._update_register_button()
 
     def _show_overlay(self) -> None:
         """Overlay registered atlas boundaries on each section in the viewer."""

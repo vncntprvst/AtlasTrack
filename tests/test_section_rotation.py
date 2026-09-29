@@ -230,6 +230,21 @@ def test_overlapping_boxes_resolve_to_the_smaller_one(qtbot):
         viewer.close()
 
 
+def click(callback, viewer, event) -> None:
+    """Deliver a click the way napari does: press, then release."""
+    import types
+
+    gen = callback(viewer, event)
+    if not isinstance(gen, types.GeneratorType):
+        return
+    try:
+        next(gen)                       # press
+        event.type = "mouse_release"
+        next(gen)                       # release
+    except StopIteration:
+        pass
+
+
 def test_clicking_selects_the_section_without_entering_edit_mode(qtbot):
     """No 'Edit boxes' first: the click works on a freshly detected slide."""
     viewer, _panel, tools, state = _clickable(qtbot)
@@ -240,8 +255,9 @@ def test_clicking_selects_the_section_without_entering_edit_mode(qtbot):
             button = 1
             modifiers = ()
             position = (30.0, 90.0)
+            type = "mouse_press"
 
-        callback(viewer, _Event())
+        click(callback, viewer, _Event())
 
         assert state.active_section_idx == 1
         assert tools._section_combo.currentData() == 1
@@ -249,8 +265,8 @@ def test_clicking_selects_the_section_without_entering_edit_mode(qtbot):
         viewer.close()
 
 
-def test_a_modified_click_is_left_to_the_other_tools(qtbot):
-    """Probe picking and landmark placement use modifier clicks."""
+def test_a_modified_click_does_not_change_the_active_section(qtbot):
+    """Ctrl/Shift+click only adds to the registration pick; "the section" stays."""
     viewer, _panel, _tools, state = _clickable(qtbot)
     try:
         callback = viewer.mouse_drag_callbacks[-1]
@@ -259,8 +275,9 @@ def test_a_modified_click_is_left_to_the_other_tools(qtbot):
             button = 1
             modifiers = ("Shift",)
             position = (30.0, 90.0)
+            type = "mouse_press"
 
-        callback(viewer, _Event())
+        click(callback, viewer, _Event())
 
         assert state.active_section_idx is None
     finally:

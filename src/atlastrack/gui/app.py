@@ -127,8 +127,32 @@ def _section_at(state: "WorkflowState", y: float, x: float):
     return best
 
 
+def _modifier_names(event) -> set[str]:
+    """``event.modifiers`` as plain names ("Control", "Shift", ...)."""
+    return {str(getattr(m, "name", m)) for m in (getattr(event, "modifiers", ()) or ())}
+
+
+def _call_panels(panels, method: str, *args) -> None:
+    for panel in panels:
+        fn = getattr(panel, method, None)
+        if callable(fn):
+            try:
+                fn(*args)
+            except Exception:  # noqa: BLE001 - one panel must not block the rest
+                pass
+
+
 def _install_section_click(viewer: "napari.Viewer", state: "WorkflowState", panels) -> None:
-    """Select the section under a plain left click, in any tab.
+    """Pick sections with left clicks on the canvas, in any tab.
+
+    A plain click selects the section under it everywhere that acts on "the
+    section", and makes it the only one picked for registration; a plain click on
+    empty canvas clears that pick, so the Register button goes back to all
+    sections. Ctrl+click adds or removes a section, Shift+click picks the range
+    from the last one - as in the section table.
+
+    Acts on release, and only if the mouse did not move: a drag is a pan, and
+    panning across the slide must not change what is selected.
 
     Hit-tests the stored bboxes rather than reading the outline Labels layer: that
     layer only paints the *border*, so a click in the middle of a section would
@@ -136,22 +160,46 @@ def _install_section_click(viewer: "napari.Viewer", state: "WorkflowState", pane
     """
 
     def _on_click(_viewer, event):
-        if getattr(event, "button", 1) != 1 or set(getattr(event, "modifiers", ()) or ()):
+        if getattr(event, "button", 1) != 1:
+            return
+        mods = _modifier_names(event)
+        if mods and mods not in ({"Control"}, {"Shift"}):
+            return
+        # Modifier clicks belong to a layer being edited (Ctrl+drag re-anchors a
+        # landmark, Shift+click multi-selects points); only in plain navigation
+        # are they free for picking sections.
+        active = getattr(getattr(_viewer, "layers", None), "selection", None)
+        active = getattr(active, "active", None)
+        if mods and getattr(active, "mode", "pan_zoom") != "pan_zoom":
             return
         position = getattr(event, "position", None)
         if position is None or len(position) < 2:
             return
-        index = _section_at(state, float(position[-2]), float(position[-1]))
+        y, x = float(position[-2]), float(position[-1])
+
+        yield
+        dragged = False
+        while getattr(event, "type", "mouse_release") == "mouse_move":
+            dragged = True
+            yield
+        if dragged:
+            return
+
+        index = _section_at(state, y, x)
+        if "Control" in mods:
+            if index is not None:
+                _call_panels(panels, "toggle_section_selection", int(index))
+            return
+        if "Shift" in mods:
+            if index is not None:
+                _call_panels(panels, "extend_section_selection", int(index))
+            return
         if index is None:
+            _call_panels(panels, "clear_section_selection")
             return
         state.active_section_idx = int(index)
-        for panel in panels:
-            select = getattr(panel, "select_section", None)
-            if callable(select):
-                try:
-                    select(int(index))
-                except Exception:  # noqa: BLE001 - one panel must not block the rest
-                    pass
+        _call_panels(panels, "select_section", int(index))
+        _call_panels(panels, "pick_section_for_registration", int(index))
 
     try:
         viewer.mouse_drag_callbacks.append(_on_click)
@@ -555,22 +603,10 @@ def _install_project_menu(
             helper._save()
 
     def _close() -> None:
-        # Closing discards in-memory work, so confirm first (best-effort dialog).
-        try:
-            from qtpy.QtWidgets import QMessageBox
-
-            resp = QMessageBox.question(
-                helper, "Close project",
-                "Close the current project? This clears the loaded slides, "
-                "sections, probes and registration from the app. Unsaved changes "
-                "will be lost.",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-            )
-            if resp != QMessageBox.Yes:
-                return
-        except Exception:  # noqa: BLE001 - headless: proceed without a prompt
-            pass
-        state.reset()
+        # Closing discards in-memory work, so confirm first - but only when there
+        # is work to lose. A prompt on every close teaches clicking Yes blind.
+        if _confirm_close(helper, state):
+            state.reset()
         if on_cleared is not None:
             on_cleared()
 
@@ -633,6 +669,25 @@ def _install_project_menu(
     # After the shortcuts are set, so their width is known.
     _fit_menu_width(menu)
     return menu
+
+
+def _confirm_close(parent, state: "WorkflowState") -> bool:
+    """True to go ahead and close: nothing unsaved, or the user said Yes."""
+    if not state.has_unsaved_changes():
+        return True
+    try:
+        from qtpy.QtWidgets import QMessageBox
+
+        resp = QMessageBox.question(
+            parent, "Close project",
+            "The project has unsaved changes. Close it anyway? This clears the "
+            "loaded slides, sections, probes and registration from the app, and "
+            "the unsaved changes are lost.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+    except Exception:  # noqa: BLE001 - headless: proceed without a prompt
+        return True
+    return resp == QMessageBox.Yes
 
 
 def _fit_menu_width(menu) -> None:

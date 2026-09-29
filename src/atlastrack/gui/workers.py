@@ -421,7 +421,10 @@ def register_worker_progressive(
     ref_vol = atlas.reference
     registered: dict[tuple[int, int], RegisteredSectionTransform] = {}
 
+    from atlastrack.registration.pipeline import clear_manual_correction
+
     failed: list[int] = []
+    cleared: list[int] = []
     for i, (slide_idx, slide, section) in enumerate(tasks):
         yield {"current": i, "total": n_total, "msg": f"Registering section {i + 1} of {n_total}"}
         logger.info("Registering section {} ({}/{})", section.index, i + 1, n_total)
@@ -483,6 +486,8 @@ def register_worker_progressive(
             tfm_path = tfm_dir / f"section_{section.index:03d}.h5"
             sitk.WriteTransform(sitk_tf, str(tfm_path))
             reg.bspline_transform_path = str(tfm_path.relative_to(tfm_dir.parent))
+        if clear_manual_correction(section):
+            cleared.append(section.index)
         section.registration = reg
 
         registered[(slide_idx, section.index)] = RegisteredSectionTransform(
@@ -499,6 +504,12 @@ def register_worker_progressive(
             "current": n_total, "total": n_total,
             "msg": f"Done with {len(failed)} failure(s): sections {failed}",
             "failed": list(failed),
+        }
+    if cleared:
+        yield {
+            "current": n_total, "total": n_total,
+            "msg": f"Cleared the hand corrections of re-registered sections {cleared}",
+            "cleared_manual": list(cleared),
         }
 
     # Project CCF positions onto shanks.
