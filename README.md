@@ -7,8 +7,8 @@
 Register histological brain sections to a reference atlas, and map probe
 trajectories into atlas coordinates.
 
-This is a desktop app for wet-lab neuroscientists: load histology slide images, 
-place each section in the atlas, register the series automatically, click your 
+This is a desktop app for wet-lab neuroscientists: load histology slide images,
+place each section in the atlas, register the series automatically, click your
 probe tracks, and export coordinates or figures.
 
 <img src="https://raw.githubusercontent.com/vncntprvst/AtlasTrack/main/images/AT_GUI.png" alt="AtlasTrack GUI" width="600">
@@ -18,13 +18,12 @@ probe tracks, and export coordinates or figures.
 Given one or more slide images and a little guidance:
 
 1. **Finds the sections** in each slide and merges several slides into one
-   coordinate space.
+   image with shared coordinates.
 2. **Places each section** at its front-to-back atlas level - by hand in a
    side-by-side matcher, or automatically with DeepSlice.
-3. **Registers every section** to the atlas: a regularized 2-D fit (elastix, with
-   a bending-energy penalty and a tissue mask) plus a silhouette pre-align and an
-   outer-contour snap. Damaged sections can be corrected by hand with a box
-   transform or landmark points.
+3. **Registers every section** to the atlas, bending the atlas to follow your
+   tissue (see *How a section is fitted* below). Damaged sections can be
+   corrected by hand, by moving the whole atlas outline or by dragging points.
 4. **Maps probe tracks** you click into atlas coordinates, per shank and per
    channel; optionally refined from recorded LFP depth features.
 5. **Exports** per-channel CSV (CCF µm or Paxinos stereotaxic mm), an interactive
@@ -44,11 +43,13 @@ uses DeepSlice only to choose the plane, then fits the atlas to the tissue:
    anchor shift by interpolating their neighbouring anchors' corrections, so
    one anchor corrects the offset of the whole series and two or more also its
    spacing. APs that DeepSlice wrote itself are predictions, not anchors.
-2. **Scale and shift.** The atlas slice's silhouette is moved and scaled onto
-   the tissue's (centre and size, no rotation).
-3. **Warp.** elastix bends the atlas onto the section (a B-spline, mutual
-   information), comparing tissue pixels only - fluorescent labels are masked
-   out - with a bending penalty that keeps it smooth.
+2. **Scale and shift.** The outline of the atlas slice is moved and scaled onto
+   the outline of the tissue: same centre, same size, no rotation.
+3. **Warp.** elastix, a registration program, bends the atlas onto the
+   section: it moves a grid of control points until the light and dark
+   patterns of the two images agree. It compares tissue pixels only -
+   fluorescent labels are left out - and a penalty on bending keeps the warp
+   smooth.
 4. **Edge snap.** The atlas brain's outline is pulled onto the tissue border,
    with the interior held still. Pushes too large to be a fit (torn or missing
    tissue) are skipped, and a warp that would fold is rejected.
@@ -92,16 +93,17 @@ cd AtlasTrack
 uv pip install -e ".[all,dev]"
 ```
 
-> Quote the target and use no spaces between extras - `zsh` and PowerShell treat
-> `[...]` as a glob, and a space splits the argument.
+> Put the package name in quotes and leave no spaces inside the brackets -
+> `zsh` and PowerShell otherwise read `[...]` as a file pattern, and a space
+> splits it in two.
 
 ## Commands
 
 ```bash
 atlastrack gui        # the app
 atlastrack version
-atlastrack gl-info    # diagnose GPU/OpenGL if the window will not open
-atlastrack split | register | export      # headless equivalents
+atlastrack gl-info    # check the graphics setup if the window will not open
+atlastrack split | register | export      # the same steps, without the window
 ```
 
 ## The window
@@ -119,15 +121,16 @@ src/atlastrack/   io/ atlas/ sectioning/ landmarks/ registration/ probes/ viz/ g
 tests/            pytest suite
 ```
 
-Core packages are headless and unit-tested; only `gui/` and `viz/napari3d.py`
-import napari/Qt, enforced by an import-linter contract. Coordinates are CCF
+The core packages run without a display and have their own tests; only `gui/`
+and `viz/napari3d.py` import napari/Qt, which `lint-imports` checks. Coordinates are CCF
 **(AP, ML, DV)** in µm throughout. A project is one Pydantic model serialized to
-`<slide>.atlastrack.json`, with transform sidecars alongside.
+`<slide>.atlastrack.json`, with each section's registration saved in a file
+alongside it.
 
 ## Testing
 
 ```bash
 uv pip install -e ".[all,dev]"
 pytest -q          # GUI tests need a display
-lint-imports       # the headless-core contract
+lint-imports       # checks the core packages never import the GUI
 ```

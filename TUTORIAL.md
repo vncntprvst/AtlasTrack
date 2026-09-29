@@ -1,8 +1,8 @@
 # AtlasTrack - Tutorial
 
-One histology slide registration, start to finish. About 20 minutes, most of it 
+One histology slide registration, start to finish. About 20 minutes, most of it
 waiting for the atlas to download and the fit to run. For the full reference see
- **MANUAL.md** (or the **Manual** tab in the app).
+**MANUAL.md** (or the **Manual** tab in the app).
 
 You need one image of a slide with brain sections on it - a whole-slide scan with
 several sections on it is ideal. Any common format works (`.tif`, `.jpg`, `.png`).
@@ -31,7 +31,7 @@ the DeepSlice step is unavailable.
 **Histology ▸ Open histology image(s)** → pick the image.
 
 It appears in the centre **Project** tab. If you pick several images they stack
-into one canvas so all the sections share one coordinate space.
+into one image so all the sections share the same coordinates.
 
 ## 2. Find the sections
 
@@ -60,7 +60,7 @@ You can leave rotation alone. The exported series straightens itself later.
 **Atlas ▸ Load atlas** with *Allen CCFv3 25 µm*.
 
 The first download is around 400 MB and takes a while; after that it loads
-instantly from `~/.brainglobe`. The **?** beside the picker explains the other
+instantly from your computer. The **?** beside the picker explains the other
 atlases - notably **Chon / Kim**, which gives Franklin-Paxinos region names.
 
 ## 5. Put the sections at the right level
@@ -80,25 +80,25 @@ to the next. Pin one section and use **Assign all** to space the rest out from i
 **Automatically** (needs the `deepslice` extra) - **Pre-match all (DeepSlice)** in
 the same window places every section in one pass. It warns you if any come back
 out of order or bunched together, and asks before overwriting APs you set by hand.
-Anything you did set also guides it, so pinning one or two good levels is worth
-doing.
+Afterwards, correct any section that came out at the wrong level: at
+registration your corrections also shift the sections between them.
 
 ## 6. Register
 
 **Register ▸ Register all sections**.
 
-Roughly half a minute per section. When it finishes, the **residuals** table fills
-in - lower is a better fit. Tick **Show atlas overlay on sections** to see the
+A few seconds per section. When it finishes, the table fills in: the
+**Residual** column is how much mismatch the fit left, lower is better. Tick **Show atlas overlay on sections** to see the
 region outlines warped onto your tissue. This is the moment to judge the result:
-the outlines should follow the anatomy, not just the silhouette.
+the outlines should follow the anatomy, not only the outer edge.
 
 If one section missed, click it and use **Manual atlas adjustment**:
 
-- **Box transform** for a section that is simply offset or the wrong size:
+- **Box transform** for a section that is only offset or the wrong size:
   **Move / scale / rotate overlay**, drag the box, **Apply box transform**.
 - **Landmarks** for local distortion: **Place landmarks**, drag each point onto
-  the matching feature, **Apply landmark warp**. Or **Pair points**, then click
-  each feature twice - once on the atlas, once on your tissue.
+  the matching feature, **Apply landmark warp**. Or **Open split panel window**
+  to do the same with the section and the atlas side by side.
 - For torn tissue or a missing piece, **Reset morph to plane** first - that gives
   you back a clean atlas slice to fit by hand.
 
@@ -135,7 +135,7 @@ Pick a **Format** and click **Export…**:
 - **Registered section series** - your sections in order, straightened, with the
   atlas outlines beside them. Add the **SVG** for editable outlines, or the
   **region list** for a table of every region in every section.
-- **Probe tracks for Python / HERBS (pkl)** - for the older pipeline.
+- **Probe tracks for Python / HERBS (pkl)** - for HERBS or your own Python scripts.
 
 Then **Project ▸ Save Project** - it writes `<slide>.atlastrack.json` next to your
 image. **Load Project** brings everything back and reloads the atlas for you.
@@ -171,7 +171,7 @@ Needs the `ephys` extra and a probe that already has tip and entry.
 | Atlas | Status shows the atlas and resolution |
 | Levels | Neighbouring sections a sensible distance apart |
 | Registration | Every section has a residual, no error dialog |
-| Overlay | Outlines follow the anatomy, not just the outer edge |
+| Overlay | Outlines follow the anatomy, not only the outer edge |
 | 3-D view | The probe sits inside the brain, in the structure you expect |
 | CSV | One row per channel, with its region, id and colour |
 
@@ -183,4 +183,5 @@ The **Manual** has a troubleshooting section. The two most common:
 
 - **The window will not open** - run `atlastrack gl-info` and send the output.
 - **Every section failed at once** - usually the stain colour was mistaken for a
-  label and the tissue was masked out. Update and re-run.
+  fluorescent label and the tissue was left out of the fit. Update AtlasTrack and
+  register again.

@@ -474,7 +474,8 @@ class PairPointsDialog(QDialog):
         apply_plane = QPushButton("Apply plane")
         apply_plane.setToolTip(
             "Write these values to the section as a manual AP.\n"
-            "Then re-run 'Register all sections' for the overlay to follow."
+            "Then register this section again (select it in the Register table)\n"
+            "for the overlay to follow."
         )
         apply_plane.clicked.connect(self._apply_plane)
         grid.addWidget(apply_plane, 0, 6)

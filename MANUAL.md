@@ -7,7 +7,7 @@ walks through one registration from start to finish.
 
 ## 1. What the app does
 
-You give it one or multiple image(s) of brain sections. It:
+You give it one or more images of brain sections. It:
 
 - finds each section and lets you tidy the boxes,
 - places each section at the right front-to-back level in the atlas,
@@ -16,8 +16,9 @@ You give it one or multiple image(s) of brain sections. It:
 - and exports the result - coordinates, figures, or your section series with
   region outlines.
 
-The defaults settings should be good enough to do most of registration. 
-Most of the work is looking at each section, checking the atlas matching, and correcting warping. 
+The default settings are good enough for most registrations. Most of the work
+is looking at each section, checking how well the atlas matches, and correcting
+the fit where it misses.
 
 ### How a section is fitted
 
@@ -38,13 +39,15 @@ lines up. Here DeepSlice only chooses the plane; the fit is done after it.
    - APs that **Pre-match all** wrote are DeepSlice's own predictions, not
      anchors. So after a pre-match, correcting a few sections by hand also carries
      the sections between them.
-   - Without DeepSlice, the plane is simply the AP (and tilt) you set.
-2. **Scale and shift.** The atlas slice's silhouette is moved and scaled onto
-   your tissue's: same centre, same size, no rotation.
-3. **Warp.** elastix bends the atlas onto the section (a B-spline fit by mutual
-   information). It compares tissue pixels only - bright fluorescent labels are
-   masked out, since the atlas has nothing like them - and a bending penalty keeps
-   the warp smooth.
+   - Without DeepSlice, the plane is the AP (and tilt) you set.
+2. **Scale and shift.** The outline of the atlas slice is moved and scaled onto
+   the outline of your tissue: same centre, same size, no rotation.
+3. **Warp.** elastix, a registration program, bends the atlas onto the section.
+   It moves a grid of control points (a *B-spline*) until the light and dark
+   patterns of the two images agree as well as they can (measured by *mutual
+   information*). It compares tissue pixels only - bright fluorescent labels are
+   left out, since the atlas has nothing like them - and a penalty on bending
+   keeps the warp smooth.
 4. **Edge snap.** The outline of the atlas brain is pulled onto the border of the
    tissue, with the inside held still. A push too large to be a fit - torn or
    missing tissue - is skipped, and a warp that would fold is rejected.
@@ -57,7 +60,7 @@ Re-registering a section clears them, because they corrected the fit it replaces
 
 ---
 
-## 2. Ideas and coordinates
+## 2. Atlases and coordinates
 
 **The atlas.** A 3-D reference brain. Positions are in micrometres (µm) along
 three axes: **AP** front-to-back, **ML** left-right, **DV** top-to-bottom.
@@ -65,7 +68,8 @@ three axes: **AP** front-to-back, **ML** left-right, **DV** top-to-bottom.
 **AP from bregma.** The app shows front-to-back position relative to **bregma**,
 the skull landmark: `0` = bregma, **negative = behind it**, positive = in front.
 
-**Atlases you can use.** All are downloaded once and cached under `~/.brainglobe`.
+**Atlases you can use.** Each is downloaded once and then kept on your computer
+(see Conventions, section 7).
 **Help ▸ Atlases** describes each one, with links and the bregma it uses:
 
 | Atlas | Why you would pick it |
@@ -76,7 +80,7 @@ the skull landmark: `0` = bregma, **negative = behind it**, positive = in front.
 | Chon / Kim v2, isotropic | The 2024 re-release of the above, 20 µm. |
 | Custom ID | Any other BrainGlobe atlas, typed in by name. |
 
-**The pipeline in one line:** section image → atlas slice at the right level →
+**The whole process in one line:** section image → atlas slice at the right level →
 that slice warped onto your section → outlines and probe coordinates.
 
 **Your project** is one `*.atlastrack.json` file. Outputs go **next to your data**,
@@ -95,16 +99,17 @@ atlastrack version   # check the install
 atlastrack gl-info   # if the window will not open, run this and send the output
 ```
 
-`pip install` works just as well as `uv pip install`. Quote the target and leave
-no spaces between extras - PowerShell and `zsh` both treat `[...]` as a pattern.
+`pip install` works as well as `uv pip install`. Put the package name in quotes
+and leave no spaces inside the brackets - PowerShell and `zsh` both read
+`[...]` as a file pattern otherwise.
 
 The base install is deliberately light. `[all]` adds three optional pieces, which
 you can also install one at a time (`".[elastix]"` and so on):
 
 | Extra | What it adds | Notes |
 |---|---|---|
-| `elastix` | The **regularized** registration engine | Recommended - it is the setting the Register step relies on. ~150 MB. Without it the app falls back to a plainer fit and that option is greyed out. |
-| `deepslice` | Automatic front-to-back placement | ~1.65 GB (it pulls TensorFlow), so it is the one to skip if you are placing sections by hand. |
+| `elastix` | The registration engine that keeps the warp smooth (*regularized*) | Recommended - it is the setting the Register step relies on. ~150 MB. Without it the app falls back to a plainer fit and that option is greyed out. |
+| `deepslice` | Automatic front-to-back placement | ~1.65 GB (it includes TensorFlow, a large machine-learning library), so it is the one to skip if you are placing sections by hand. |
 | `ephys` | The Ephys tab | Only needed if you are refining depth from recordings. |
 
 ---
@@ -146,7 +151,7 @@ onto a second screen; closing that window puts it back.
 ### 5.1 Load a slide
 
 **Histology ▸ Open histology image(s)** - pick one image, or several to stack
-them into one canvas so every section shares a coordinate space.
+them into one image so every section shares the same coordinates.
 
 Opening an image when one is already loaded **replaces** it. Same size keeps your
 sections and registration - handy for the same slide in a different dye. A
@@ -170,7 +175,8 @@ section.
 
 - **Rotation ▸ Angle** straightens a section that was mounted crooked. **From
   DeepSlice** fills in the angle it measured. Rotating a section that is already
-  registered invalidates that fit - the panel says so, and you re-register it.
+  registered makes that fit out of date - the panel says so, and you register
+  it again.
   For a tidy exported series you usually need none of this: the section-series
   export straightens on its own (Recipe 5.9).
 - **Flip H / Flip V** if the tissue is mirrored.
@@ -206,10 +212,10 @@ set the spacing, **Apply spacing** to fill in the series.
 - It fixes the *order* but not the *spacing*, so the app checks the result and
   warns if sections come back out of order or too close together. Fix those before
   registering.
-- An AP you set by hand also **guides** it at registration: one pinned section
-  sets the overall offset, two or more set offset and spacing. After a pre-match,
-  correct just the sections that came out wrong - the ones between them follow
-  (see *How a section is fitted* in section 1).
+- APs you set or correct by hand **after** the pre-match guide it at
+  registration: one sets the offset of the whole series, two or more also its
+  spacing. So correct only the sections that came out wrong - the ones between
+  them follow (see *How a section is fitted* in section 1).
 
 ### 5.6 Register
 
@@ -217,22 +223,24 @@ set the spacing, **Apply spacing** to fill in the series.
 worth knowing:
 
 - **Predict planes with DeepSlice** - place the sections automatically as part of
-  the run.
+  the run. Leave it on after a pre-match: the run then reuses the pre-match
+  instead of running DeepSlice again, and keeps the tilt it predicted.
 - **Regularized registration (elastix)** - keeps the atlas outline on the tissue.
   Recommended, and on when the elastix extra is installed.
 - **Keep hand-corrected sections on re-run** - so **Register all sections** skips
-  sections you corrected by hand. Off (the default), a re-run replaces their fit
+  sections you corrected by hand. Off (the default), running it again replaces their fit
   and clears the corrections, which belonged to the old fit.
 
 Then **Register ▸ Register all sections**. Watch the progress, then check the
-**residuals** table (lower is a better fit) and switch on **Show atlas overlay on
+**Residual** column - how much mismatch the fit left, lower is better - and
+switch on **Show atlas overlay on
 sections** to see the outlines on your tissue.
 
 **Only some sections.** Select them in the table - click one, **Ctrl**+click to
 add or remove, **Shift**+click for a range - or with the same clicks on the
 sections in the image. The button becomes **Register selected sections**, and
 registers those even if they are hand-corrected. **Esc** in the table, or a click
-on empty canvas, goes back to all.
+on an empty part of the image, goes back to all.
 
 ### 5.7 Hand-correct a section
 
@@ -255,20 +263,25 @@ Drag the auto-placed points:
    drag. **Ctrl+drag** moves a point without warping.
 3. **Apply landmark warp**.
 
-Or click your own pairs, the way HERBS does:
+Or work side by side, the way HERBS does: **Open split panel window** shows the
+section on the left and the atlas, as currently registered, on the right.
 
-1. **Pair points (click atlas, then tissue)**. On a section with no landmarks yet
-   this starts from an empty set.
-2. Click a feature on the atlas outline. A yellow marker shows the pending point.
-3. Click that same feature on your tissue. The pair joins the set and the outline
-   re-warps. Repeat for as many pairs as you need.
-4. **Apply landmark warp**, once you have at least four pairs.
+1. **Auto-place points** puts numbered dots on both. Dots you have not moved yet
+   are amber and hold the atlas still where they are.
+2. Drag each dot on the section onto the feature it marks on the atlas. Click
+   empty space to add a pair; right-click a dot, or click it and press
+   **Delete**, to remove it. **Undo** steps back one change.
+3. **Preview warp** shows the result, **Apply landmark warp** keeps it.
+
+The window can also lay the atlas over the tissue at any opacity, and nudge the
+atlas plane (AP, ML tilt, DV tilt). **Apply plane** saves the new plane; register
+the section again for the overlay to follow it.
 
 Both routes fill the same landmark set, so you can start with the auto-placed
 points and add hand-clicked pairs to them.
 
-**Reset morph to plane** drops the automatic warp but keeps the level - the right
-move for torn tissue or a missing piece, then place landmarks by hand.
+**Reset morph to plane** drops the automatic warp but keeps the level - the best
+start for torn tissue or a missing piece, which you then fit with landmarks.
 **Reset adjustment** clears a correction.
 
 ### 5.8 Probes
@@ -286,7 +299,7 @@ Everything is in the right-hand **3D & Export** panel.
 
 **Update probe coordinates** first if you have moved a marker or corrected a
 section - exports use the last computed coordinates. **Enforce rigid array**
-regularises a multi-shank probe to parallel, evenly spaced shanks.
+straightens a multi-shank probe so its shanks are parallel and evenly spaced.
 
 **3D Visualization** - **Region atlas** names regions from a different atlas
 without re-registering (this is how you get Franklin-Paxinos names). **3D view**
@@ -297,7 +310,7 @@ opens the brain and probes in a 3-D window.
 | Format | What you get |
 |---|---|
 | Per-channel coordinates (CSV) | One row per recording channel, with its atlas region |
-| Probe tracks for Python / HERBS (pkl) | The tracks, for the older pipeline |
+| Probe tracks for Python / HERBS (pkl) | The tracks, for HERBS or your own Python scripts |
 | 3D view as interactive HTML | A page you can send someone |
 | Registered section series (folder) | Your sections, in order, with region outlines |
 
@@ -315,7 +328,7 @@ apart they are - they are published estimates, so validate against your histolog
 
 The **section series** writes your sections in front-to-back order, straightened,
 with the atlas outlines as a separate black-on-white image per section, plus a
-manifest. Options add outlines burnt onto the section, an editable **SVG** of the
+file listing them all. Options add outlines burnt onto the section, an editable **SVG** of the
 outlines, and a **region list** naming every region in every section.
 
 ### 5.10 Refine depth from recordings (optional)
@@ -343,17 +356,19 @@ atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
 ## 6. Troubleshooting
 
 **Every section fails registration at once.** Usually the stain colour was
-mistaken for a label and the tissue was masked out. Update and re-run.
+mistaken for a fluorescent label and the tissue was left out of the fit. Update
+AtlasTrack and register again.
 
 **The atlas overlay's outline fits but the inside looks stretched** (an enlarged
-ventricle, say). Intensity-based warping has little to go on inside. Place
-landmarks on that structure - raising smoothness or the grid will not help.
+ventricle, say). The warp follows patterns of light and dark, and there are few
+inside the brain. Place landmarks on that structure - changing the warp settings
+will not help.
 
 **DeepSlice APs come out in the wrong order or bunched together.** Set the section
-order and spacing first, then re-run, and read the warning.
+order and spacing first, then run the pre-match again and read the warning.
 
-**Elastix options are greyed out.** Install the elastix extra; without it the
-plain B-spline is used.
+**Elastix options are greyed out.** Install the elastix extra; without it a
+plainer fit is used.
 
 **The first DeepSlice run in a session is slow.** It loads a large model once.
 
@@ -368,5 +383,7 @@ registration atlas mid-project: levels assigned under one do not carry to anothe
 ## 7. Conventions
 
 - Outputs go next to your data, never into the app's folder.
-- Projects are `*.atlastrack.json`; atlases cache under `~/.brainglobe`.
+- Projects are saved as `.json` files (e.g., `*.atlastrack.json`). Atlases are
+  kept where BrainGlobe stores them, by default in your home folder (e.g.,
+  `~/.brainglobe` on Linux).
 - The project auto-saves after a hand correction.
