@@ -189,3 +189,51 @@ def test_the_shank_combo_still_indexes_shanks_directly(qtbot) -> None:
         assert widget._shank_combo.itemText(0) == "Shank 0"
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_saved_track_points_are_shown_and_kept_after_loading(qtbot) -> None:
+    """Loading a project must draw its track points, and a new point must not erase them.
+
+    The layer is the source the shanks' track points are rebuilt from on every
+    edit, so an empty layer after loading meant the first new point wiped them all.
+    """
+    import napari
+
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.workflow import WorkflowState
+    from atlastrack.project.schema import Section, Slide
+
+    state = WorkflowState()
+    state.project.slides.append(
+        Slide(image_path="s.tif",
+              sections=[Section(index=0, slide_idx=0, bbox_px=(0, 0, 100, 100))])
+    )
+    state.active_slide_idx = 0
+    state.project.probes.append(
+        ProbeSpec(label="p1", type=ProbeType(name="NP", n_shanks=2),
+                  shanks=[Shank(index=0, tip_px=Point2D(x_px=5.0, y_px=90.0), tip_section_idx=0,
+                                track_picks=[_pick(10.0, 20.0), _pick(12.0, 40.0)]),
+                          Shank(index=1, track_picks=[_pick(60.0, 30.0)])],
+                  unassigned_track_picks=[_pick(80.0, 80.0)])
+    )
+
+    viewer = napari.Viewer(show=False)
+    try:
+        widget = ClickOverlayWidget(state, viewer)
+        qtbot.addWidget(widget)
+        widget.refresh_after_load()
+        layer = widget._track_layer
+        assert layer is not None and len(layer.data) == 4
+
+        widget._refresh_probe_combo()
+        widget._mode_track.setChecked(True)
+        layer.data = np.vstack([layer.data, [[50.0, 15.0]]])
+        widget._on_track_data_changed()
+
+        probe = state.project.probes[0]
+        assert len(probe.shanks[0].track_picks) == 3
+        assert len(probe.shanks[1].track_picks) == 1
+        assert len(probe.unassigned_track_picks) == 1
+    finally:
+        viewer.close()

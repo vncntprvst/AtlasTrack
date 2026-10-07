@@ -146,3 +146,30 @@ def test_side_panel_does_not_set_a_tall_window(qtbot) -> None:
             assert panel.minimumWidth() >= need, tabs.tabText(k)
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_side_panel_combo_boxes_do_not_size_to_their_longest_entry(qtbot) -> None:
+    """A long combo entry (a probe or stream name) must not widen the whole panel.
+
+    Combo boxes size to their longest entry by default; the Ephys "Probe map" list
+    alone made the panel over 500 px wide. (Measured in the running app: with this,
+    every tab fits in about 320 px.)
+    """
+    import napari
+    from qtpy.QtWidgets import QComboBox
+
+    from atlastrack.gui.app import _build_panel
+
+    viewer = napari.Viewer(show=False)
+    try:
+        panel, viz = _build_panel(viewer)
+        qtbot.addWidget(panel)
+        qtbot.addWidget(viz)
+        combos = panel.findChildren(QComboBox)
+        assert combos
+        narrow = QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        wide = [c.currentText() or c.objectName() for c in combos if c.sizeAdjustPolicy() != narrow]
+        assert not wide, wide
+    finally:
+        viewer.close()

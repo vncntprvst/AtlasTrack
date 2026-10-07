@@ -400,6 +400,35 @@ def _scrollable(page: "QWidget") -> "QWidget":
     return scroll
 
 
+def _narrow_combo_boxes(root: "QWidget", chars: int = 10) -> None:
+    """Stop the combo boxes under ``root`` from widening the panel to their longest item.
+
+    A combo box is as wide as its longest entry by default, so one long probe or
+    stream name set the whole side panel's width. Here each is as wide as ``chars``
+    characters (wider if its row allows), a longer current choice is shortened with
+    "…" and given in full as a tooltip, and the drop-down list still shows every
+    entry in full.
+    """
+    from qtpy.QtWidgets import QComboBox
+
+    for combo in root.findChildren(QComboBox):
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(chars)
+
+        def _fit_popup(_=None, combo=combo) -> None:
+            view = combo.view()
+            view.setMinimumWidth(view.sizeHintForColumn(0) + 24)
+            text = combo.currentText()
+            if text and not combo.toolTip():
+                combo.setProperty("_auto_tip", True)
+            if combo.property("_auto_tip"):
+                combo.setToolTip(text)
+
+        combo.currentTextChanged.connect(_fit_popup)
+        combo.model().rowsInserted.connect(lambda *_, f=_fit_popup: f())
+        _fit_popup()
+
+
 def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     """Construct the main dock panel and wire up all sub-widgets."""
     from qtpy.QtWidgets import QTabWidget, QVBoxLayout, QWidget
@@ -503,6 +532,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     tabs.addTab(_scrollable(tab_register), "Register")
     tabs.addTab(_scrollable(tab_annotate), "Probes")
     tabs.addTab(_scrollable(tab_ephys), "Ephys")
+    _narrow_combo_boxes(tabs)
 
     def _fit_width_to_tab(_index: int = 0) -> None:
         # As wide as the tab on show needs (its scroll bar included), so none is

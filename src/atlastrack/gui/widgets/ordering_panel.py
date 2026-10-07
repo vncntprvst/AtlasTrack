@@ -58,16 +58,19 @@ class OrderingPanelWidget(QWidget):
         dir_row = QHBoxLayout()
         dir_lbl = QLabel("Direction:")
         dir_tip = (
-            "Which way the section sequence runs. With 'Anterior → Posterior' the "
-            "FIRST section (top of the list below) is the most anterior; AP then "
-            "steps posteriorly down the list. The list marks the anterior/posterior "
-            "ends so you can check the numbering matches your slides."
+            "Which way the section sequence runs. With 'A → P' (anterior to "
+            "posterior) the FIRST section (top of the list below) is the most "
+            "anterior; AP then steps posteriorly down the list. 'P → A' is the "
+            "reverse. The list marks the anterior/posterior ends so you can check "
+            "the numbering matches your slides."
         )
         dir_lbl.setToolTip(dir_tip)
         dir_row.addWidget(dir_lbl)
-        self._ant_post = QRadioButton("Anterior → Posterior")
+        # Short labels keep the Atlas tab within the panel's usual width; the
+        # tooltip spells them out.
+        self._ant_post = QRadioButton("A → P")
         self._ant_post.setChecked(True)
-        self._post_ant = QRadioButton("Posterior → Anterior")
+        self._post_ant = QRadioButton("P → A")
         for rb in (self._ant_post, self._post_ant):
             rb.setToolTip(dir_tip)
             rb.toggled.connect(self._refresh_list)  # re-label the end markers

@@ -764,6 +764,11 @@ class ClickOverlayWidget(QWidget):
         entries: list[list[float]] = []
         ent_p: list[int] = []
         ent_s: list[int] = []
+        # Track points too: every edit rebuilds the shanks' track points from this
+        # layer, so leaving it empty after a load erased them on the first new point.
+        tracks: list[list[float]] = []
+        trk_p: list[int] = []
+        trk_s: list[int] = []
         for p_idx, probe in enumerate(self._state.project.probes):
             for s_idx, shank in enumerate(probe.shanks):
                 if shank.tip_px is not None:
@@ -774,18 +779,28 @@ class ClickOverlayWidget(QWidget):
                     entries.append([shank.entry_px.y_px, shank.entry_px.x_px])
                     ent_p.append(p_idx)
                     ent_s.append(s_idx)
-        if not tips and not entries:
+                for pick in shank.track_picks or []:
+                    tracks.append([pick.point.y_px, pick.point.x_px])
+                    trk_p.append(p_idx)
+                    trk_s.append(s_idx)
+            for pick in probe.unassigned_track_picks or []:
+                tracks.append([pick.point.y_px, pick.point.x_px])
+                trk_p.append(p_idx)
+                trk_s.append(_UNASSIGNED)
+        if not tips and not entries and not tracks:
             return  # nothing to draw - avoid creating empty layers
         self._ensure_points_layers()
         self._suppress_store = True
         try:
             self._set_layer(self._tip_layer, tips, tip_p, tip_s)
             self._set_layer(self._entry_layer, entries, ent_p, ent_s)
+            self._set_layer(self._track_layer, tracks, trk_p, trk_s)
         finally:
             self._suppress_store = False
         self._tip_count = len(tips)
         self._entry_count = len(entries)
-        for layer in (self._tip_layer, self._entry_layer):
+        self._track_count = len(tracks)
+        for layer in (self._tip_layer, self._entry_layer, self._track_layer):
             if layer is not None:
                 self._bring_to_front(layer)
 
