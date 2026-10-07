@@ -350,6 +350,41 @@ def seen_from_cmd(
     _warn_mirrored(project)
 
 
+@app.command("add-channel")
+def add_channel_cmd(
+    project_json: Annotated[Path, typer.Argument(help="The project to add it to.")],
+    name: Annotated[str, typer.Argument(help="Name of the channel image, e.g. 'far red'.")],
+    files: Annotated[
+        list[Path],
+        typer.Argument(help="One image per slide image, in the slide's order, of the same size."),
+    ],
+    slide: Annotated[int, typer.Option(help="Which slide of the project (0 = first).")] = 0,
+    colour: Annotated[
+        str, typer.Option(help="Colour map for a grey image (colour images are kept).")
+    ] = "gray",
+) -> None:
+    """Add another image of a slide - one dye on its own, say - shown on demand.
+
+    The files must match the slide's own images one for one (same order and size),
+    so section boxes, flips and rotations apply to them unchanged.
+    """
+    from atlastrack.project.images import check_channel_layout
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.project.schema import ChannelImage
+
+    project = load_project(project_json)
+    target = project.slides[slide]
+    paths = [str(f.resolve()) for f in files]
+    try:
+        check_channel_layout(target, paths, project_json.parent)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    target.channel_images = [c for c in target.channel_images if c.name != name]
+    target.channel_images.append(ChannelImage(name=name, source_paths=paths, colour=colour))
+    save_project(project, project_json)
+    typer.echo(f"added channel image {name!r} ({len(paths)} file(s)) -> {project_json}")
+
+
 @app.command("register")
 def register_cmd(
     project_json: Annotated[

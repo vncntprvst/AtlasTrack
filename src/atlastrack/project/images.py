@@ -146,6 +146,19 @@ def rebuild_slide_image(
         img = load_image(_resolve(slide.image_path))
         bands = [(0, int(img.shape[0]))]
 
+    return apply_slide_edits(img, slide), bands
+
+
+def apply_slide_edits(
+    img: np.ndarray, slide: "Slide", *, rotations: dict[int, float] | None = None
+) -> np.ndarray:
+    """The slide's flips, then each section's flips and rotation, applied to ``img``.
+
+    ``img`` is laid out like the slide's merged sources; a new array is returned.
+    ``rotations`` (section index -> degrees) replaces the sections' own rotation:
+    the app shows a new rotation only after a reload, so an image shown beside the
+    slide must turn by what the slide was turned by, not by the current setting.
+    """
     if slide.flip_h:
         img = np.fliplr(img)
     if slide.flip_v:
@@ -169,13 +182,71 @@ def rebuild_slide_image(
     # rather than something applied later at export time. Rotating a section that is
     # already registered invalidates that section's fit - the GUI warns about it.
     for section in slide.sections:
-        angle = float(getattr(section, "rotation_deg", 0.0) or 0.0)
+        if rotations is not None:
+            angle = float(rotations.get(section.index, 0.0))
+        else:
+            angle = float(getattr(section, "rotation_deg", 0.0) or 0.0)
         if abs(angle) < 1e-6:
             continue
         x0, y0, x1, y1 = section.bbox_px
         img[y0:y1, x0:x1] = rotate_in_bbox(img[y0:y1, x0:x1], angle)
 
-    return img, bands
+    return img
+
+
+def image_size(path: str | Path) -> tuple[int, int]:
+    """``(height, width)`` of an image file, read from its header."""
+    path = Path(path)
+    if path.suffix.lower() in {".tif", ".tiff"}:
+        import tifffile
+
+        with tifffile.TiffFile(str(path)) as tif:
+            shape = tif.series[0].shape
+            axes = tif.series[0].axes
+        return int(shape[axes.index("Y")]), int(shape[axes.index("X")])
+    from PIL import Image
+
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(path) as im:
+        return im.height, im.width
+
+
+def check_channel_layout(slide: "Slide", paths: list[str], base_dir: Path | None = None) -> None:
+    """Raise ValueError unless ``paths`` match the slide's sources one for one, in size."""
+    def _resolve(p: str) -> Path:
+        q = Path(p)
+        return q if q.is_absolute() or base_dir is None else base_dir / q
+
+    sources = list(slide.source_paths) or [slide.image_path]
+    if len(paths) != len(sources):
+        raise ValueError(
+            f"the slide is made of {len(sources)} image(s), so a channel needs "
+            f"{len(sources)} file(s), one per slide image; got {len(paths)}"
+        )
+    for src, path in zip(sources, paths, strict=True):
+        a, b = image_size(_resolve(src)), image_size(_resolve(path))
+        if a != b:
+            raise ValueError(
+                f"{Path(path).name} is {b[1]}x{b[0]} px but {Path(src).name} is "
+                f"{a[1]}x{a[0]}; a channel image must have the slide image's size"
+            )
+
+
+def load_channel_image(slide: "Slide", k: int, base_dir: Path | None = None) -> np.ndarray:
+    """Channel image ``k`` of the slide, merged like the slide but not yet edited.
+
+    Pass it through :func:`apply_slide_edits` to get it as the slide is shown.
+    """
+    def _resolve(p: str) -> Path:
+        q = Path(p)
+        return q if q.is_absolute() or base_dir is None else base_dir / q
+
+    channel = slide.channel_images[k]
+    images = [load_image(_resolve(p)) for p in channel.source_paths]
+    img = merge_images(images) if len(images) > 1 else images[0]
+    if img.ndim == 3 and img.shape[-1] == 4:
+        img = img[..., :3]
+    return img
 
 
 def section_images(

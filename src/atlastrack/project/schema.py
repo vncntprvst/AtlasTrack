@@ -352,6 +352,21 @@ class Section(BaseModel):
 ChannelColour = Literal["red", "green", "blue"]
 
 
+class ChannelImage(BaseModel):
+    """Another image of the same slide - one dye on its own, say.
+
+    Laid out like the slide: one file per slide source, in the same order and of
+    the same size, so every section box, flip and rotation applies to it unchanged.
+    Shown instead of (or over) the slide image to tell apart tracks that overlap
+    in the combined image; registration always uses the slide image itself.
+    """
+
+    name: str
+    source_paths: list[str]
+    # Colour map for a grey (single-channel) image; colour images are shown as they are.
+    colour: str = "gray"
+
+
 class Slide(BaseModel):
     """One slide image - typically holds several Sections.
 
@@ -376,6 +391,8 @@ class Slide(BaseModel):
     align_channel: ChannelColour | None = None
     # Pixel size of the slide image in µm, when known.
     pixel_um: float | None = None
+    # Other images of this slide with the same layout (one dye each, say).
+    channel_images: list[ChannelImage] = []
 
 
 class CellPoint(BaseModel):

@@ -170,6 +170,15 @@ Opening an image when one is already loaded **replaces** it. Same size keeps you
 sections and registration - handy for the same slide in a different dye. A
 different size starts fresh.
 
+**Channel images.** To keep the combined image and still see each dye on its own
+- where tracks from several probes overlap, say - add the single-dye exports as
+channel images: **Histology ▸ Channels ▸ Add channel image...**, one file per
+slide image (e.g. `Slide 3_red.png` and `Slide 4_red.png`), the same size as the
+slide images. **Show** then switches between the slide image and each channel.
+They share the slide's sections, flips and registration, so one project can hold
+the probes of every session; registration always uses the slide image. From the
+command line: `atlastrack add-channel PROJECT.json NAME FILE...`.
+
 ### 5.2 Find the sections
 
 1. **Detect sections**. Adjust **Min area** upward to ignore debris, or
@@ -386,6 +395,7 @@ atlastrack split IMAGE                  # find sections
 atlastrack register PROJECT.json        # register a whole project
 atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
 atlastrack add-cells PROJECT.json DIR   # add slicereg's counted cells to its import
+atlastrack add-channel PROJECT.json NAME FILE...  # another image of the slide, e.g. one dye
 atlastrack seen-from PROJECT.json back  # which face the images show (--mirror-planes)
 ```
 

@@ -483,6 +483,11 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # Naming a channel in Histology updates the Register tab's "Align on" list.
     image_tools.on_channel_names_changed = register_panel._populate_align_combo
 
+    # Channel images added or removed in Histology, and the one to show.
+    image_tools.on_channel_images_changed = (
+        lambda: _update_channel_layers(viewer, state, reload=True)
+    )
+    image_tools.on_show_channel = lambda name: _show_channel(viewer, state, name)
 
     def _after_planes_mirrored() -> None:
         # Overlays drawn for the old planes are out of date: redraw those shown.
@@ -959,6 +964,73 @@ def _section_outline_blending() -> str:
     return OVERLAY_BLENDING
 
 
+CHANNEL_LAYER_PREFIX = "Channel: "
+
+
+def _channel_layer_name(state: "WorkflowState", slide_idx: int, name: str) -> str:
+    many = len(state.project.slides) > 1
+    return f"{CHANNEL_LAYER_PREFIX}{name}" + (f" (slide {slide_idx})" if many else "")
+
+
+def _update_channel_layers(
+    viewer: "napari.Viewer", state: "WorkflowState", *, reload: bool = False
+) -> None:
+    """Show each slide's channel images, laid out and flipped like the slide.
+
+    ``reload`` reads them from disk again (after a project load or a new channel);
+    otherwise the ones in memory are re-flipped to follow the slide's edits.
+    Channel layers sit just above their slide and start hidden - the Histology
+    tab's "Show" picks one.
+    """
+    from loguru import logger
+
+    from atlastrack.project.images import apply_slide_edits, load_channel_image
+
+    base_dir = state.project_path.parent if state.project_path else None
+    wanted = set()
+    for slide_idx, slide in enumerate(state.project.slides):
+        if reload or len(state.channel_raw.get(slide_idx, [])) != len(slide.channel_images):
+            raws = []
+            for k, channel in enumerate(slide.channel_images):
+                try:
+                    raws.append(load_channel_image(slide, k, base_dir))
+                except Exception as exc:  # noqa: BLE001 - a missing file must not stop the rest
+                    logger.warning("channel image {!r} not shown: {}", channel.name, exc)
+                    raws.append(None)
+            state.channel_raw[slide_idx] = raws
+        rotations = state.shown_rotations.get(slide_idx, {})
+        slide_name = f"Slide {slide_idx}"
+        for channel, raw in zip(slide.channel_images, state.channel_raw[slide_idx], strict=True):
+            if raw is None:
+                continue
+            img = apply_slide_edits(raw.copy(), slide, rotations=rotations)
+            name = _channel_layer_name(state, slide_idx, channel.name)
+            wanted.add(name)
+            if name in viewer.layers:
+                viewer.layers[name].data = img
+                continue
+            kwargs = {"rgb": True} if img.ndim == 3 else {"colormap": channel.colour}
+            layer = viewer.add_image(img, name=name, visible=False, **kwargs)
+            if slide_name in viewer.layers:
+                viewer.layers.move(viewer.layers.index(layer), viewer.layers.index(slide_name) + 1)
+    for layer in list(viewer.layers):
+        if layer.name.startswith(CHANNEL_LAYER_PREFIX) and layer.name not in wanted:
+            viewer.layers.remove(layer)
+
+
+def _show_channel(viewer: "napari.Viewer", state: "WorkflowState", name: str | None) -> None:
+    """Show one channel image instead of the slide image, or the slide (``None``)."""
+    for slide_idx, slide in enumerate(state.project.slides):
+        slide_layer = f"Slide {slide_idx}"
+        found = False
+        for channel in slide.channel_images:
+            layer_name = _channel_layer_name(state, slide_idx, channel.name)
+            if layer_name in viewer.layers:
+                on = channel.name == name
+                viewer.layers[layer_name].visible = on
+                found = found or on
+        if slide_layer in viewer.layers:
+            viewer.layers[slide_layer].visible = not found
 
 
 def _update_cells_layer(viewer: "napari.Viewer", state: "WorkflowState") -> None:
@@ -1061,6 +1133,10 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
             continue
         state.slide_bands[slide_idx] = bands
         state.slide_images[slide_idx] = img
+        # The rotations this image was built with, for its channel images.
+        state.shown_rotations[slide_idx] = {
+            s.index: float(s.rotation_deg or 0.0) for s in slide.sections
+        }
         state.active_slide_idx = slide_idx
         name = f"Slide {slide_idx}"
         disp = _display_image_for_slide(state, slide_idx, img)
@@ -1080,6 +1156,7 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
                 )
             _update_section_numbers(viewer, state, slide_idx)
 
+    _update_channel_layers(viewer, state, reload=True)
     _update_cells_layer(viewer, state)
     if state.project.slides:
         state.active_slide_idx = 0
@@ -1099,6 +1176,9 @@ def _refresh_slide(viewer: "napari.Viewer", state: "WorkflowState") -> None:
     name = f"Slide {slide_idx}"
     if name in viewer.layers:
         viewer.layers[name].data = _display_image_for_slide(state, slide_idx, img)
+    # Flips change the slide image in place; its channel images follow.
+    if state.project.slides[slide_idx].channel_images:
+        _update_channel_layers(viewer, state)
 
 
 def _window(channel, lo_frac: float, hi_frac: float):

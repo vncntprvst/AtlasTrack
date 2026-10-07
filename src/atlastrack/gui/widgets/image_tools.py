@@ -246,6 +246,35 @@ class ImageToolsWidget(QWidget):
             row.addWidget(edit, 1)
             names_layout.addLayout(row)
             self._name_edits[colour] = edit
+
+        # Channel images: other images of the same slide (one dye each), to
+        # switch to when tracks overlap in the combined image.
+        show_row = QHBoxLayout()
+        show_row.addWidget(QLabel("Show:"))
+        self._show_combo = QComboBox()
+        self._show_combo.setToolTip(
+            "Which image of the slide to show: the slide image itself, or one of "
+            "its channel images - e.g. one dye alone, where tracks from different "
+            "probes overlap. Registration always uses the slide image."
+        )
+        self._show_combo.currentIndexChanged.connect(self._on_show_changed)
+        show_row.addWidget(self._show_combo, 1)
+        names_layout.addLayout(show_row)
+        buttons = QHBoxLayout()
+        add_btn = QPushButton("Add channel image...")
+        add_btn.setToolTip(
+            "Add another image of this slide with the same layout - one file per "
+            "slide image, the same size (e.g. 'Slide 3_red.png' and 'Slide 4_red.png')."
+        )
+        add_btn.clicked.connect(self._add_channel_image)
+        buttons.addWidget(add_btn)
+        self._remove_channel_btn = QPushButton("Remove")
+        self._remove_channel_btn.setToolTip("Remove the channel image shown above.")
+        self._remove_channel_btn.clicked.connect(self._remove_channel_image)
+        buttons.addWidget(self._remove_channel_btn)
+        names_layout.addLayout(buttons)
+        self._populate_show_combo()
+
         layout.addWidget(names_box)
         layout.addStretch()
 
@@ -323,6 +352,120 @@ class ImageToolsWidget(QWidget):
         if mirrored and self.on_planes_mirrored is not None:
             self.on_planes_mirrored()
 
+    # ------------------------------------------------------------------
+    # Channel images
+    # ------------------------------------------------------------------
+
+    #: Called after a channel image is added or removed (the app redraws them).
+    on_channel_images_changed: Callable[[], None] | None = None
+    #: Called with a channel image's name to show it, or None for the slide image.
+    on_show_channel: Callable[[str | None], None] | None = None
+
+    def _active_slide(self):
+        idx = self._state.active_slide_idx
+        slides = self._state.project.slides
+        if idx is None or idx >= len(slides):
+            return slides[0] if slides else None
+        return slides[idx]
+
+    def _populate_show_combo(self, keep: str | None = None) -> None:
+        slide = self._active_slide()
+        names = [c.name for c in slide.channel_images] if slide is not None else []
+        self._show_combo.blockSignals(True)
+        self._show_combo.clear()
+        self._show_combo.addItem("Slide image (all channels)", None)
+        for name in names:
+            self._show_combo.addItem(name, name)
+        self._show_combo.setCurrentIndex(max(0, self._show_combo.findData(keep)))
+        self._show_combo.blockSignals(False)
+        self._remove_channel_btn.setEnabled(self._show_combo.currentData() is not None)
+
+    def _on_show_changed(self, _index: int) -> None:
+        name = self._show_combo.currentData()
+        self._remove_channel_btn.setEnabled(name is not None)
+        if self.on_show_channel is not None:
+            self.on_show_channel(name)
+
+    @staticmethod
+    def _guess_channel_name(paths: list[str]) -> str:
+        """What the file names share at their end: 'Slide 3_red', 'Slide 4_red' -> 'red'."""
+        import os
+        from pathlib import Path
+
+        stems = [Path(p).stem for p in paths]
+        if len(stems) == 1:
+            stem = stems[0]
+            return stem.rsplit("_", 1)[-1] if "_" in stem else stem
+        tail = os.path.commonprefix([s[::-1] for s in stems])[::-1]
+        return tail.strip(" _-.") or stems[0]
+
+    @staticmethod
+    def _guess_colour(name: str) -> str:
+        n = name.lower()
+        for word, colour in (("far", "magenta"), ("pink", "magenta"), ("red", "red"),
+                             ("green", "green"), ("blue", "blue"), ("dapi", "blue"),
+                             ("cyan", "cyan"), ("yellow", "yellow")):
+            if word in n:
+                return colour
+        return "gray"
+
+    def _add_channel_image(self) -> None:
+        from pathlib import Path
+
+        from qtpy.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+
+        from atlastrack.project.images import check_channel_layout
+        from atlastrack.project.schema import ChannelImage
+
+        slide = self._active_slide()
+        if slide is None:
+            QMessageBox.information(self, "No slide", "Load a slide first.")
+            return
+        n = len(slide.source_paths) or 1
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, f"Channel image: {n} file(s), one per slide image",
+            str(Path(slide.image_path).parent) if slide.image_path else "",
+            "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp)",
+        )
+        if not paths:
+            return
+        # Sorted like the slide's own sources, so file k goes with slide image k.
+        paths = sorted(paths)
+        base = self._state.project_path.parent if self._state.project_path else None
+        try:
+            check_channel_layout(slide, paths, base)
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, "Not added", str(exc))
+            return
+        name, ok = QInputDialog.getText(
+            self, "Channel name", "Name for this channel image:",
+            text=self._guess_channel_name(paths),
+        )
+        name = name.strip()
+        if not ok or not name:
+            return
+        if any(c.name == name for c in slide.channel_images):
+            QMessageBox.warning(self, "Not added", f"There is already a channel named {name!r}.")
+            return
+        slide.channel_images.append(ChannelImage(
+            name=name, source_paths=[str(Path(p)) for p in paths],
+            colour=self._guess_colour(name),
+        ))
+        if self.on_channel_images_changed is not None:
+            self.on_channel_images_changed()
+        self._populate_show_combo(keep=name)
+        self._on_show_changed(self._show_combo.currentIndex())
+
+    def _remove_channel_image(self) -> None:
+        slide = self._active_slide()
+        name = self._show_combo.currentData()
+        if slide is None or name is None:
+            return
+        slide.channel_images = [c for c in slide.channel_images if c.name != name]
+        if self.on_channel_images_changed is not None:
+            self.on_channel_images_changed()
+        self._populate_show_combo()
+        self._on_show_changed(0)
 
     # ------------------------------------------------------------------
     # Channel names
@@ -349,6 +492,7 @@ class ImageToolsWidget(QWidget):
             edit.blockSignals(True)
             edit.setText(names.get(colour, ""))
             edit.blockSignals(False)
+        self._populate_show_combo()
         self._show_view()
 
     # ------------------------------------------------------------------

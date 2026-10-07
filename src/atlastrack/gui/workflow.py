@@ -66,6 +66,11 @@ class WorkflowState:
     # DeepSlice pass when the user already pre-matched in the Atlas matcher.
     deepslice_anchorings: dict[int, list[float]] = field(default_factory=dict)
     deepslice_fingerprints: dict[int, list[float]] = field(default_factory=dict)
+    # Each slide's channel images as loaded (merged, not yet flipped), and the
+    # section rotations its shown image was built with - channel images are shown
+    # with the same flips and rotations.
+    channel_raw: dict[int, list[np.ndarray]] = field(default_factory=dict)
+    shown_rotations: dict[int, dict[int, float]] = field(default_factory=dict)
 
     @property
     def atlas(self) -> "BrainGlobeAtlas | None":
@@ -89,6 +94,8 @@ class WorkflowState:
         self.slide_bands.clear()
         self.deepslice_anchorings.clear()
         self.deepslice_fingerprints.clear()
+        self.channel_raw.clear()
+        self.shown_rotations.clear()
         self.active_slide_idx = None
         self.active_section_idx = None
 
