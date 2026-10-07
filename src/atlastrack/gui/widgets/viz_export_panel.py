@@ -146,6 +146,28 @@ def _viewer_alive(viewer) -> bool:
         return False
 
 
+def _bring_to_front(viewer) -> None:
+    """Show a napari window above the others and give it the focus.
+
+    Done once now and once after the event loop has shown the window: a window
+    that is still being created ignores the first request on Windows.
+    """
+    from qtpy.QtCore import QTimer, Qt
+
+    def _raise() -> None:
+        try:
+            win = viewer.window._qt_window
+        except Exception:  # noqa: BLE001 - window already closed
+            return
+        if win.windowState() & Qt.WindowState.WindowMinimized:
+            win.showNormal()
+        win.raise_()
+        win.activateWindow()
+
+    _raise()
+    QTimer.singleShot(150, _raise)
+
+
 class VizExportPanelWidget(QWidget):
     """3D visualization + export actions, always docked (not a workflow tab)."""
 
@@ -587,6 +609,9 @@ class VizExportPanelWidget(QWidget):
                 self._display_atlas,
                 extra_regions=self._extra_region_list(),
             )
+            # Bring the 3D window to the front: a second napari window otherwise
+            # opens behind the main one, which keeps the focus.
+            _bring_to_front(self._viewer3d)
             if self._display_atlas is None:
                 self._status.setText(
                     "Opened 3D window: probe tracks only. Load an atlas to see the brain."

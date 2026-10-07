@@ -17,6 +17,22 @@ from qtpy.QtWidgets import (
 from atlastrack.gui.workflow import WorkflowState
 
 
+def report_project(action: str, path: str | Path | None) -> None:
+    """Say in the terminal (and the crash log) which project was opened, saved or closed.
+
+    The GUI's status line is gone once the window closes or crashes; the terminal
+    keeps the record of which project a session worked on.
+    """
+    from atlastrack.gui import crashlog
+
+    line = f"{action} project: {path}" if path else f"{action} project (never saved)"
+    print(line, flush=True)
+    try:
+        crashlog.note(line)
+    except Exception:  # noqa: BLE001 - logging must never break a load or save
+        pass
+
+
 class SavePanelWidget(QWidget):
     """Save / load the project JSON (the per-project configuration)."""
 
@@ -120,6 +136,7 @@ class SavePanelWidget(QWidget):
         save_project(self._state.project, out_path, slide_images=self._state.slide_images)
         self._remember(out_path)
         self._status.setText(f"Saved → {out_path.name}")
+        report_project("Saved", out_path)
 
     def _load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -163,6 +180,7 @@ class SavePanelWidget(QWidget):
             f"Loaded {Path(path).name} - {len(project.slides)} slide(s), "
             f"{n_reg} registered section(s){pre}."
         )
+        report_project("Opened", path)
         if self._on_project_loaded is not None:
             self._on_project_loaded()
         return True

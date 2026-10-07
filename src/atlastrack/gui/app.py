@@ -665,6 +665,19 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     wrap_tooltips(container)
     wrap_tooltips(viz_panel)
     container.help_panel = help_panel
+
+    # Quitting closes the open project too; say so in the terminal like Close Project.
+    from qtpy.QtWidgets import QApplication
+
+    def _report_quit() -> None:
+        if state.project_path is not None:
+            from atlastrack.gui.widgets.save_panel import report_project
+
+            report_project("Closed", state.project_path)
+
+    qapp = QApplication.instance()
+    if qapp is not None:
+        qapp.aboutToQuit.connect(_report_quit)
     return container, viz_panel
 
 
@@ -738,7 +751,11 @@ def _install_project_menu(
         # Closing discards in-memory work, so confirm first - but only when there
         # is work to lose. A prompt on every close teaches clicking Yes blind.
         if _confirm_close(helper, state):
+            from atlastrack.gui.widgets.save_panel import report_project
+
+            closed = state.project_path
             state.reset()
+            report_project("Closed", closed)
         if on_cleared is not None:
             on_cleared()
 
