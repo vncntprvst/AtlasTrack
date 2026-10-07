@@ -1,24 +1,21 @@
-"""Tip / entry-point click overlay widget.
+"""Probe tracks: place, select, move and remove each shank's track on the sections.
 
-Manages napari layers for tip/entry annotation and maps viewer clicks to
-Section pixel coordinates stored in the project Shank objects.
+A shank's track is two markers - the **tip** (where the shank ends) and the
+**entry** (where it went in) - and the line through them. Each shank has its own
+colour, used by its markers, its line and its row in the list.
 
-Markers are **colour-coded per shank**: a shank's tip and entry share one colour
-(cycling as you select another shank/probe), and tip vs entry are told apart by
-**symbol** (tip = disc, entry = triangle). Each point carries its ``(probe,
-shank)`` in the layer ``features`` so identity survives moves / deletes, and the
-layers stay in two-way sync with the project schema:
+* **Add track** - pick the Probe and Shank, press Add track, click the tip, then
+  the entry. While placing, the cursor is a probe and a dotted line follows it from
+  the tip. Esc cancels. Adding a track for a shank that has one replaces it.
+* **Select** - click a marker or a line (or a row in the list). The Probe and
+  Shank selectors follow.
+* **Move** - drag a marker. **Remove** - select the track, press Delete.
 
-* **add** (Tip/Entry mode, click) - a point for the selected shank; a second
-  click for a shank that already has that point *replaces* it (one per shank).
-* **move / delete** ("Select / move" mode) - drag to reposition, Delete or
-  "Clear selected" to remove just the selected points; "Clear all" wipes them.
-
-Two ways to mark an entry point:
-
-* **Marker** - click the brain surface directly.
-* **Trajectory line** - draw the probe track as a line; the point where that
-  line first crosses the tissue surface is taken as the entry.
+The line runs from the tip through the entry and on to the edge of the section's
+box. When the tip and the entry are on different sections, each section gets its
+own part: on the tip's section the line starts at the tip and points where the
+entry would be if it sat at the same place in this section's box; on the entry's
+section it starts at the entry and runs away from the tip to the box edge.
 """
 from __future__ import annotations
 
@@ -26,22 +23,19 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from qtpy.QtWidgets import (
-    QButtonGroup,
-    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
-    QRadioButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from atlastrack.gui.widgets.separators import section_header
 from atlastrack.gui.overlay_style import OVERLAY_BLENDING as _OVERLAY_BLENDING
+from atlastrack.gui.widgets.separators import section_header
 from atlastrack.gui.workflow import WorkflowState
 from atlastrack.project.schema import Point2D
 
@@ -51,24 +45,104 @@ if TYPE_CHECKING:
 
 _LAYER_TIP = "Tips"
 _LAYER_ENTRY = "Entries"
-_LAYER_TRACK = "Track points"
-_LAYER_TRAJECTORY = "Trajectory"
+_LAYER_LINES = "Probe tracks"
+_LAYER_PREVIEW = "Track preview"
 
-# Marks a track point that could not be attributed to a shank. Kept on the probe
-# rather than guessed onto a shank - see ProbeSpec.unassigned_track_picks.
-_UNASSIGNED = -1
+_TIP_PROMPT = "Place track end marker (shank tip)"
+_ENTRY_PROMPT = "Place track origin marker (shank entrypoint)"
 
 # Distinct, colour-blind-friendlier cycle; a shank's global ordinal indexes it so
-# the same shank gets the same colour in both the Tips and Entries layers.
+# a shank keeps one colour on its markers, its line and its row in the list.
 _SHANK_COLORS = [
     "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
     "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990", "#9a6324",
     "#800000", "#808000", "#000075", "#a9a9a9",
 ]
 
+# A press that moves less than this (screen pixels) before release is a click,
+# not a pan.
+_CLICK_SLOP_PX = 5
+
+
+def _ray_to_box(start, direction, box) -> np.ndarray | None:
+    """Where the ray from ``start`` along ``direction`` leaves ``box``.
+
+    ``start`` and ``direction`` are (x, y); ``box`` is (x0, y0, x1, y1). None if
+    the direction is zero or the ray never meets the box.
+    """
+    d = np.asarray(direction, dtype=float)
+    p = np.asarray(start, dtype=float)
+    if not np.any(d):
+        return None
+    x0, y0, x1, y1 = (float(v) for v in box)
+    ts = []
+    for axis, lo, hi in ((0, x0, x1), (1, y0, y1)):
+        if d[axis] > 0:
+            ts.append((hi - p[axis]) / d[axis])
+        elif d[axis] < 0:
+            ts.append((lo - p[axis]) / d[axis])
+    ts = [t for t in ts if t > 0]
+    if not ts:
+        return None
+    return p + min(ts) * d
+
+
+def track_segments(tip, tip_box, entry, entry_box) -> list[tuple[np.ndarray, np.ndarray]]:
+    """The line segments drawn for one track, as ((x, y), (x, y)) pairs.
+
+    ``tip``/``entry`` are (x, y) slide pixels (or None); ``tip_box``/``entry_box``
+    the (x0, y0, x1, y1) boxes of the sections they are on (or None).
+
+    * Same section: tip -> entry -> on to the box edge.
+    * Different sections: on the tip's section, from the tip toward the entry as
+      placed at the same spot in this box, to the box edge; on the entry's section,
+      from the entry away from the tip (placed likewise) to the box edge.
+    """
+    if tip is None or entry is None:
+        return []
+    tip = np.asarray(tip, dtype=float)
+    entry = np.asarray(entry, dtype=float)
+    if tip_box is None or entry_box is None or tuple(tip_box) == tuple(entry_box):
+        box = tip_box or entry_box
+        end = _ray_to_box(entry, entry - tip, box) if box is not None else None
+        return [(tip, end if end is not None else entry)]
+    t0 = np.asarray(tip_box[:2], dtype=float)
+    e0 = np.asarray(entry_box[:2], dtype=float)
+    entry_here = t0 + (entry - e0)        # the entry, same place in the tip's box
+    tip_there = e0 + (tip - t0)           # the tip, same place in the entry's box
+    out = []
+    end = _ray_to_box(tip, entry_here - tip, tip_box)
+    if end is not None:
+        out.append((tip, end))
+    end = _ray_to_box(entry, entry - tip_there, entry_box)
+    if end is not None:
+        out.append((entry, end))
+    return out
+
+
+def _probe_cursor():
+    """A probe-shaped mouse cursor: a thin shank ending in a point (the hot spot)."""
+    from qtpy.QtCore import QPointF, Qt
+    from qtpy.QtGui import QColor, QCursor, QPainter, QPen, QPixmap, QPolygonF
+
+    pm = QPixmap(32, 32)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    shank = QPolygonF([QPointF(13, 1), QPointF(19, 1), QPointF(19, 22),
+                       QPointF(16, 31), QPointF(13, 22)])
+    painter.setPen(QPen(QColor("black"), 2))
+    painter.setBrush(QColor("white"))
+    painter.drawPolygon(shank)
+    painter.setPen(QPen(QColor("black"), 1))
+    for y in (6, 11, 16):                      # recording sites, so it reads as a probe
+        painter.drawPoint(16, y)
+    painter.end()
+    return QCursor(pm, 16, 31)
+
 
 class ClickOverlayWidget(QWidget):
-    """Mode selector + point table for tip/entry annotation."""
+    """Add / select / move / remove each shank's track (tip + entry + line)."""
 
     def __init__(
         self,
@@ -81,22 +155,23 @@ class ClickOverlayWidget(QWidget):
         self._viewer = viewer
         self._tip_layer: napari.layers.Points | None = None
         self._entry_layer: napari.layers.Points | None = None
-        self._track_layer: napari.layers.Points | None = None
-        self._traj_layer: napari.layers.Shapes | None = None
-        # Suppress the data-changed handlers while we set marker data in bulk.
-        self._suppress_store = False
-        # Track point counts so a data event can tell an *add* from a move/delete.
-        self._tip_count = 0
-        self._entry_count = 0
-        self._track_count = 0
-        # Per-slide tissue-mask cache for trajectory→surface intersection.
-        self._mask_cache: tuple[int, np.ndarray] | None = None
+        self._line_layer: napari.layers.Shapes | None = None
+        self._preview_layer: napari.layers.Points | None = None
+        # None, or the marker being placed: "tip" then "entry".
+        self._adding: str | None = None
+        self._pending_tip: tuple[float, float] | None = None   # (x, y)
+        self._selected: tuple[int, int] | None = None          # (probe, shank)
         self._build_ui()
-        # NOTE: the Tips/Entries Points layers are created lazily (the first time
-        # the user arms tip/entry), not here - adding empty Points layers at
-        # launch made vispy try to draw a Markers visual with no data, which on
-        # some Windows GPUs triggered shader / framebuffer errors before a slide
-        # was even loaded.
+        # The marker layers are created on first use, not here: empty Points
+        # layers at launch made vispy draw a Markers visual with no data, which
+        # on some Windows GPUs raised shader / framebuffer errors.
+        drag = getattr(viewer, "mouse_drag_callbacks", None)
+        if drag is not None:
+            drag.append(self._on_mouse_drag)
+        move = getattr(viewer, "mouse_move_callbacks", None)
+        if move is not None:
+            move.append(self._on_mouse_move)
+        self._install_key_filter()
 
     # ------------------------------------------------------------------
     # UI
@@ -105,71 +180,13 @@ class ClickOverlayWidget(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-
         # First thing in the panel, so no gap above it.
-        layout.addWidget(section_header("Probe markers", top_margin=0))
+        layout.addWidget(section_header("Probe tracks", top_margin=0))
 
-        mode_row = QHBoxLayout()
-        # "Mode" said nothing about what it selected; these radios choose which
-        # kind of marker a click on the section places.
-        mode_row.addWidget(QLabel("Marker type:"))
-        self._mode_tip = QRadioButton("Tip")
-        self._mode_tip.setChecked(True)
-        self._mode_entry = QRadioButton("Entry")
-        self._mode_track = QRadioButton("Track point")
-        self._mode_track.setToolTip(
-            "Extra points along a shank's track, for when the dye shows more than the "
-            "tip.\nUnlike Tip and Entry there can be any number per shank, and none is "
-            "perfectly fine - with no track points the shank is the straight tip-entry "
-            "line exactly as before.\nSet Shank to 'Unassigned' for a dye point you "
-            "cannot attribute to a particular shank: it is kept, but never bends a "
-            "track it may not belong to."
-        )
-        mode_grp = QButtonGroup(self)
-        mode_grp.addButton(self._mode_tip)
-        mode_grp.addButton(self._mode_entry)
-        mode_grp.addButton(self._mode_track)
-        mode_row.addWidget(self._mode_tip)
-        mode_row.addWidget(self._mode_entry)
-        mode_row.addWidget(self._mode_track)
-        layout.addLayout(mode_row)
-
-        # Selecting a mode immediately arms the matching viewer tool - no extra
-        # button press needed. ``clicked`` fires even when the radio is already
-        # checked, so re-arming after a discard/draw action still works.
-        for btn in (self._mode_tip, self._mode_entry, self._mode_track):
-            btn.toggled.connect(self._activate_pick_mode)
-            btn.clicked.connect(self._activate_pick_mode)
-
-        entry_row = QHBoxLayout()
-        entry_row.addWidget(QLabel("Entry via:"))
-        self._entry_marker = QRadioButton("Marker")
-        self._entry_marker.setChecked(True)
-        self._entry_line = QRadioButton("Trajectory line")
-        entry_grp = QButtonGroup(self)
-        entry_grp.addButton(self._entry_marker)
-        entry_grp.addButton(self._entry_line)
-        self._entry_marker.setToolTip("Click the brain surface to drop the entry point.")
-        self._entry_line.setToolTip(
-            "Draw the probe trajectory as a line; the entry point is where it\n"
-            "first crosses the tissue surface."
-        )
-        entry_row.addWidget(self._entry_marker)
-        entry_row.addWidget(self._entry_line)
-        layout.addLayout(entry_row)
-        for btn in (self._entry_marker, self._entry_line):
-            btn.toggled.connect(self._activate_pick_mode)
-            btn.clicked.connect(self._activate_pick_mode)
-
-        # Select probe + shank by label (consistent with the Ephys tab).
         probe_row = QHBoxLayout()
         probe_row.addWidget(QLabel("Probe:"))
         self._probe_combo = QComboBox()
-        self._probe_combo.setToolTip(
-            "Selects which probe you're picking for - and highlights that probe's "
-            "existing tip/entry markers (big, white halo) so you can find them; the "
-            "other probes' markers shrink."
-        )
+        self._probe_combo.setToolTip("The probe the next track is added to.")
         self._probe_combo.currentIndexChanged.connect(self._on_probe_changed)
         probe_row.addWidget(self._probe_combo, 1)
         layout.addLayout(probe_row)
@@ -177,57 +194,46 @@ class ClickOverlayWidget(QWidget):
         shank_row = QHBoxLayout()
         shank_row.addWidget(QLabel("Shank:"))
         self._shank_combo = QComboBox()
-        # Shank change only re-targets new markers; it must NOT repopulate the
-        # shank combo (that would recurse).
-        self._shank_combo.currentIndexChanged.connect(self._apply_current_identity)
+        self._shank_combo.setToolTip("The shank the next track is added to.")
         shank_row.addWidget(self._shank_combo, 1)
-        # A separate control rather than an "Unassigned" row in the shank combo:
-        # several places read the combo's *index* as the shank index, so adding a
-        # row would shift every shank by one and silently mis-assign tips/entries.
-        self._unassigned_check = QCheckBox("Unassigned")
-        self._unassigned_check.setToolTip(
-            "For a dye point you cannot attribute to a particular shank. It is stored "
-            "on the probe and kept for later, but never used to bend a shank's track - "
-            "a wrong attribution is worse than an unused point.\n"
-            "Applies to Track point mode only."
-        )
-        self._unassigned_check.setEnabled(False)
-        shank_row.addWidget(self._unassigned_check)
         layout.addLayout(shank_row)
-        self._mode_track.toggled.connect(self._unassigned_check.setEnabled)
         self._refresh_probe_combo()
 
-        # Edit / delete controls.
-        edit_row = QHBoxLayout()
-        self._select_btn = QPushButton("Select / move")
-        self._select_btn.setCheckable(True)
-        self._select_btn.setToolTip(
-            "Enter select mode: drag a marker to reposition it, or click to select "
-            "(Shift-click for several), then Delete or 'Clear selected' to remove. "
-            "Turn off to go back to dropping new points."
+        self._add_btn = QPushButton("Add track")
+        self._add_btn.setCheckable(True)
+        self._add_btn.setToolTip(
+            "Place a track for the Probe and Shank above: click the tip (where the "
+            "shank ends), then the entry (where it went in). Esc cancels. A shank "
+            "that already has a track gets the new one instead.\n"
+            "To change a track later: click a marker or the line to select it, drag a "
+            "marker to move it, press Delete to remove the track."
         )
-        self._select_btn.toggled.connect(self._on_select_toggled)
-        edit_row.addWidget(self._select_btn)
-        clear_sel_btn = QPushButton("Clear selected")
-        clear_sel_btn.setToolTip("Remove only the currently selected marker(s).")
-        clear_sel_btn.clicked.connect(self._clear_selected)
-        edit_row.addWidget(clear_sel_btn)
-        layout.addLayout(edit_row)
+        self._add_btn.toggled.connect(self._on_add_toggled)
+        layout.addWidget(self._add_btn)
 
-        clear_btn = QPushButton("Clear all points")
-        clear_btn.clicked.connect(self._clear_points)
+        clear_btn = QPushButton("Clear all tracks")
+        clear_btn.setToolTip("Remove every track of every probe.")
+        clear_btn.clicked.connect(self._clear_tracks)
         layout.addWidget(clear_btn)
 
+        self._status = QLabel("")
+        self._status.setWordWrap(True)
+        layout.addWidget(self._status)
+
         self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["Probe", "Shank", "Type", "Coords (px)"])
+        self._table.setHorizontalHeaderLabels(["Probe", "Shank", "Tip (px)", "Entry (px)"])
         self._table.setMaximumHeight(200)
-        # Narrow columns by default: each fits its content (+ a stretchable last
-        # column for the coords), instead of four equal wide columns.
         header = self._table.horizontalHeader()
-        for col in range(3):
-            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        for col in range(2):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        for col in (2, 3):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
         self._table.verticalHeader().setDefaultSectionSize(20)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.cellClicked.connect(self._on_row_clicked)
         layout.addWidget(self._table)
         layout.addStretch()
 
@@ -252,136 +258,88 @@ class ClickOverlayWidget(QWidget):
     def _current_ps(self) -> tuple[int, int]:
         return self._probe_combo.currentIndex(), self._shank_combo.currentIndex()
 
-    @staticmethod
-    def _feature_array(features, name: str, n: int) -> np.ndarray:
-        """Read a feature column as a float array of length ``n`` (pad/truncate)."""
-        arr = np.zeros(n, dtype=float)
-        try:
-            vals = np.asarray(features[name], dtype=float)
-            m = min(len(vals), n)
-            arr[:m] = vals[:m]
-        except Exception:
-            pass
-        return arr
-
-    def _apply_current_identity(self, *_args) -> None:
-        """Default new markers to the selected shank (its colour is set on sync).
-
-        Only ``feature_defaults`` is touched - the actual per-shank colour is
-        applied by :meth:`_recolor` after each data change. (Setting
-        ``current_face_color`` here would drive napari's colour-swatch control and
-        can recurse, so we deliberately avoid it.)
-        """
-        p_idx, s_idx = self._current_ps()
-        if p_idx < 0 or s_idx < 0:
-            return
-        for layer in (self._tip_layer, self._entry_layer):
-            if layer is None:
-                continue
-            try:
-                layer.feature_defaults = {"p": p_idx, "s": s_idx}
-            except Exception:
-                pass
-
     def _on_probe_changed(self, *_args) -> None:
         self._refresh_shank_combo()
-        self._apply_current_identity()
-        # Highlight the newly-selected probe's tip/entry markers so they're easy to
-        # find (big + white halo); other probes shrink.
-        self._highlight_selected_probe()
 
     # ------------------------------------------------------------------
-    # Layer management
+    # Sizes (in slide pixels, so markers look alike at any slide resolution)
+    # ------------------------------------------------------------------
+
+    def _section_boxes(self) -> list:
+        slide_idx = self._state.active_slide_idx
+        slides = self._state.project.slides
+        if slide_idx is None or not 0 <= slide_idx < len(slides):
+            return []
+        return [s.bbox_px for s in slides[slide_idx].sections]
+
+    def _marker_size(self) -> float:
+        boxes = self._section_boxes()
+        if not boxes:
+            return 14.0
+        width = float(np.median([b[2] - b[0] for b in boxes]))
+        return max(10.0, width / 28.0)
+
+    def _line_width(self) -> float:
+        return max(1.5, self._marker_size() / 9.0)
+
+    # ------------------------------------------------------------------
+    # Layers
     # ------------------------------------------------------------------
 
     def _drop_stale_layer_refs(self) -> None:
         """Forget layer references that are no longer in the viewer.
 
-        A project close/clear empties ``viewer.layers`` but leaves these widget
-        attributes pointing at the removed layers. Operating on such a detached
-        layer means markers never draw and ``selection.active = layer`` warns
-        "not in the list" - so reset the refs and let them be recreated.
+        A project close empties ``viewer.layers`` but leaves these attributes
+        pointing at removed layers; drawing on those shows nothing.
         """
         layers = self._viewer.layers
-        if self._tip_layer is not None and self._tip_layer not in layers:
-            self._tip_layer = None
-        if self._entry_layer is not None and self._entry_layer not in layers:
-            self._entry_layer = None
-        if self._track_layer is not None and self._track_layer not in layers:
-            self._track_layer = None
-        if self._traj_layer is not None and self._traj_layer not in layers:
-            self._traj_layer = None
+        for attr in ("_tip_layer", "_entry_layer", "_line_layer", "_preview_layer"):
+            layer = getattr(self, attr)
+            if layer is not None and layer not in layers:
+                setattr(self, attr, None)
 
     def _ensure_points_layers(self) -> None:
-        """Create the Tips/Entries Points layers on first use (and wire events)."""
+        """Create (or find) the Tips / Entries / Probe tracks layers."""
         self._drop_stale_layer_refs()
-        if self._tip_layer is None:
-            if _LAYER_TIP in self._viewer.layers:
-                self._tip_layer = self._viewer.layers[_LAYER_TIP]  # type: ignore[assignment]
+        layers = self._viewer.layers
+        size = self._marker_size()
+        if self._line_layer is None:
+            if _LAYER_LINES in layers:
+                self._line_layer = layers[_LAYER_LINES]  # type: ignore[assignment]
             else:
-                self._tip_layer = self._viewer.add_points(
-                    blending=_OVERLAY_BLENDING,
-                    name=_LAYER_TIP, face_color="red", size=12, ndim=2, symbol="disc",
+                self._line_layer = self._viewer.add_shapes(
+                    blending=_OVERLAY_BLENDING, name=_LAYER_LINES, ndim=2,
+                    edge_width=self._line_width(), face_color="transparent",
                 )
-            self._tip_layer.events.data.connect(self._on_tip_data_changed)
-        if self._entry_layer is None:
-            if _LAYER_ENTRY in self._viewer.layers:
-                self._entry_layer = self._viewer.layers[_LAYER_ENTRY]  # type: ignore[assignment]
+        for attr, name, symbol in (("_tip_layer", _LAYER_TIP, "disc"),
+                                   ("_entry_layer", _LAYER_ENTRY, "triangle_up")):
+            if getattr(self, attr) is not None:
+                continue
+            if name in layers:
+                setattr(self, attr, layers[name])
             else:
-                self._entry_layer = self._viewer.add_points(
-                    blending=_OVERLAY_BLENDING,
-                    name=_LAYER_ENTRY, face_color="cyan", size=12, ndim=2,
-                    symbol="triangle_up",
-                )
-            self._entry_layer.events.data.connect(self._on_entry_data_changed)
-        if self._track_layer is None:
-            if _LAYER_TRACK in self._viewer.layers:
-                self._track_layer = self._viewer.layers[_LAYER_TRACK]  # type: ignore[assignment]
-            else:
-                # A third symbol, so track points are distinguishable from tips
-                # (disc) and entries (triangle) at a glance, and smaller, because
-                # there can be many of them along one shank.
-                self._track_layer = self._viewer.add_points(
-                    blending=_OVERLAY_BLENDING,
-                    name=_LAYER_TRACK, face_color="white", size=9, ndim=2, symbol="x",
-                )
-            self._track_layer.events.data.connect(self._on_track_data_changed)
-        self._apply_current_identity()
-
-    def _ensure_traj_layer(self) -> napari.layers.Shapes:
-        """Create (or fetch) the trajectory Shapes layer used for line drawing."""
-        self._drop_stale_layer_refs()
-        if _LAYER_TRAJECTORY in self._viewer.layers:
-            self._traj_layer = self._viewer.layers[_LAYER_TRAJECTORY]  # type: ignore[assignment]
-        elif self._traj_layer is None:
-            self._traj_layer = self._viewer.add_shapes(
-                blending=_OVERLAY_BLENDING,
-                name=_LAYER_TRAJECTORY, edge_color="yellow", face_color="transparent",
-                edge_width=4,
-            )
-            self._traj_layer.events.data.connect(self._on_trajectory_changed)
-        return self._traj_layer
+                # Empty inside with a bright outline in the shank's colour, so the
+                # tissue under the marker stays visible.
+                setattr(self, attr, self._viewer.add_points(
+                    blending=_OVERLAY_BLENDING, name=name, ndim=2, symbol=symbol,
+                    size=size, face_color="transparent", border_width=0.22,
+                    border_width_is_relative=True,
+                ))
+        for layer in (self._line_layer, self._tip_layer, self._entry_layer):
+            try:
+                layer.mode = "pan_zoom"
+            except Exception:  # noqa: BLE001
+                pass
 
     def _bring_to_front(self, layer) -> None:
-        """Move ``layer`` to the top of the stack so its markers stay visible."""
+        """Move ``layer`` to the top of the stack so it stays visible."""
         layers = self._viewer.layers
         try:
             src = layers.index(layer)
             if src != len(layers) - 1:
                 layers.move(src, len(layers) - 1)
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
-
-    def arm_tip(self) -> None:
-        """Select Tip + Marker mode and arm the viewer (e.g. after Add probe)."""
-        self._refresh_probe_combo()
-        n_probes = len(self._state.project.probes)
-        if n_probes:
-            self._probe_combo.setCurrentIndex(n_probes - 1)
-        self._select_btn.setChecked(False)
-        self._mode_tip.setChecked(True)
-        self._entry_marker.setChecked(True)
-        self._activate_pick_mode()
 
     # ------------------------------------------------------------------
     # Probe / shank selectors
@@ -412,296 +370,412 @@ class ClickOverlayWidget(QWidget):
         if 0 <= cur < self._shank_combo.count():
             self._shank_combo.setCurrentIndex(cur)
 
-    def _activate_pick_mode(self, *_args) -> None:
-        """Arm the viewer tool that matches the current selection / select toggle."""
-        if self._select_btn.isChecked():
-            self._set_points_mode("select")
-            return
-        if self._mode_entry.isChecked() and self._entry_line.isChecked():
-            layer = self._ensure_traj_layer()
-            self._viewer.layers.selection.active = layer
-            self._bring_to_front(layer)
-            try:
-                layer.mode = "add_line"
-            except Exception:
-                layer.mode = "add_path"
-            return
+    def arm_tip(self) -> None:
+        """Start adding a track for the newest probe's first shank (after Add probe)."""
+        self._refresh_probe_combo()
+        n_probes = len(self._state.project.probes)
+        if n_probes:
+            self._probe_combo.setCurrentIndex(n_probes - 1)
+            self._shank_combo.setCurrentIndex(0)
+        self._add_btn.setChecked(True)
 
-        self._ensure_points_layers()
-        layer = self._tip_layer if self._mode_tip.isChecked() else self._entry_layer
-        if layer is None:
-            return
-        self._viewer.layers.selection.active = layer
-        self._bring_to_front(layer)
-        layer.mode = "add"
+    # ------------------------------------------------------------------
+    # Adding a track
+    # ------------------------------------------------------------------
 
-    def _set_points_mode(self, mode: str) -> None:
-        self._ensure_points_layers()
-        active = self._tip_layer if self._mode_tip.isChecked() else self._entry_layer
-        for layer in (self._tip_layer, self._entry_layer):
-            if layer is not None:
-                try:
-                    layer.mode = mode
-                except Exception:
-                    pass
-        if active is not None:
-            self._viewer.layers.selection.active = active
-            self._bring_to_front(active)
-
-    def _on_select_toggled(self, on: bool) -> None:
+    def _on_add_toggled(self, on: bool) -> None:
         if on:
-            self._set_points_mode("select")
+            self._start_add()
         else:
-            self._activate_pick_mode()
-        self._highlight_selected_probe()
+            self._stop_add()
 
-    # ------------------------------------------------------------------
-    # Point event handlers
-    # ------------------------------------------------------------------
-
-    def _on_tip_data_changed(self, event=None) -> None:
-        if self._suppress_store or self._tip_layer is None:
+    def _start_add(self) -> None:
+        p_idx, s_idx = self._current_ps()
+        if p_idx < 0 or s_idx < 0:
+            self._status.setText("Add a probe first (above).")
+            self._add_btn.blockSignals(True)
+            self._add_btn.setChecked(False)
+            self._add_btn.blockSignals(False)
             return
-        n = len(self._tip_layer.data)
-        added = n == self._tip_count + 1
-        self._sync_layer(self._tip_layer, "tip", added)
-        self._tip_count = len(self._tip_layer.data)
-
-    def _on_entry_data_changed(self, event=None) -> None:
-        if self._suppress_store or self._entry_layer is None:
-            return
-        n = len(self._entry_layer.data)
-        added = n == self._entry_count + 1
-        self._sync_layer(self._entry_layer, "entry", added)
-        self._entry_count = len(self._entry_layer.data)
-
-    def _on_track_data_changed(self, event=None) -> None:
-        if self._suppress_store or self._track_layer is None:
-            return
-        added = len(self._track_layer.data) == self._track_count + 1
-        self._sync_track_layer(added)
-        self._track_count = len(self._track_layer.data)
-
-    def _sync_track_layer(self, added: bool) -> None:
-        """Rewrite the track picks from the layer.
-
-        Deliberately **not** routed through :meth:`_sync_layer`: that one enforces one
-        marker per shank (newest wins), which is exactly wrong here - a track carries
-        as many points as the dye reveals, and de-duplicating them would silently
-        discard all but the last. The two also differ in that a track point may be
-        *unassigned*, which no tip or entry can be.
-        """
-        layer = self._track_layer
-        if layer is None:
-            return
-        data = np.asarray(layer.data, dtype=float)
-        feats = layer.features
-        p_idx = list(np.asarray(feats.get("p", np.zeros(len(data))), dtype=int)) \
-            if len(data) else []
-        s_idx = list(np.asarray(feats.get("s", np.zeros(len(data))), dtype=int)) \
-            if len(data) else []
-        if added and len(data):
-            probe_pos, shank_pos = self._current_ps()
-            if self._unassigned_check.isChecked():
-                shank_pos = _UNASSIGNED
-            if len(p_idx) < len(data):
-                p_idx = [*p_idx, probe_pos][: len(data)]
-                s_idx = [*s_idx, shank_pos][: len(data)]
-            else:
-                p_idx[-1], s_idx[-1] = probe_pos, shank_pos
-
-        from atlastrack.project.schema import TrackPick
-
-        probes = self._state.project.probes
-        for probe in probes:
-            probe.unassigned_track_picks = []
-            for shank in probe.shanks:
-                shank.track_picks = []
-        for (y, x), p, s in zip(data, p_idx, s_idx, strict=False):
-            if not 0 <= int(p) < len(probes):
-                continue
-            # Per point, not once for the layer: a track can cross sections, and
-            # picks on different sections are exactly what makes it 3D.
-            section_idx = self._find_section_for_point(float(x), float(y))
-            if section_idx is None:
-                continue
-            pick = TrackPick(point=Point2D(x_px=float(x), y_px=float(y)),
-                             section_idx=int(section_idx))
-            probe = probes[int(p)]
-            if int(s) == _UNASSIGNED or not 0 <= int(s) < len(probe.shanks):
-                probe.unassigned_track_picks.append(pick)
-            else:
-                probe.shanks[int(s)].track_picks.append(pick)
-
-        layer.features = {"p": np.array(p_idx, dtype=float),
-                          "s": np.array(s_idx, dtype=float)}
-        self._refresh_table()
-
-    def _sync_layer(self, layer, kind: str, added: bool) -> None:
-        """Two-way sync a Points layer with the schema after add/move/delete.
-
-        ``kind`` is ``"tip"`` or ``"entry"``. On *add* the new (last) point is
-        assigned to the currently selected shank; points are then deduped to one
-        per shank (newest wins), the schema is rewritten from the points, and the
-        per-shank colours are reapplied.
-        """
-        data = np.asarray(layer.data, dtype=float)
-        n = len(data)
-
-        # Guard against a stale / incomplete layer silently wiping committed
-        # markers. _sync_layer rewrites the schema from the layer's points (it first
-        # clears EVERY shank's px of this kind), so if the layer is missing markers
-        # it should hold - e.g. a layer-list reset left it partial - the rewrite
-        # would null real tip_px/entry_px while their CCF survives (the "only Probe A
-        # reloaded" bug). A genuine edit changes the count by at most one; if 2+
-        # markers vanished on a non-add event, repopulate from the schema instead.
-        n_schema = sum(
-            1
-            for probe in self._state.project.probes
-            for sh in probe.shanks
-            if (sh.tip_px if kind == "tip" else sh.entry_px) is not None
-        )
-        if not added and (n_schema - n) >= 2:
-            self._rebuild_markers()
-            return
-
-        p_arr = self._feature_array(layer.features, "p", n)
-        s_arr = self._feature_array(layer.features, "s", n)
-        if added and n >= 1:
-            cp, cs = self._current_ps()
-            p_arr[-1], s_arr[-1] = float(cp), float(cs)
-
-        # One marker of this kind per shank: keep the newest for each (p, s).
-        keep: dict[tuple[int, int], int] = {}
-        for i in range(n):
-            keep[(int(p_arr[i]), int(s_arr[i]))] = i
-        keep_idx = sorted(keep.values())
-
-        # Rewrite the schema from the kept points.
-        probes = self._state.project.probes
-        for probe in probes:
-            for shank in probe.shanks:
-                if kind == "tip":
-                    shank.tip_px, shank.tip_section_idx = None, None
-                else:
-                    shank.entry_px, shank.entry_section_idx = None, None
-        for i in keep_idx:
-            p, s = int(p_arr[i]), int(s_arr[i])
-            if not (0 <= p < len(probes)) or not (0 <= s < len(probes[p].shanks)):
-                continue
-            y, x = float(data[i][0]), float(data[i][1])
-            shank = probes[p].shanks[s]
-            sec = self._find_section_for_point(x, y)
-            if kind == "tip":
-                shank.tip_px, shank.tip_section_idx = Point2D(x_px=x, y_px=y), sec
-            else:
-                shank.entry_px, shank.entry_section_idx = Point2D(x_px=x, y_px=y), sec
-
-        # Push the cleaned points + colours back to the layer (suppressed).
-        self._suppress_store = True
-        try:
-            if len(keep_idx) != n:
-                layer.data = data[keep_idx]
-            layer.features = {"p": p_arr[keep_idx], "s": s_arr[keep_idx]}
-            self._recolor(layer)
-        finally:
-            self._suppress_store = False
-        self._refresh_table()
-
-    def _recolor(self, layer) -> None:
-        """Colour each point by its shank's global ordinal (tip & entry match), and
-        highlight the currently-selected probe's points (bigger + white outline)."""
-        n = len(layer.data)
-        if n == 0:
-            return
-        p_arr = self._feature_array(layer.features, "p", n)
-        s_arr = self._feature_array(layer.features, "s", n)
-        ordinals = self._shank_ordinals()
-        colors = [
-            _SHANK_COLORS[ordinals.get((int(p_arr[i]), int(s_arr[i])), 0) % len(_SHANK_COLORS)]
-            for i in range(n)
-        ]
-        p_sel = self._probe_combo.currentIndex()
-        selected = p_arr.astype(int) == int(p_sel)
-        # Selected probe: large with a thick white halo; others: small + thin.
-        borders = ["#ffffff" if selected[i] else colors[i] for i in range(n)]
-        sizes = np.where(selected, 28.0, 8.0)
-        widths = np.where(selected, 0.55, 0.06)  # relative border width
-        try:
-            layer.face_color = colors
-            layer.border_color = borders
-            layer.size = sizes
-            layer.border_width = widths
-        except Exception:
-            pass
-
-    def _highlight_selected_probe(self) -> None:
-        """Re-apply the per-probe styling so the current probe's markers pop."""
-        for layer in (self._tip_layer, self._entry_layer):
-            if layer is not None and len(layer.data):
-                self._recolor(layer)
-
-    def _on_trajectory_changed(self, event=None) -> None:
-        """When a trajectory line is drawn, derive the surface entry point."""
-        if self._traj_layer is None or len(self._traj_layer.data) == 0:
-            return
-        line = np.asarray(self._traj_layer.data[-1])  # (n_pts, 2) [row, col]
-        if line.shape[0] < 2:
-            return
-        entry = self._line_surface_crossing(line[0], line[-1])
-        if entry is None:
-            return
-        ex, ey = entry
         self._ensure_points_layers()
-        if self._entry_layer is not None:
-            self._entry_layer.data = np.vstack([self._entry_layer.data, [[ey, ex]]])
-            self._bring_to_front(self._entry_layer)
+        self._adding = "tip"
+        self._pending_tip = None
+        if self._line_layer is not None:
+            self._viewer.layers.selection.active = self._line_layer
+        self._set_canvas_cursor(_probe_cursor())
+        label = self._state.project.probes[p_idx].label
+        self._status.setText(f"{_TIP_PROMPT} - {label}, shank {s_idx}. Esc cancels.")
+
+    def _stop_add(self) -> None:
+        self._adding = None
+        self._pending_tip = None
+        self._clear_preview()
+        self._set_canvas_cursor(None)
+        from qtpy.QtWidgets import QToolTip
+
+        QToolTip.hideText()
+        if self._add_btn.isChecked():
+            self._add_btn.blockSignals(True)
+            self._add_btn.setChecked(False)
+            self._add_btn.blockSignals(False)
+
+    def _cancel_add(self) -> None:
+        self._stop_add()
+        self._status.setText("Track not added.")
+
+    def _place(self, x: float, y: float) -> None:
+        """A click while adding: the tip first, then the entry (which completes it)."""
+        if self._adding == "tip":
+            self._pending_tip = (x, y)
+            self._adding = "entry"
+            self._status.setText(f"{_ENTRY_PROMPT}. Esc cancels.")
+            self._update_preview(x, y)
+            return
+        if self._adding != "entry" or self._pending_tip is None:
+            return
+        p_idx, s_idx = self._current_ps()
+        shank = self._state.project.probes[p_idx].shanks[s_idx]
+        tx, ty = self._pending_tip
+        shank.tip_px = Point2D(x_px=float(tx), y_px=float(ty))
+        shank.tip_section_idx = self._find_section_for_point(tx, ty)
+        shank.entry_px = Point2D(x_px=float(x), y_px=float(y))
+        shank.entry_section_idx = self._find_section_for_point(x, y)
+        self._selected = (p_idx, s_idx)
+        self._stop_add()
+        self._rebuild_markers()
+        self._refresh_table()
+        label = self._state.project.probes[p_idx].label
+        self._status.setText(f"Track added: {label}, shank {s_idx}.")
 
     # ------------------------------------------------------------------
-    # Trajectory → tissue-surface intersection
+    # Preview (dotted line from the tip to the cursor) and the cursor
     # ------------------------------------------------------------------
 
-    def _tissue_mask(self) -> np.ndarray | None:
-        """Binary tissue mask for the active slide (cached)."""
-        slide_idx = self._state.active_slide_idx
-        if slide_idx is None:
-            return None
-        img = self._state.slide_images.get(slide_idx)
-        if img is None:
-            return None
-        if self._mask_cache is not None and self._mask_cache[0] == slide_idx:
-            return self._mask_cache[1]
-        from atlastrack.sectioning.split import _binarize, _to_gray
+    def _update_preview(self, x: float, y: float) -> None:
+        if self._adding != "entry" or self._pending_tip is None:
+            return
+        tip = np.array(self._pending_tip, dtype=float)
+        end = np.array([x, y], dtype=float)
+        length = float(np.linalg.norm(end - tip))
+        spacing = self._line_width() * 3.0
+        n = max(2, int(length / spacing) + 1)
+        pts = tip[None, :] + np.linspace(0.0, 1.0, n)[:, None] * (end - tip)[None, :]
+        data = pts[:, ::-1]                        # (y, x) for napari
+        color = self._color_for(*self._current_ps())
+        self._drop_stale_layer_refs()
+        if self._preview_layer is None:
+            self._preview_layer = self._viewer.add_points(
+                data, blending=_OVERLAY_BLENDING, name=_LAYER_PREVIEW, ndim=2,
+                size=self._line_width() * 1.4, face_color=color, border_width=0,
+            )
+        else:
+            self._preview_layer.data = data
+            self._preview_layer.face_color = color
+        if self._line_layer is not None:
+            self._viewer.layers.selection.active = self._line_layer
 
-        mask = _binarize(_to_gray(img))
-        self._mask_cache = (slide_idx, mask)
-        return mask
+    def _clear_preview(self) -> None:
+        self._drop_stale_layer_refs()
+        if self._preview_layer is not None:
+            try:
+                self._viewer.layers.remove(self._preview_layer)
+            except Exception:  # noqa: BLE001
+                pass
+            self._preview_layer = None
 
-    def _line_surface_crossing(
-        self, a: np.ndarray, b: np.ndarray
-    ) -> tuple[float, float] | None:
-        """Return the (x, y) where segment a→b first enters tissue."""
-        mask = self._tissue_mask()
-        if mask is None:
+    def _canvas_widget(self):
+        try:
+            return self._viewer.window._qt_viewer.canvas.native
+        except Exception:  # noqa: BLE001 - headless / fake viewer
             return None
-        h, w = mask.shape
-        n = 256
-        ts = np.linspace(0.0, 1.0, n)
-        rows = a[0] + ts * (b[0] - a[0])
-        cols = a[1] + ts * (b[1] - a[1])
-        ri = np.clip(np.round(rows).astype(int), 0, h - 1)
-        ci = np.clip(np.round(cols).astype(int), 0, w - 1)
-        inside = mask[ri, ci]
 
-        transitions = np.flatnonzero((~inside[:-1]) & inside[1:]) + 1
-        if len(transitions):
-            idx = transitions[0] if not inside[0] else transitions[-1]
-            return float(cols[idx]), float(rows[idx])
-        if not inside[0]:
-            return float(a[1]), float(a[0])
-        if not inside[-1]:
-            return float(b[1]), float(b[0])
-        return float(a[1]), float(a[0])
+    def _set_canvas_cursor(self, cursor) -> None:
+        widget = self._canvas_widget()
+        if widget is None:
+            return
+        if cursor is None:
+            widget.unsetCursor()
+            try:   # let napari put back the cursor its own mode wants
+                style = self._viewer.cursor.style
+                self._viewer.cursor.style = "standard"
+                self._viewer.cursor.style = style
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            widget.setCursor(cursor)
+
+    # ------------------------------------------------------------------
+    # Mouse
+    # ------------------------------------------------------------------
+
+    def _interactive(self) -> bool:
+        """Clicks on the canvas are ours while adding, or while the Probes tab shows."""
+        return self._adding is not None or self.isVisible()
+
+    @staticmethod
+    def _event_xy(event) -> tuple[float, float]:
+        y, x = (float(v) for v in event.position[-2:])
+        return x, y
+
+    def _on_mouse_move(self, _viewer, event) -> None:
+        if self._adding is None:
+            return
+        x, y = self._event_xy(event)
+        if self._adding == "entry":
+            self._update_preview(x, y)
+        from qtpy.QtGui import QCursor
+        from qtpy.QtWidgets import QToolTip
+
+        prompt = _TIP_PROMPT if self._adding == "tip" else _ENTRY_PROMPT
+        QToolTip.showText(QCursor.pos(), prompt, self._canvas_widget())
+
+    def _on_mouse_drag(self, _viewer, event):
+        """Click to place (while adding) or select; drag a marker to move it."""
+        if not self._interactive() or getattr(event, "button", 1) != 1:
+            return
+        start_screen = np.asarray(getattr(event, "pos", (0, 0)), dtype=float)
+        x, y = self._event_xy(event)
+
+        if self._adding is not None:
+            # Drags still pan the view; only a click (press + release in place) places.
+            moved = False
+            yield
+            while event.type == "mouse_move":
+                if np.linalg.norm(np.asarray(event.pos, dtype=float) - start_screen) > _CLICK_SLOP_PX:
+                    moved = True
+                yield
+            if not moved:
+                self._place(x, y)
+            return
+
+        hit = self._hit_test(x, y)
+        if hit is None:
+            return
+        p_idx, s_idx, kind = hit
+        self._select_track(p_idx, s_idx)
+        if kind not in ("tip", "entry"):
+            return
+        # Drag the marker: stop the view panning while it moves.
+        try:
+            self._viewer.camera.mouse_pan = False
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            yield
+            while event.type == "mouse_move":
+                mx, my = self._event_xy(event)
+                self._move_marker(p_idx, s_idx, kind, mx, my, commit=False)
+                yield
+            mx, my = self._event_xy(event)
+            if np.linalg.norm(np.asarray(event.pos, dtype=float) - start_screen) > _CLICK_SLOP_PX:
+                self._move_marker(p_idx, s_idx, kind, mx, my, commit=True)
+        finally:
+            try:
+                self._viewer.camera.mouse_pan = True
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _hit_test(self, x: float, y: float) -> tuple[int, int, str] | None:
+        """The (probe, shank, 'tip'|'entry'|'line') under a click, or None."""
+        radius = self._marker_size() * 0.7
+        best = None
+        for p_idx, probe in enumerate(self._state.project.probes):
+            for s_idx, shank in enumerate(probe.shanks):
+                for kind, pt in (("tip", shank.tip_px), ("entry", shank.entry_px)):
+                    if pt is None:
+                        continue
+                    d = float(np.hypot(pt.x_px - x, pt.y_px - y))
+                    if d <= radius and (best is None or d < best[0]):
+                        best = (d, p_idx, s_idx, kind)
+        if best is not None:
+            return best[1], best[2], best[3]
+        tol = max(self._line_width() * 2.0, self._marker_size() * 0.35)
+        p = np.array([x, y], dtype=float)
+        for p_idx, probe in enumerate(self._state.project.probes):
+            for s_idx, _shank in enumerate(probe.shanks):
+                for a, b in self._segments_for(p_idx, s_idx):
+                    ab = b - a
+                    denom = float(ab @ ab)
+                    t = 0.0 if denom == 0 else float(np.clip((p - a) @ ab / denom, 0, 1))
+                    d = float(np.linalg.norm(p - (a + t * ab)))
+                    if d <= tol and (best is None or d < best[0]):
+                        best = (d, p_idx, s_idx, "line")
+        return None if best is None else (best[1], best[2], best[3])
+
+    def _move_marker(self, p_idx, s_idx, kind, x, y, *, commit: bool) -> None:
+        shank = self._state.project.probes[p_idx].shanks[s_idx]
+        pt = Point2D(x_px=float(x), y_px=float(y))
+        if kind == "tip":
+            shank.tip_px = pt
+            if commit:
+                shank.tip_section_idx = self._find_section_for_point(x, y)
+        else:
+            shank.entry_px = pt
+            if commit:
+                shank.entry_section_idx = self._find_section_for_point(x, y)
+        self._rebuild_markers()
+        if commit:
+            self._refresh_table()
+
+    # ------------------------------------------------------------------
+    # Selection and removal
+    # ------------------------------------------------------------------
+
+    def _select_track(self, p_idx: int, s_idx: int) -> None:
+        self._selected = (p_idx, s_idx)
+        self._probe_combo.setCurrentIndex(p_idx)
+        self._shank_combo.setCurrentIndex(s_idx)
+        self._rebuild_markers()
+        self._refresh_table()
+        label = self._state.project.probes[p_idx].label
+        self._status.setText(
+            f"Selected: {label}, shank {s_idx}. Drag a marker to move it; Delete removes "
+            "the track."
+        )
+
+    def _on_row_clicked(self, row: int, _col: int) -> None:
+        item = self._table.item(row, 0)
+        if item is None:
+            return
+        from qtpy.QtCore import Qt
+
+        key = item.data(Qt.ItemDataRole.UserRole)
+        if key:
+            self._select_track(int(key[0]), int(key[1]))
+
+    def _delete_selected(self) -> bool:
+        if self._selected is None:
+            return False
+        p_idx, s_idx = self._selected
+        probes = self._state.project.probes
+        if not (0 <= p_idx < len(probes) and 0 <= s_idx < len(probes[p_idx].shanks)):
+            self._selected = None
+            return False
+        shank = probes[p_idx].shanks[s_idx]
+        shank.tip_px = shank.tip_section_idx = None
+        shank.entry_px = shank.entry_section_idx = None
+        self._selected = None
+        self._rebuild_markers()
+        self._refresh_table()
+        self._status.setText(f"Track removed: {probes[p_idx].label}, shank {s_idx}.")
+        return True
+
+    def _install_key_filter(self) -> None:
+        """Esc cancels adding; Delete / Backspace removes the selected track."""
+        widget = self._canvas_widget()
+        if widget is None:
+            return
+        from qtpy.QtCore import QEvent, QObject, Qt
+
+        overlay = self
+
+        class _Keys(QObject):
+            def eventFilter(self, obj, event) -> bool:  # noqa: N802 - Qt name
+                if event.type() != QEvent.Type.KeyPress:
+                    return False
+                key = event.key()
+                if key == Qt.Key.Key_Escape and overlay._adding is not None:
+                    overlay._cancel_add()
+                    return True
+                if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and overlay._interactive():
+                    return overlay._delete_selected()
+                return False
+
+        self._key_filter = _Keys(self)
+        widget.installEventFilter(self._key_filter)
+
+    def _clear_tracks(self) -> None:
+        n = sum(1 for p in self._state.project.probes for s in p.shanks
+                if s.tip_px is not None or s.entry_px is not None)
+        if n and self.isVisible():
+            from qtpy.QtWidgets import QMessageBox
+
+            answer = QMessageBox.question(
+                self, "Clear all tracks", f"Remove all {n} track(s) of every probe?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._stop_add()
+        for probe in self._state.project.probes:
+            for shank in probe.shanks:
+                shank.tip_px = shank.tip_section_idx = None
+                shank.entry_px = shank.entry_section_idx = None
+        self._selected = None
+        self._rebuild_markers()
+        self._refresh_table()
+
+    # ------------------------------------------------------------------
+    # Drawing
+    # ------------------------------------------------------------------
+
+    def _box_of(self, section_idx: int | None):
+        if section_idx is None:
+            return None
+        for slide in self._state.project.slides:
+            for section in slide.sections:
+                if section.index == section_idx:
+                    return section.bbox_px
+        return None
+
+    def _segments_for(self, p_idx: int, s_idx: int) -> list:
+        shank = self._state.project.probes[p_idx].shanks[s_idx]
+        if shank.tip_px is None or shank.entry_px is None:
+            return []
+        tip_box = self._box_of(shank.tip_section_idx)
+        entry_box = self._box_of(shank.entry_section_idx)
+        return track_segments((shank.tip_px.x_px, shank.tip_px.y_px), tip_box,
+                              (shank.entry_px.x_px, shank.entry_px.y_px), entry_box)
+
+    def refresh_after_load(self) -> None:
+        """Redraw the tracks and the list from a freshly-loaded project."""
+        self._stop_add()
+        self._selected = None
+        self._drop_stale_layer_refs()
+        self._refresh_probe_combo()
+        self._rebuild_markers()
+        self._refresh_table()
+
+    def _rebuild_markers(self) -> None:
+        """Redraw markers and lines (colour per shank; the selected track larger)."""
+        tips, tip_c, tip_sel = [], [], []
+        entries, ent_c, ent_sel = [], [], []
+        lines, line_c, line_w = [], [], []
+        size, width = self._marker_size(), self._line_width()
+        for p_idx, probe in enumerate(self._state.project.probes):
+            for s_idx, shank in enumerate(probe.shanks):
+                color = self._color_for(p_idx, s_idx)
+                selected = self._selected == (p_idx, s_idx)
+                if shank.tip_px is not None:
+                    tips.append([shank.tip_px.y_px, shank.tip_px.x_px])
+                    tip_c.append(color)
+                    tip_sel.append(selected)
+                if shank.entry_px is not None:
+                    entries.append([shank.entry_px.y_px, shank.entry_px.x_px])
+                    ent_c.append(color)
+                    ent_sel.append(selected)
+                for a, b in self._segments_for(p_idx, s_idx):
+                    lines.append(np.array([[a[1], a[0]], [b[1], b[0]]]))
+                    line_c.append(color)
+                    line_w.append(width * (2.0 if selected else 1.0))
+        if not tips and not entries and self._tip_layer is None:
+            return  # nothing to draw - avoid creating empty layers
+        self._ensure_points_layers()
+        for layer, pts, cols, sel in ((self._tip_layer, tips, tip_c, tip_sel),
+                                      (self._entry_layer, entries, ent_c, ent_sel)):
+            if layer is None:
+                continue
+            layer.data = np.array(pts, dtype=float) if pts else np.empty((0, 2))
+            if pts:
+                layer.face_color = "transparent"
+                layer.border_color = cols
+                layer.size = np.where(np.array(sel), size * 1.6, size)
+        if self._line_layer is not None:
+            self._line_layer.data = []
+            if lines:
+                self._line_layer.add_lines(lines, edge_color=line_c, edge_width=line_w)
+        for layer in (self._line_layer, self._tip_layer, self._entry_layer):
+            if layer is not None:
+                self._bring_to_front(layer)
 
     # ------------------------------------------------------------------
     # Section lookup
@@ -728,121 +802,31 @@ class ClickOverlayWidget(QWidget):
         return best_idx
 
     # ------------------------------------------------------------------
-    # Table refresh
+    # List
     # ------------------------------------------------------------------
 
     def _refresh_table(self) -> None:
+        from qtpy.QtCore import Qt
+        from qtpy.QtGui import QColor
+
         rows = []
-        for probe in self._state.project.probes:
-            for shank in probe.shanks:
-                if shank.tip_px is not None:
-                    rows.append((probe.label, shank.index, "tip", shank.tip_px))
-                if shank.entry_px is not None:
-                    rows.append((probe.label, shank.index, "entry", shank.entry_px))
-        self._table.setRowCount(len(rows))
-        for i, (label, s, t, pt) in enumerate(rows):
-            # Show the probe label (updates when a probe is renamed, since this is
-            # rebuilt on the on_probes_changed refresh), not a bare index.
-            self._table.setItem(i, 0, QTableWidgetItem(str(label)))
-            self._table.setItem(i, 1, QTableWidgetItem(str(s)))
-            self._table.setItem(i, 2, QTableWidgetItem(t))
-            self._table.setItem(i, 3, QTableWidgetItem(f"{pt.x_px:.1f}, {pt.y_px:.1f}"))
-
-    def refresh_after_load(self) -> None:
-        """Restore tip/entry markers + the table from a freshly-loaded project."""
-        self._mask_cache = None
-        self._drop_stale_layer_refs()
-        self._refresh_probe_combo()
-        self._rebuild_markers()
-        self._refresh_table()
-
-    def _rebuild_markers(self) -> None:
-        """Redraw the Tips/Entries point layers (with identity + colour) from schema."""
-        tips: list[list[float]] = []
-        tip_p: list[int] = []
-        tip_s: list[int] = []
-        entries: list[list[float]] = []
-        ent_p: list[int] = []
-        ent_s: list[int] = []
-        # Track points too: every edit rebuilds the shanks' track points from this
-        # layer, so leaving it empty after a load erased them on the first new point.
-        tracks: list[list[float]] = []
-        trk_p: list[int] = []
-        trk_s: list[int] = []
         for p_idx, probe in enumerate(self._state.project.probes):
             for s_idx, shank in enumerate(probe.shanks):
-                if shank.tip_px is not None:
-                    tips.append([shank.tip_px.y_px, shank.tip_px.x_px])
-                    tip_p.append(p_idx)
-                    tip_s.append(s_idx)
-                if shank.entry_px is not None:
-                    entries.append([shank.entry_px.y_px, shank.entry_px.x_px])
-                    ent_p.append(p_idx)
-                    ent_s.append(s_idx)
-                for pick in shank.track_picks or []:
-                    tracks.append([pick.point.y_px, pick.point.x_px])
-                    trk_p.append(p_idx)
-                    trk_s.append(s_idx)
-            for pick in probe.unassigned_track_picks or []:
-                tracks.append([pick.point.y_px, pick.point.x_px])
-                trk_p.append(p_idx)
-                trk_s.append(_UNASSIGNED)
-        if not tips and not entries and not tracks:
-            return  # nothing to draw - avoid creating empty layers
-        self._ensure_points_layers()
-        self._suppress_store = True
-        try:
-            self._set_layer(self._tip_layer, tips, tip_p, tip_s)
-            self._set_layer(self._entry_layer, entries, ent_p, ent_s)
-            self._set_layer(self._track_layer, tracks, trk_p, trk_s)
-        finally:
-            self._suppress_store = False
-        self._tip_count = len(tips)
-        self._entry_count = len(entries)
-        self._track_count = len(tracks)
-        for layer in (self._tip_layer, self._entry_layer, self._track_layer):
-            if layer is not None:
-                self._bring_to_front(layer)
-
-    def _set_layer(self, layer, pts, p_idx, s_idx) -> None:
-        if layer is None:
-            return
-        layer.data = np.array(pts, dtype=float) if pts else np.empty((0, 2))
-        layer.features = {"p": np.array(p_idx, dtype=float),
-                          "s": np.array(s_idx, dtype=float)}
-        self._recolor(layer)
-
-    # ------------------------------------------------------------------
-    # Clearing
-    # ------------------------------------------------------------------
-
-    def _clear_selected(self) -> None:
-        """Remove only the selected marker(s); their shanks are cleared via sync."""
-        for layer in (self._tip_layer, self._entry_layer):
-            if layer is None or not getattr(layer, "selected_data", None):
-                continue
-            try:
-                layer.remove_selected()  # fires data event -> _sync_layer
-            except Exception:
-                pass
-
-    def _clear_points(self) -> None:
-        self._suppress_store = True
-        try:
-            if self._tip_layer is not None:
-                self._tip_layer.data = np.empty((0, 2))
-            if self._entry_layer is not None:
-                self._entry_layer.data = np.empty((0, 2))
-            if self._traj_layer is not None:
-                self._traj_layer.data = []
-        finally:
-            self._suppress_store = False
-        self._tip_count = 0
-        self._entry_count = 0
-        for probe in self._state.project.probes:
-            for shank in probe.shanks:
-                shank.tip_px = None
-                shank.tip_section_idx = None
-                shank.entry_px = None
-                shank.entry_section_idx = None
-        self._refresh_table()
+                if shank.tip_px is None and shank.entry_px is None:
+                    continue
+                rows.append((p_idx, s_idx, probe.label, shank))
+        self._table.setRowCount(len(rows))
+        for i, (p_idx, s_idx, label, shank) in enumerate(rows):
+            color = QColor(self._color_for(p_idx, s_idx))
+            first = QTableWidgetItem(str(label))
+            first.setData(Qt.ItemDataRole.DecorationRole, color)   # colour swatch
+            first.setData(Qt.ItemDataRole.UserRole, (p_idx, s_idx))
+            cells = [first, QTableWidgetItem(str(shank.index))]
+            for pt in (shank.tip_px, shank.entry_px):
+                cells.append(QTableWidgetItem("" if pt is None else f"{pt.x_px:.0f}, {pt.y_px:.0f}"))
+            for col, item in enumerate(cells):
+                if col:
+                    item.setForeground(color)
+                self._table.setItem(i, col, item)
+            if self._selected == (p_idx, s_idx):
+                self._table.selectRow(i)

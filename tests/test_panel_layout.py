@@ -64,7 +64,7 @@ def test_histology_groups_run_adjustments_scope_flip_levels(qtbot) -> None:
     assert order == sorted(order), f"unexpected order: {labels}"
 
 
-def test_probes_tab_heads_the_marker_controls(qtbot) -> None:
+def test_probes_tab_heads_the_track_controls(qtbot) -> None:
     class _FakeViewer:
         layers: typing.ClassVar[list] = []
         mouse_drag_callbacks: typing.ClassVar[list] = []
@@ -73,11 +73,12 @@ def test_probes_tab_heads_the_marker_controls(qtbot) -> None:
     qtbot.addWidget(widget)
 
     labels = _labels(widget)
-    assert "Probe markers" in labels
-    # "Mode" said nothing about what it chose.
-    assert "Marker type:" in labels
-    assert "Mode:" not in labels
-    assert labels.index("Probe markers") < labels.index("Marker type:")
+    assert "Probe tracks" in labels
+    for gone in ("Marker type:", "Entry via:", "Select / move", "Clear selected"):
+        assert gone not in labels
+    assert labels.index("Probe tracks") < labels.index("Probe:")
+    buttons = [b.text() for b in widget.findChildren(QPushButton)]
+    assert buttons.index("Add track") < buttons.index("Clear all tracks")
 
 
 def test_landmark_preview_matches_the_normal_overlay_width() -> None:

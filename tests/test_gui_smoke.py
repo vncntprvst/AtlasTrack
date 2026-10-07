@@ -179,8 +179,8 @@ def test_register_panel_exit_landmark_edit(qtbot) -> None:
 
 
 @pytest.mark.qt
-def test_click_overlay_probe_highlight(qtbot) -> None:
-    """Selecting a probe enlarges its markers; the other probe's shrink."""
+def test_selected_track_is_drawn_larger(qtbot) -> None:
+    """Selecting a track enlarges its markers; the list shows probe labels."""
     import napari
     import numpy as np
 
@@ -190,25 +190,24 @@ def test_click_overlay_probe_highlight(qtbot) -> None:
     viewer = napari.Viewer(show=False)
     try:
         state = WorkflowState()
-        for lbl in ("A", "B"):
+        for i, lbl in enumerate(("A", "B")):
             state.project.probes.append(ProbeSpec(
                 label=lbl, type=ProbeType(name="np", n_shanks=1),
-                shanks=[Shank(index=0, tip_px=Point2D(x_px=10.0, y_px=20.0))],
+                shanks=[Shank(index=0, tip_px=Point2D(x_px=10.0 + 50 * i, y_px=80.0),
+                              entry_px=Point2D(x_px=10.0 + 50 * i, y_px=20.0))],
             ))
         widget = ClickOverlayWidget(state, viewer)
         qtbot.addWidget(widget)
         widget.refresh_after_load()
 
-        widget._probe_combo.setCurrentIndex(0)  # probe A selected
+        widget._select_track(0, 0)
         sizes = np.asarray(widget._tip_layer.size, dtype=float)
-        p = np.asarray(widget._tip_layer.features["p"], dtype=int)
-        assert sizes[p == 0].max() > sizes[p == 1].max()  # A big, B small
-        widget._probe_combo.setCurrentIndex(1)  # switch to B
+        assert sizes[0] > sizes[1]
+        widget._select_track(1, 0)
         sizes = np.asarray(widget._tip_layer.size, dtype=float)
-        assert sizes[p == 1].max() > sizes[p == 0].max()  # now B is big
+        assert sizes[1] > sizes[0]
+        assert widget._probe_combo.currentIndex() == 1
 
-        # The table's Probe column shows the label, not a numeric index.
-        widget._refresh_table()
         labels = {widget._table.item(r, 0).text() for r in range(widget._table.rowCount())}
         assert labels == {"A", "B"}
     finally:
@@ -709,7 +708,7 @@ def test_reload_restores_slide_flip(qtbot, tmp_path) -> None:
 
 
 @pytest.mark.qt
-def test_add_probe_arms_tip_mode(qtbot) -> None:
+def test_add_probe_starts_adding_its_track(qtbot) -> None:
     import napari
     from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
     from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
@@ -723,11 +722,10 @@ def test_add_probe_arms_tip_mode(qtbot) -> None:
         qtbot.addWidget(picker)
         picker.on_probe_added = overlay.arm_tip
         picker._add_probe()
-        # Tip + Marker selected and the Tips layer armed, no extra clicks needed.
-        assert overlay._mode_tip.isChecked()
-        assert overlay._entry_marker.isChecked()
-        assert viewer.layers.selection.active is overlay._tip_layer
-        assert overlay._tip_layer.mode == "add"
+        # The new probe's first shank, waiting for its tip - no extra clicks.
+        assert overlay._add_btn.isChecked()
+        assert overlay._adding == "tip"
+        assert overlay._current_ps() == (0, 0)
     finally:
         viewer.close()
 
@@ -885,16 +883,11 @@ def test_replacing_with_a_different_size_does_not_block_on_a_dialog(
 
 @pytest.mark.qt
 def test_markers_redraw_after_layers_cleared(qtbot) -> None:
-    """After the canvas is cleared (project close) the overlay must recreate its
-    Points layers on reload, not write to detached layers (markers vanished +
-    'Select / move' warned 'not in the list')."""
+    """After the canvas is cleared (project close) the tracks are redrawn on new
+    layers at reload, not on the detached old ones (markers used to vanish)."""
     import napari
 
-    from atlastrack.gui.widgets.click_overlay import (
-        _LAYER_ENTRY,
-        _LAYER_TIP,
-        ClickOverlayWidget,
-    )
+    from atlastrack.gui.widgets.click_overlay import _LAYER_ENTRY, ClickOverlayWidget
     from atlastrack.project.schema import Point2D, ProbeSpec, ProbeType, Shank
 
     viewer = napari.Viewer(show=False)
@@ -910,31 +903,22 @@ def test_markers_redraw_after_layers_cleared(qtbot) -> None:
         widget = ClickOverlayWidget(state, viewer)
         qtbot.addWidget(widget)
         widget.refresh_after_load()
-        assert _LAYER_ENTRY in viewer.layers
         assert len(viewer.layers[_LAYER_ENTRY].data) == 1
 
-        # Simulate a project close clearing the canvas (leaves stale layer refs).
-        viewer.layers.clear()
+        viewer.layers.clear()                 # a project close
         assert widget._entry_layer is not None  # stale reference retained
 
-        # Reload: the entry marker must be redrawn on a live, in-viewer layer.
         widget.refresh_after_load()
-        assert _LAYER_ENTRY in viewer.layers
         assert len(viewer.layers[_LAYER_ENTRY].data) == 1
         assert widget._entry_layer in viewer.layers
-
-        # Select / move can now activate the layer without "not in the list".
-        widget._select_btn.setChecked(True)
-        assert viewer.layers.selection.active in (
-            viewer.layers[_LAYER_TIP], viewer.layers[_LAYER_ENTRY])
+        assert widget._line_layer in viewer.layers
     finally:
         viewer.close()
 
 
 @pytest.mark.qt
-def test_sync_layer_does_not_wipe_markers_from_partial_layer(qtbot) -> None:
-    """A stale/partial marker layer must not null other probes' committed pixels
-    (the 'only Probe A reloaded' data-loss bug)."""
+def test_editing_one_track_leaves_the_others(qtbot) -> None:
+    """Moving or deleting one track must not touch any other probe's tracks."""
     import napari
 
     from atlastrack.gui.widgets.click_overlay import _LAYER_TIP, ClickOverlayWidget
@@ -948,34 +932,30 @@ def test_sync_layer_does_not_wipe_markers_from_partial_layer(qtbot) -> None:
         state.project.slides[0].sections.append(
             Section(index=0, slide_idx=0, bbox_px=(0, 0, 400, 400), ap_order=0))
         for label in ("ProbeA", "ProbeB"):
-            shanks = [Shank(index=i, tip_px=Point2D(x_px=10.0 + i, y_px=20.0 + i),
-                            tip_section_idx=0) for i in range(4)]
+            shanks = [Shank(index=i, tip_px=Point2D(x_px=40.0 + 30 * i, y_px=300.0),
+                            tip_section_idx=0,
+                            entry_px=Point2D(x_px=40.0 + 30 * i, y_px=100.0),
+                            entry_section_idx=0) for i in range(4)]
             state.project.probes.append(
-                ProbeSpec(label=label, type=ProbeType(name="NP2", n_shanks=4),
-                          shanks=shanks))
+                ProbeSpec(label=label, type=ProbeType(name="NP2", n_shanks=4), shanks=shanks))
 
         widget = ClickOverlayWidget(state, viewer)
         qtbot.addWidget(widget)
-        widget._rebuild_markers()
-        tip = viewer.layers[_LAYER_TIP]
-        assert len(tip.data) == 8  # both probes drawn
+        widget.refresh_after_load()
+        assert len(viewer.layers[_LAYER_TIP].data) == 8
 
-        def n_tip_px():
+        def n_tracks():
             return sum(1 for p in state.project.probes for s in p.shanks
-                       if s.tip_px is not None)
+                       if s.tip_px is not None and s.entry_px is not None)
 
-        assert n_tip_px() == 8
-
-        # Simulate the layer going partial (only ProbeA's 4) without firing sync.
-        widget._suppress_store = True
-        tip.data = np.asarray(tip.data)[:4]
-        tip.features = {"p": np.zeros(4), "s": np.arange(4, dtype=float)}
-        widget._suppress_store = False
-
-        # A sync on this partial layer must NOT wipe ProbeB's 4 markers.
-        widget._sync_layer(tip, "tip", added=False)
-        assert n_tip_px() == 8  # ProbeB preserved
-        assert len(viewer.layers[_LAYER_TIP].data) == 8  # layer repopulated
+        widget._move_marker(0, 1, "tip", 75.0, 310.0, commit=True)
+        assert n_tracks() == 8
+        widget._select_track(1, 2)
+        assert widget._delete_selected()
+        assert n_tracks() == 7
+        assert state.project.probes[1].shanks[2].tip_px is None
+        assert state.project.probes[0].shanks[1].tip_px.y_px == 310.0
+        assert len(viewer.layers[_LAYER_TIP].data) == 7
     finally:
         viewer.close()
 
@@ -1040,7 +1020,8 @@ def _color_of(layer, p_idx, s_idx):
 
 @pytest.mark.qt
 def test_markers_color_per_shank_and_one_per_shank(qtbot) -> None:
-    """Tip+entry of a shank share a colour; another shank cycles; one tip/shank."""
+    """A shank's tip, entry and line share a colour; another shank differs; adding
+    a track for a shank that has one replaces it."""
     import napari
     from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
 
@@ -1049,63 +1030,58 @@ def test_markers_color_per_shank_and_one_per_shank(qtbot) -> None:
         state = _two_shank_state()
         w = ClickOverlayWidget(state, viewer)
         qtbot.addWidget(w)
-        w._ensure_points_layers()
 
-        # Drop a tip for shank 0, then shank 1 (simulating clicks via layer.add).
-        w._probe_combo.setCurrentIndex(0)
-        w._shank_combo.setCurrentIndex(0)
-        w._tip_layer.add([[10.0, 20.0]])
-        w._shank_combo.setCurrentIndex(1)
-        w._tip_layer.add([[30.0, 40.0]])
+        def add(shank, tip, entry):
+            w._probe_combo.setCurrentIndex(0)
+            w._shank_combo.setCurrentIndex(shank)
+            w._add_btn.setChecked(True)
+            w._place(*tip)
+            w._place(*entry)
 
+        add(0, (20.0, 80.0), (22.0, 10.0))
+        add(1, (60.0, 80.0), (62.0, 10.0))
         shanks = state.project.probes[0].shanks
-        assert shanks[0].tip_px is not None and shanks[1].tip_px is not None
-        assert (shanks[0].tip_px.x_px, shanks[0].tip_px.y_px) == (20.0, 10.0)
-        # Two shanks -> two different colours.
-        c0 = _color_of(w._tip_layer, 0, 0)
-        c1 = _color_of(w._tip_layer, 0, 1)
-        assert c0 is not None and c1 is not None and not np.allclose(c0, c1)
+        assert (shanks[0].tip_px.x_px, shanks[0].tip_px.y_px) == (20.0, 80.0)
+        assert (shanks[1].entry_px.x_px, shanks[1].entry_px.y_px) == (62.0, 10.0)
 
-        # Entry for shank 0 shares shank 0's colour.
-        w._shank_combo.setCurrentIndex(0)
-        w._entry_layer.add([[12.0, 22.0]])
-        assert np.allclose(_color_of(w._entry_layer, 0, 0), c0)
+        tip_c = np.asarray(w._tip_layer.border_color)
+        ent_c = np.asarray(w._entry_layer.border_color)
+        assert not np.allclose(tip_c[0], tip_c[1])     # two shanks, two colours
+        assert np.allclose(tip_c[0], ent_c[0])         # tip and entry match
+        assert np.allclose(np.asarray(w._tip_layer.face_color)[:, 3], 0)  # empty inside
 
-        # A second tip for shank 0 REPLACES it (still one tip point per shank).
-        w._tip_layer.add([[50.0, 60.0]])
-        assert len(w._tip_layer.data) == 2  # shank0 (moved) + shank1, not 3
-        assert (shanks[0].tip_px.x_px, shanks[0].tip_px.y_px) == (60.0, 50.0)
+        add(0, (25.0, 85.0), (27.0, 12.0))             # replaces shank 0's track
+        assert len(w._tip_layer.data) == 2
+        assert (shanks[0].tip_px.x_px, shanks[0].tip_px.y_px) == (25.0, 85.0)
     finally:
         viewer.close()
 
 
 @pytest.mark.qt
-def test_markers_clear_selected_removes_one(qtbot) -> None:
+def test_delete_removes_only_the_selected_track(qtbot) -> None:
     import napari
     from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.project.schema import Point2D
 
     viewer = napari.Viewer(show=False)
     try:
         state = _two_shank_state()
+        for i, sh in enumerate(state.project.probes[0].shanks):
+            sh.tip_px = Point2D(x_px=20.0 + 40 * i, y_px=80.0)
+            sh.entry_px = Point2D(x_px=20.0 + 40 * i, y_px=10.0)
         w = ClickOverlayWidget(state, viewer)
         qtbot.addWidget(w)
-        w._ensure_points_layers()
-        w._shank_combo.setCurrentIndex(0)
-        w._tip_layer.add([[10.0, 20.0]])
-        w._shank_combo.setCurrentIndex(1)
-        w._tip_layer.add([[30.0, 40.0]])
+        w.refresh_after_load()
 
-        # Select the shank-0 point and clear only it.
-        feats = w._tip_layer.features
-        s = np.asarray(feats["s"], dtype=int)
-        sel = {i for i in range(len(s)) if s[i] == 0}
-        w._tip_layer.selected_data = sel
-        w._clear_selected()
-
+        # Clicking near shank 0's tip selects it; Delete removes that track only.
+        assert w._hit_test(21.0, 79.0) == (0, 0, "tip")
+        w._select_track(0, 0)
+        assert w._delete_selected()
         shanks = state.project.probes[0].shanks
-        assert shanks[0].tip_px is None  # cleared
-        assert shanks[1].tip_px is not None  # kept
+        assert shanks[0].tip_px is None and shanks[0].entry_px is None
+        assert shanks[1].tip_px is not None
         assert len(w._tip_layer.data) == 1
+        assert w._table.rowCount() == 1
     finally:
         viewer.close()
 
@@ -1269,9 +1245,10 @@ def test_residuals_table_bregma_and_ap_order(qtbot) -> None:
 
 
 @pytest.mark.qt
-def test_click_overlay_modes_and_nearest_section(qtbot) -> None:
+def test_click_overlay_nearest_section_and_cancel(qtbot) -> None:
     import napari
     from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.project.schema import ProbeSpec, ProbeType, Shank
 
     viewer = napari.Viewer(show=False)
     try:
@@ -1282,18 +1259,23 @@ def test_click_overlay_modes_and_nearest_section(qtbot) -> None:
         state.project.slides[0].sections.append(
             Section(index=3, slide_idx=0, bbox_px=(10, 10, 30, 30))
         )
+        state.project.probes.append(
+            ProbeSpec(label="P", type=ProbeType(name="NP", n_shanks=1), shanks=[Shank(index=0)]))
         widget = ClickOverlayWidget(state, viewer)
         qtbot.addWidget(widget)
-
-        # Trajectory-line entry mode arms a Trajectory shapes layer.
-        widget._mode_entry.setChecked(True)
-        widget._entry_line.setChecked(True)
-        widget._activate_pick_mode()
-        assert "Trajectory" in viewer.layers
+        widget._refresh_probe_combo()
 
         # A point just OUTSIDE the tight bbox still resolves to that section.
         assert widget._find_section_for_point(32.0, 20.0) == 3
         assert widget._find_section_for_point(20.0, 20.0) == 3  # inside
+
+        # Esc after the tip: nothing is stored and the preview goes away.
+        widget._add_btn.setChecked(True)
+        widget._place(20.0, 25.0)
+        assert widget._preview_layer is not None
+        widget._cancel_add()
+        assert state.project.probes[0].shanks[0].tip_px is None
+        assert widget._preview_layer is None and not widget._add_btn.isChecked()
     finally:
         viewer.close()
 
@@ -1711,8 +1693,8 @@ def test_reload_repopulates_widgets(qtbot) -> None:
         assert atlas_browser._current_atlas_id() == "kim_mouse_25um"
         assert atlas_browser._ap_spin.value() == pytest.approx(BREGMA_AP_FROM_ORIGIN_UM - 4000.0)
 
-        # Click overlay: tip + entry restored to the table and markers drawn.
-        assert click_overlay._table.rowCount() == 2
+        # Probe tracks: the track (tip + entry, one row) restored and drawn.
+        assert click_overlay._table.rowCount() == 1
         assert click_overlay._tip_layer is not None and len(click_overlay._tip_layer.data) == 1
         assert len(click_overlay._entry_layer.data) == 1
 

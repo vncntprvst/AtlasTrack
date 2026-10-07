@@ -333,10 +333,18 @@ start for torn tissue or a missing piece, which you then fit with landmarks.
 
 1. **Probes ▸** choose a **Type**, give it a **Label**, set **Shanks**, **Add
    probe**. Labels must be unique - they name the columns you export.
-2. Choose **Tip** or **Entry** and click in the image. For entry you can instead
-   draw a **Trajectory line**; the entry is where it crosses the surface.
-3. Each shank has its own colour; tips are discs, entries are triangles.
-4. **Select / move** to drag a marker; **Clear selected** to remove some.
+2. Under **Probe tracks**, pick the **Probe** and **Shank**, then **Add track**.
+   The cursor becomes a probe. Click the end of the track (the shank tip), then
+   the point where it went in (the entry). A dotted line follows the cursor
+   between the two clicks. **Esc** cancels. Adding a track for a shank that has
+   one replaces it.
+3. Each shank has its own colour, used by its markers (tip = circle, entry =
+   triangle), its line and its row in the list. The line runs from the tip
+   through the entry to the edge of the section's box. If the tip and the entry
+   are on different sections, each section shows its own part of the line.
+4. To change a track, click its marker or line (or its row in the list) to
+   select it. Drag a marker to move it; press **Delete** to remove the track.
+   **Clear all tracks** removes every track.
 
 ### 5.9 Export
 

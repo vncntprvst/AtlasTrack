@@ -97,76 +97,6 @@ pytest.importorskip("qtpy")
 
 
 @pytest.mark.qt
-def test_track_points_are_many_per_shank_and_unassignable(qtbot) -> None:
-    import napari
-
-    from atlastrack.gui.widgets.click_overlay import _UNASSIGNED, ClickOverlayWidget
-    from atlastrack.gui.workflow import WorkflowState
-    from atlastrack.project.schema import Section, Slide
-
-    state = WorkflowState()
-    state.project.slides.append(
-        Slide(image_path="s.tif",
-              sections=[Section(index=0, slide_idx=0, bbox_px=(0, 0, 100, 100))])
-    )
-    state.active_slide_idx = 0
-    state.project.probes.append(
-        ProbeSpec(label="p1", type=ProbeType(name="NP", n_shanks=2),
-                  shanks=[Shank(index=0), Shank(index=1)])
-    )
-
-    viewer = napari.Viewer(show=False)
-    try:
-        widget = ClickOverlayWidget(state, viewer)
-        qtbot.addWidget(widget)
-        widget._refresh_probe_combo()
-        widget._mode_track.setChecked(True)
-        widget._ensure_points_layers()
-        layer = widget._track_layer
-        assert layer is not None
-
-        # Three points on shank 0 - none of them replacing the others.
-        for i in range(3):
-            layer.data = np.vstack([layer.data, [[10.0 + i, 20.0]]]) \
-                if len(layer.data) else np.array([[10.0, 20.0]])
-            widget._on_track_data_changed()
-
-        shank0 = state.project.probes[0].shanks[0]
-        assert len(shank0.track_picks) == 3, "track points must not dedupe per shank"
-
-        # A fourth, marked unassigned, goes to the probe instead.
-        widget._unassigned_check.setChecked(True)
-        layer.data = np.vstack([layer.data, [[50.0, 60.0]]])
-        widget._on_track_data_changed()
-
-        assert len(shank0.track_picks) == 3
-        assert len(state.project.probes[0].unassigned_track_picks) == 1
-        assert _UNASSIGNED == -1
-    finally:
-        viewer.close()
-
-
-@pytest.mark.qt
-def test_the_unassigned_control_is_only_live_for_track_points(qtbot) -> None:
-    import napari
-
-    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
-    from atlastrack.gui.workflow import WorkflowState
-
-    viewer = napari.Viewer(show=False)
-    try:
-        widget = ClickOverlayWidget(WorkflowState(), viewer)
-        qtbot.addWidget(widget)
-
-        widget._mode_tip.setChecked(True)
-        assert not widget._unassigned_check.isEnabled()
-        widget._mode_track.setChecked(True)
-        assert widget._unassigned_check.isEnabled()
-    finally:
-        viewer.close()
-
-
-@pytest.mark.qt
 def test_the_shank_combo_still_indexes_shanks_directly(qtbot) -> None:
     """Regression guard: an 'Unassigned' row here would shift every shank by one."""
     import napari
@@ -192,12 +122,9 @@ def test_the_shank_combo_still_indexes_shanks_directly(qtbot) -> None:
 
 
 @pytest.mark.qt
-def test_saved_track_points_are_shown_and_kept_after_loading(qtbot) -> None:
-    """Loading a project must draw its track points, and a new point must not erase them.
-
-    The layer is the source the shanks' track points are rebuilt from on every
-    edit, so an empty layer after loading meant the first new point wiped them all.
-    """
+def test_old_track_points_are_not_drawn_and_survive_edits(qtbot) -> None:
+    """Track points saved by earlier versions are no longer shown, and editing a
+    track must not silently erase them from the project."""
     import napari
 
     from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
@@ -211,29 +138,21 @@ def test_saved_track_points_are_shown_and_kept_after_loading(qtbot) -> None:
     )
     state.active_slide_idx = 0
     state.project.probes.append(
-        ProbeSpec(label="p1", type=ProbeType(name="NP", n_shanks=2),
-                  shanks=[Shank(index=0, tip_px=Point2D(x_px=5.0, y_px=90.0), tip_section_idx=0,
-                                track_picks=[_pick(10.0, 20.0), _pick(12.0, 40.0)]),
-                          Shank(index=1, track_picks=[_pick(60.0, 30.0)])],
-                  unassigned_track_picks=[_pick(80.0, 80.0)])
+        ProbeSpec(label="p1", type=ProbeType(name="NP", n_shanks=1),
+                  shanks=[Shank(index=0, tip_px=Point2D(x_px=50.0, y_px=90.0),
+                                tip_section_idx=0,
+                                entry_px=Point2D(x_px=50.0, y_px=10.0), entry_section_idx=0,
+                                track_picks=[_pick(50.0, 50.0)])])
     )
-
     viewer = napari.Viewer(show=False)
     try:
         widget = ClickOverlayWidget(state, viewer)
         qtbot.addWidget(widget)
         widget.refresh_after_load()
-        layer = widget._track_layer
-        assert layer is not None and len(layer.data) == 4
-
-        widget._refresh_probe_combo()
-        widget._mode_track.setChecked(True)
-        layer.data = np.vstack([layer.data, [[50.0, 15.0]]])
-        widget._on_track_data_changed()
-
-        probe = state.project.probes[0]
-        assert len(probe.shanks[0].track_picks) == 3
-        assert len(probe.shanks[1].track_picks) == 1
-        assert len(probe.unassigned_track_picks) == 1
+        assert "Track points" not in viewer.layers
+        widget._move_marker(0, 0, "tip", 52.0, 88.0, commit=True)
+        assert len(state.project.probes[0].shanks[0].track_picks) == 1
     finally:
         viewer.close()
+
+
