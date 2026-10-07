@@ -256,6 +256,12 @@ Then **Register ▸ Register all sections**. Watch the progress, then check the
 switch on **Show atlas overlay on
 sections** to see the outlines on your tissue.
 
+**Check series (AP and tilt)** plots every section's AP, pitch and yaw in series
+order. Sections cut from one block should step evenly front to back at one angle,
+so one out of order, or tilted more than 2° unlike the rest, is drawn in red and
+named below the plot. Click a point to select that section. (The plot needs the
+`ephys` extra, which includes pyqtgraph.)
+
 **Only some sections.** Select them in the table - click one, **Ctrl**+click to
 add or remove, **Shift**+click for a range - or with the same clicks on the
 sections in the image. The button becomes **Register selected sections**, and

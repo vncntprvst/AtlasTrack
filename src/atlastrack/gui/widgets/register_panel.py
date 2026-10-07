@@ -311,6 +311,14 @@ class RegisterPanelWidget(QWidget):
         self._overlay_btn.clicked.connect(self._show_overlay)
         layout.addWidget(self._overlay_btn)
 
+        self._series_btn = QPushButton("Check series (AP and tilt)")
+        self._series_btn.setToolTip(
+            "Plot every section's AP, pitch and yaw in series order, to spot a "
+            "section out of order or tilted unlike the rest."
+        )
+        self._series_btn.clicked.connect(self._show_series_check)
+        layout.addWidget(self._series_btn)
+
         # Manual per-section atlas correction (drag in the viewer). Set well
         # apart from the automatic registration controls above - it is the
         # by-hand fallback for sections the automatic fit got wrong.
@@ -932,6 +940,20 @@ class RegisterPanelWidget(QWidget):
                 if section.index == section_index and section.manual_landmarks is not None:
                     return bool(section.manual_landmarks.forward)
         return False
+
+    def _show_series_check(self) -> None:
+        from atlastrack.gui.widgets.series_check_dialog import SeriesCheckDialog
+        from atlastrack.io.ccf_coords import bregma_ap_for_display
+
+        dialog = SeriesCheckDialog(
+            self._state.project,
+            bregma_ap_for_display(self._state.project.atlas.name),
+            on_pick=lambda idx: self._set_selection([idx]),
+            parent=self,
+        )
+        # Kept on self so it stays open beside the canvas (non-modal).
+        self._series_dialog = dialog
+        dialog.show()
 
     def _show_overlay(self) -> None:
         """Overlay registered atlas boundaries on each section in the viewer."""
