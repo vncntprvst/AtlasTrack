@@ -312,7 +312,7 @@ def register_cmd(
         typer.Option(
             help=(
                 "Directory for .tfm sidecar files. "
-                "Defaults to <project_dir>/transforms/."
+                "Defaults to <project_dir>/<project name>_transforms/."
             )
         ),
     ] = None,
@@ -363,7 +363,10 @@ def register_cmd(
     bg_atlas = BrainGlobeAtlas(atlas)
 
     if transforms_dir is None:
-        transforms_dir = project_dir / "transforms"
+        from atlastrack.project.section_files import transforms_folder
+
+        # Named after the project, so two projects in one folder keep their own.
+        transforms_dir = project_dir / transforms_folder(output_json or project_json)
 
     # Rebuild the exact pixels the stored bboxes were drawn against: merged
     # multi-source slides, whole-slide flips, per-section flips.

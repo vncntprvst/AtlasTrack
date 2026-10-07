@@ -75,6 +75,40 @@ def rotate_in_bbox(patch: np.ndarray, degrees: float) -> np.ndarray:
     return out.astype(patch.dtype, copy=False)
 
 
+def assemble_from_sections(
+    slide: Slide, *, base_dir: Path | None = None
+) -> np.ndarray | None:
+    """The slide put back together from its sections' own images, or ``None``.
+
+    Each image goes back into its box on a blank canvas. The images already carry
+    their flips and rotation, so nothing is re-applied. ``None`` unless every
+    section has an image on disk that fits its box.
+    """
+    if not slide.sections:
+        return None
+    patches = []
+    for section in slide.sections:
+        if not section.image_path:
+            return None
+        path = Path(section.image_path)
+        if not path.is_absolute() and base_dir is not None:
+            path = base_dir / path
+        if not path.is_file():
+            return None
+        patch = load_image(path)
+        x0, y0, x1, y1 = section.bbox_px
+        if patch.shape[:2] != (y1 - y0, x1 - x0):
+            return None
+        patches.append((section.bbox_px, patch))
+    height = max(b[3] for b, _ in patches)
+    width = max(b[2] for b, _ in patches)
+    first = patches[0][1]
+    canvas = np.zeros((height, width, *first.shape[2:]), dtype=first.dtype)
+    for (x0, y0, x1, y1), patch in patches:
+        canvas[y0:y1, x0:x1] = patch
+    return canvas
+
+
 def rebuild_slide_image(
     slide: "Slide",
     *,
@@ -85,13 +119,22 @@ def rebuild_slide_image(
     Merges ``source_paths`` (when there is more than one), re-applies the slide's
     own flips, then re-applies each section's flip inside its bbox. Returns the
     image and the per-source row bands (``[(y0, y1), ...]``), which a re-detect
-    needs to stay slide-aware.
+    needs to stay slide-aware. When the slide image is missing (or the slide never
+    had one), the slide is put together from its sections' own images instead.
 
     ``base_dir`` resolves relative paths; absolute stored paths are used as-is.
     """
     def _resolve(p: str) -> Path:
         path = Path(p)
         return path if path.is_absolute() or base_dir is None else base_dir / path
+
+    sources = list(slide.source_paths) or ([slide.image_path] if slide.image_path else [])
+    if not sources or not all(_resolve(s).is_file() for s in sources):
+        assembled = assemble_from_sections(slide, base_dir=base_dir)
+        if assembled is not None:
+            return assembled, [(0, int(assembled.shape[0]))]
+        if not sources:
+            raise FileNotFoundError("slide has no image and its sections have none either")
 
     if slide.source_paths and len(slide.source_paths) > 1:
         sources = [load_image(_resolve(s)) for s in slide.source_paths]

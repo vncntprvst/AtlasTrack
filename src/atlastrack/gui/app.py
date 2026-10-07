@@ -1009,7 +1009,10 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
         try:
             # Merged sources, whole-slide flips and per-section flips are all
             # re-applied here - shared with the headless CLI so the two can't drift.
-            img, bands = rebuild_slide_image(slide)
+            img, bands = rebuild_slide_image(
+                slide,
+                base_dir=state.project_path.parent if state.project_path else None,
+            )
         except Exception:
             continue
         state.slide_bands[slide_idx] = bands

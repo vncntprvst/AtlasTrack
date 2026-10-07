@@ -579,8 +579,11 @@ class RegisterPanelWidget(QWidget):
         # Ensure a persistent project location so the transforms (and the
         # auto-saved project) survive a reload, instead of a temp dir.
         project_path = self._ensure_project_path()
+        from atlastrack.project.section_files import transforms_folder
+
+        # Named after the project, so two projects in one folder keep their own.
         transforms_dir = (
-            project_path.parent / "transforms" if project_path is not None
+            project_path.parent / transforms_folder(project_path) if project_path is not None
             else Path(__import__("tempfile").mkdtemp()) / "transforms"
         )
         # Transform sidecar paths are stored relative to this base dir.
@@ -796,7 +799,7 @@ class RegisterPanelWidget(QWidget):
             try:
                 from atlastrack.project.io import save_project
 
-                save_project(self._state.project, path)
+                save_project(self._state.project, path, slide_images=self._state.slide_images)
                 msg += f"  ·  auto-saved → {path.name}"
             except Exception as exc:  # noqa: BLE001
                 msg += f"  ·  auto-save failed: {exc}"
@@ -1717,7 +1720,7 @@ class RegisterPanelWidget(QWidget):
             try:
                 from atlastrack.project.io import save_project
 
-                save_project(self._state.project, path)
+                save_project(self._state.project, path, slide_images=self._state.slide_images)
                 msg += f"  ·  saved → {path.name}"
             except Exception as exc:  # noqa: BLE001
                 msg += f"  ·  save failed: {exc}"

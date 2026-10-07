@@ -86,6 +86,19 @@ that slice warped onto your section → outlines and probe coordinates.
 **Your project** is one `*.atlastrack.json` file. Outputs go **next to your data**,
 not into the app's folder.
 
+**Each section also gets a folder** beside the project, `sections/section_NNN/`,
+written when you save:
+
+- `image.tif` - the section cut from the slide, with its flips and rotation, as
+  registration sees it. It is cut again only if you change the section's box.
+- `section.json` - the section in plain numbers: front-to-back level (AP), the
+  cutting angle (pitch and yaw), rotation, µm per pixel, and each landmark as an
+  image pixel paired with its atlas point. It is for reading; editing it changes
+  nothing - the project file is what the app reads.
+
+If the slide image is missing when you open a project, the app rebuilds the slide
+from these section images, so you can share a project without its slide.
+
 ---
 
 ## 3. Install and launch

@@ -881,7 +881,7 @@ class EphysPanelWidget(QWidget):
             try:
                 from atlastrack.project.io import save_project
 
-                save_project(self._state.project, path)
+                save_project(self._state.project, path, slide_images=self._state.slide_images)
                 msg += f"  ·  saved → {path.name}"
             except Exception as exc:
                 msg += f"  ·  auto-save failed: {exc}"

@@ -545,7 +545,10 @@ class VizExportPanelWidget(QWidget):
             try:
                 from atlastrack.project.io import save_project
 
-                save_project(self._state.project, self._state.project_path)
+                save_project(
+                    self._state.project, self._state.project_path,
+                    slide_images=self._state.slide_images,
+                )
                 msg += f"  ·  saved → {self._state.project_path.name}"
             except Exception as exc:  # noqa: BLE001
                 msg += f"  ·  save failed: {exc}"

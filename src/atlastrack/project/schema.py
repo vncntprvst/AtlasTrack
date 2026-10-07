@@ -342,6 +342,10 @@ class Section(BaseModel):
     # Thin-plate-spline correction from dragged landmarks (richer, non-rigid).
     # Takes precedence over manual_affine when present.
     manual_landmarks: ManualLandmarks | None = None
+    # This section's own image (project-relative): its box cut from the slide,
+    # with its flips and rotation applied - the pixels registration sees. Written
+    # on save; used to rebuild the slide when the slide image itself is missing.
+    image_path: str | None = None
 
 
 #: A colour channel of a slide image, by name.
@@ -358,6 +362,7 @@ class Slide(BaseModel):
     slide ``source_paths`` is empty and ``image_path`` is used directly.
     """
 
+    # Empty when the slide exists only as its sections' own images (an import).
     image_path: str
     source_paths: list[str] = []
     sections: list[Section] = []

@@ -117,7 +117,7 @@ class SavePanelWidget(QWidget):
         self._state.project_path = out_path
         from atlastrack.project.io import save_project
 
-        save_project(self._state.project, out_path)
+        save_project(self._state.project, out_path, slide_images=self._state.slide_images)
         self._remember(out_path)
         self._status.setText(f"Saved → {out_path.name}")
 
