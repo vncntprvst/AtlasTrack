@@ -1,6 +1,6 @@
 # Publish to PyPI when a version tag is pushed:
 #
-#   git tag v0.10.1 && git push origin v0.10.1
+#   git tag v0.10.2 && git push origin v0.10.2
 #
 # Uses PyPI trusted publishing (configured on pypi.org for this repository and this
 # file name), so no token is stored. The build runs from the tagged commit, and is

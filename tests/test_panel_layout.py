@@ -166,7 +166,8 @@ def test_side_panel_combo_boxes_do_not_size_to_their_longest_entry(qtbot) -> Non
         panel, viz = _build_panel(viewer)
         qtbot.addWidget(panel)
         qtbot.addWidget(viz)
-        combos = panel.findChildren(QComboBox)
+        # Both side panels: the registration tabs and 3D & Export.
+        combos = panel.findChildren(QComboBox) + viz.findChildren(QComboBox)
         assert combos
         narrow = QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         wide = [c.currentText() or c.objectName() for c in combos if c.sizeAdjustPolicy() != narrow]

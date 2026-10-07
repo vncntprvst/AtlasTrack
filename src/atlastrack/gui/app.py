@@ -553,6 +553,8 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # not inside the Register tab.
     viz_panel = VizExportPanelWidget(state, viewer)
     viz_panel.apply_settings(settings)
+    # Its atlas and alignment lists would otherwise make it about 500 px wide.
+    _narrow_combo_boxes(viz_panel)
 
     # After a project load, redraw the canvas AND repopulate every tab's fields
     # from the loaded project (probes, tip/entry, atlas + AP, ordering, residuals,
