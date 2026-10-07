@@ -25,6 +25,20 @@ if TYPE_CHECKING:
     from atlastrack.project.schema import Project, Slide
 
 
+_CHANNEL_INDEX = {"red": 0, "green": 1, "blue": 2}
+
+
+def align_channel_image(patch: np.ndarray, align_channel: str | None) -> np.ndarray:
+    """The channel registration should compare with the atlas, or ``patch`` as is.
+
+    With no channel named, or a grayscale patch, nothing changes and the caller's
+    usual handling (luminance, with red/green labels masked out) applies.
+    """
+    if not align_channel or patch.ndim != 3 or patch.shape[-1] < 3:
+        return patch
+    return patch[..., _CHANNEL_INDEX[align_channel]]
+
+
 def deepslice_rotation_deg(anchoring: list[float] | tuple[float, ...]) -> float:
     """In-plane rotation of a section, degrees, from its stored anchoring.
 
@@ -138,6 +152,8 @@ def section_images(
             continue
         for section in slide.sections:
             patch = crop(img, section.bbox_px)
+            if grayscale:
+                patch = align_channel_image(patch, slide.align_channel)
             if grayscale and patch.ndim == 3:
                 patch = patch[..., :3].astype(np.float32).mean(axis=-1)
             out[section.index] = patch.astype(np.float32)

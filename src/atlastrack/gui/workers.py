@@ -447,6 +447,7 @@ def register_worker_progressive(
                     bspline_grid=bspline_grid, max_iterations=max_iterations,
                     engine=engine, bending_weight=bending_weight,
                     use_masks=use_masks, prealign=prealign,
+                    align_channel=slide.align_channel,
                 ),
             )
             if tinfo.get("refined"):
@@ -469,6 +470,7 @@ def register_worker_progressive(
                 engine=engine,
                 bending_weight=bending_weight,
                 use_masks=use_masks,
+                align_channel=slide.align_channel,
                 prealign=prealign,
                 boundary_snap=boundary_snap,
             )

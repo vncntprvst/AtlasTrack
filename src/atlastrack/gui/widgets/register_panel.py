@@ -242,6 +242,21 @@ class RegisterPanelWidget(QWidget):
         # Held for the Parameters dialog; intentionally NOT added to the panel.
         self._params_box = params_box
 
+        # Which channel holds the tissue stain is a fact about the images, not a
+        # tuning knob, so it sits on the panel rather than in Parameters.
+        align_row = QHBoxLayout()
+        align_row.addWidget(QLabel("Align on:"))
+        self._align_combo = QComboBox()
+        self._align_combo.setToolTip(
+            "The channel compared with the atlas: pick the one with the tissue "
+            "stain (Nissl, DAPI...). 'All channels' uses their brightness together "
+            "and leaves out bright red and green, taken to be labels."
+        )
+        self._populate_align_combo()
+        self._align_combo.currentIndexChanged.connect(self._on_align_channel_changed)
+        align_row.addWidget(self._align_combo, 1)
+        layout.addLayout(align_row)
+
         self._reg_btn = QPushButton(REGISTER_ALL_TEXT)
         self._reg_btn.setFixedHeight(34)
         self._reg_btn.setToolTip(
@@ -476,11 +491,33 @@ class RegisterPanelWidget(QWidget):
     # Registration
     # ------------------------------------------------------------------
 
+    def _populate_align_combo(self) -> None:
+        """Fill "Align on" from the first slide's channel names and choice."""
+        slides = self._state.project.slides
+        names = slides[0].channel_names if slides else {}
+        current = slides[0].align_channel if slides else None
+        self._align_combo.blockSignals(True)
+        self._align_combo.clear()
+        self._align_combo.addItem("All channels (labels left out)", None)
+        for colour in ("red", "green", "blue"):
+            name = names.get(colour)
+            label = colour.capitalize() + (f" ({name})" if name else "")
+            self._align_combo.addItem(label, colour)
+        self._align_combo.setCurrentIndex(max(0, self._align_combo.findData(current)))
+        self._align_combo.blockSignals(False)
+
+    def _on_align_channel_changed(self) -> None:
+        # One choice for the project: every slide of a series is stained alike.
+        colour = self._align_combo.currentData()
+        for slide in self._state.project.slides:
+            slide.align_channel = colour
+
     def refresh_after_load(self) -> None:
         """Repopulate the residuals table from a freshly-loaded project."""
         # Transform sidecars resolve against the loaded project's folder.
         if self._state.project_path is not None:
             self._reg_base_dir = self._state.project_path.parent
+        self._populate_align_combo()
         self._refresh_residuals()
         self._populate_adjust_combo()
         n = sum(

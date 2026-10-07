@@ -340,6 +340,10 @@ class Section(BaseModel):
     manual_landmarks: ManualLandmarks | None = None
 
 
+#: A colour channel of a slide image, by name.
+ChannelColour = Literal["red", "green", "blue"]
+
+
 class Slide(BaseModel):
     """One slide image - typically holds several Sections.
 
@@ -356,6 +360,11 @@ class Slide(BaseModel):
     flip_h: bool = False
     flip_v: bool = False
     levels: ChannelLevels | None = None
+    # What each colour channel shows (e.g. {"blue": "nissl", "red": "rfp"}).
+    channel_names: dict[ChannelColour, str] = {}
+    # The channel registration compares with the atlas. None = all channels, with
+    # bright red/green labels left out automatically.
+    align_channel: ChannelColour | None = None
 
 
 class AtlasRef(BaseModel):

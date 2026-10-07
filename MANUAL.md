@@ -231,6 +231,13 @@ worth knowing:
   sections you corrected by hand. Off (the default), running it again replaces their fit
   and clears the corrections, which belonged to the old fit.
 
+**Align on** (above the Register button) says which colour channel holds the
+tissue stain - Nissl, DAPI and the like. Registration then compares only that
+channel with the atlas, and DeepSlice sees only that channel too. Left on **All
+channels**, the app uses all of them and leaves out bright red and green, taking
+them to be labels; that guess fails when the stain itself is red or green, so
+name the channel when you can.
+
 Then **Register ▸ Register all sections**. Watch the progress, then check the
 **Residual** column - how much mismatch the fit left, lower is better - and
 switch on **Show atlas overlay on

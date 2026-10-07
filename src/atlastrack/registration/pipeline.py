@@ -334,8 +334,13 @@ def register_section_image(
     prealign: bool = True,
     boundary_snap: bool = True,
     plane_fallback: bool = True,
+    align_channel: str | None = None,
 ) -> tuple[RegistrationResult, object | None]:
     """Run the M3 registration on one section.
+
+    ``align_channel`` ("red", "green" or "blue") registers on that channel of an
+    RGB section alone - the tissue stain - instead of guessing which colours are
+    labels. ``None`` keeps the guess: luminance, bright red/green masked out.
 
     Returns the persistable :class:`RegistrationResult` plus the in-memory
     SimpleITK transform (caller writes it to a sidecar if desired). The transform
@@ -379,7 +384,16 @@ def register_section_image(
 
     moving = section_image
     moving_mask = None
-    if moving.ndim == 3:
+    if align_channel and moving.ndim == 3:
+        from atlastrack.project.images import align_channel_image
+
+        moving = align_channel_image(moving, align_channel).astype(np.float32)
+        if use_masks:
+            from atlastrack.registration.masks import registration_moving_mask
+
+            # The named channel holds no labels, so only the tissue outline matters.
+            moving_mask = registration_moving_mask(moving, exclude_labels=False)
+    elif moving.ndim == 3:
         # Build the metric mask from the RGB crop BEFORE collapsing to luminance,
         # so the bright fluorescent labels can be excluded (they have no atlas
         # counterpart and otherwise pull the fit).
@@ -437,9 +451,11 @@ def register_section_image(
         from atlastrack.atlas.planes import annotation_at_plane
 
         brain = annotation_at_plane(atlas, anchoring, out_shape) > 0
+        # The tissue outline comes from the stain channel when one is named.
+        tissue_image = moving if align_channel and section_image.ndim == 3 else section_image
         if boundary_snap:
-            transform = _apply_boundary_snap(transform, brain, section_image, out_shape)
-        if plane_fallback and _plane_fits_better(transform, brain, section_image, out_shape):
+            transform = _apply_boundary_snap(transform, brain, tissue_image, out_shape)
+        if plane_fallback and _plane_fits_better(transform, brain, tissue_image, out_shape):
             logger.warning("morph fits the tissue worse than the plane; keeping the plane")
             transform = None
             morph_fallback = True
