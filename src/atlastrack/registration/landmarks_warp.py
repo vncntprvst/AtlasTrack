@@ -245,14 +245,64 @@ def _rbf(src: np.ndarray, dst: np.ndarray):
     return RBFInterpolator(src, dst, kernel="thin_plate_spline", smoothing=0.0)
 
 
-def warp_points(source: np.ndarray, target: np.ndarray, pts: np.ndarray) -> np.ndarray:
-    """Forward TPS (source -> target) applied to ``pts`` (N, 2) in (x, y)."""
-    return _rbf(source, target)(np.asarray(pts, dtype=float).reshape(-1, 2))
+# A landmark correction is one thin-plate spline, fitted one of two ways round:
+#
+# * "reverse" (AtlasTrack's own landmarks): fitted from the corrected positions
+#   back to the overlay's (target -> source). The overlay is drawn by pulling each
+#   pixel back through it, and points are mapped back through it directly.
+# * "forward" (slicereg's model): fitted from the overlay's positions to the
+#   corrected ones (source -> target), and inverted exactly where needed.
+#
+# A spline fitted one way is not the inverse of the one fitted the other way - on
+# a section with large corrections they part by 100 µm or more - so each section
+# keeps the way its landmarks were made, and the drawn overlay, the live preview
+# and the mapping of points all follow it.
 
 
-def invert_points(source: np.ndarray, target: np.ndarray, pts: np.ndarray) -> np.ndarray:
-    """Reverse TPS (target -> source) - maps a corrected-frame point back."""
-    return _rbf(target, source)(np.asarray(pts, dtype=float).reshape(-1, 2))
+def _solve(forward, start: np.ndarray, pts: np.ndarray, *, iterations: int = 50,
+           tol_px: float = 1e-4) -> np.ndarray:
+    """``y`` with ``forward(y) = pts``, by ``y <- y + (pts - forward(y))`` from ``start``.
+
+    Points where that does not settle (a folded warp) keep ``start``.
+    """
+    y = start.copy()
+    for _ in range(iterations):
+        step = pts - forward(y)
+        y = y + step
+        if np.max(np.abs(step), initial=0.0) < tol_px:
+            return y
+    bad = np.abs(pts - forward(y)).max(axis=1) > 1e-2
+    y[bad] = start[bad]
+    return y
+
+
+def warp_points(
+    source: np.ndarray, target: np.ndarray, pts: np.ndarray, *, forward: bool = False
+) -> np.ndarray:
+    """Overlay positions ``pts`` -> where the correction draws them (source -> target).
+
+    ``forward``: the spline was fitted source -> target (see the note above);
+    otherwise it was fitted target -> source and is inverted here.
+    """
+    pts = np.asarray(pts, dtype=float).reshape(-1, 2)
+    fwd = _rbf(source, target)
+    if forward:
+        return fwd(pts)
+    return _solve(_rbf(target, source), fwd(pts), pts)
+
+
+def invert_points(
+    source: np.ndarray, target: np.ndarray, pts: np.ndarray, *, forward: bool = False
+) -> np.ndarray:
+    """Corrected positions ``pts`` -> the overlay positions they came from.
+
+    The inverse of :func:`warp_points` for the same ``forward``.
+    """
+    pts = np.asarray(pts, dtype=float).reshape(-1, 2)
+    rev = _rbf(target, source)
+    if not forward:
+        return rev(pts)
+    return _solve(_rbf(source, target), rev(pts), pts)
 
 
 def warp_contour_image(
@@ -263,6 +313,7 @@ def warp_contour_image(
     *,
     thickness: int = 0,
     close_gaps: int = 0,
+    forward: bool = False,
 ) -> np.ndarray:
     """Forward-TPS boundary pixels and rasterise them into a binary edge image.
 
@@ -293,7 +344,8 @@ def warp_contour_image(
     if edge_rc.size == 0:
         return img
     pts_xy = np.column_stack([edge_rc[:, 1], edge_rc[:, 0]]).astype(float)
-    warped = warp_points(source, target, pts_xy)  # (N, 2) (x, y)
+    # The same correction the final overlay draws, so the preview matches it.
+    warped = warp_points(source, target, pts_xy, forward=forward)  # (N, 2) (x, y)
     cx = np.round(warped[:, 0]).astype(int)
     cy = np.round(warped[:, 1]).astype(int)
     ok = (cx >= 0) & (cx < w) & (cy >= 0) & (cy < h)
@@ -315,20 +367,20 @@ def warp_contour_image(
 
 
 def warp_label_image(
-    labels: np.ndarray, source: np.ndarray, target: np.ndarray
+    labels: np.ndarray, source: np.ndarray, target: np.ndarray, *, forward: bool = False
 ) -> np.ndarray:
     """Resample a label image through the TPS so ``labels`` move source -> target.
 
-    ``corrected[q] = labels[reverseTPS(q)]`` (pull-back), nearest-neighbour, 0
+    ``corrected[q] = labels[invert_points(q)]`` (pull-back), nearest-neighbour, 0
     outside - i.e. the atlas content originally at ``source`` ends up at ``target``.
     """
     from scipy.ndimage import map_coordinates
 
     h, w = labels.shape
-    rev = _rbf(target, source)  # corrected (x,y) -> registered/source (x,y)
     yy, xx = np.mgrid[0:h, 0:w]
     q = np.column_stack([xx.ravel().astype(float), yy.ravel().astype(float)])
-    s = rev(q)
+    # corrected (x, y) -> registered/source (x, y)
+    s = invert_points(source, target, q, forward=forward)
     out = map_coordinates(
         labels, [s[:, 1], s[:, 0]], order=0, mode="constant", cval=0.0
     )

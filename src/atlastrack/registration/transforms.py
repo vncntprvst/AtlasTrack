@@ -17,6 +17,7 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -83,6 +84,8 @@ class RegisteredSectionTransform:
     # Landmark TPS correction (section-local (x, y) source/target arrays); takes
     # precedence over manual_affine when present.
     manual_landmarks: tuple[np.ndarray, np.ndarray] | None = None
+    # Which way the landmark spline is fitted (ManualLandmarks.forward).
+    landmarks_forward: bool = False
 
     def _section_px_to_slice_px(self, x_px: float, y_px: float) -> tuple[float, float]:
         """Map a histology pixel through the inverse B-spline to slice-px coords.
@@ -94,18 +97,26 @@ class RegisteredSectionTransform:
         """
         if self.bspline is None:
             return x_px, y_px
-        import SimpleITK as sitk
-
-        # SITK TransformPoint maps fixed→moving; we want the inverse.
-        try:
-            inv = self.bspline.GetInverse()
-        except RuntimeError:
-            # Some B-splines need an iterative inverse displacement field.
-            inv = _invert_displacement(self.bspline, self.output_size_px)
-        slice_x, slice_y = inv.TransformPoint((float(x_px), float(y_px)))
+        slice_x, slice_y = self._inverse_warp.TransformPoint((float(x_px), float(y_px)))
         return float(slice_x), float(slice_y)
 
+    @cached_property
+    def _inverse_warp(self) -> "sitk.Transform":
+        """The warp's inverse, built once: inverting a displacement field is costly."""
+        # SITK TransformPoint maps fixed→moving; we want the inverse.
+        try:
+            return self.bspline.GetInverse()
+        except RuntimeError:
+            # Some B-splines need an iterative inverse displacement field.
+            return _invert_displacement(self.bspline, self.output_size_px)
+
     def apply(self, x_px: float, y_px: float) -> tuple[float, float, float]:
+        ap, ml, dv = self.apply_many(np.array([[x_px, y_px]], dtype=float))[0]
+        return float(ap), float(ml), float(dv)
+
+    def apply_many(self, pts_px: np.ndarray) -> np.ndarray:
+        """Section pixels (N, 2) in (x, y) -> CCF (AP, ML, DV) µm, (N, 3)."""
+        pts = np.asarray(pts_px, dtype=float).reshape(-1, 2)
         # The clicked point is in the corrected (dragged) frame; pull it back into
         # the registered frame before the registration inverse. Landmarks (TPS)
         # take precedence over the box-handle affine.
@@ -113,28 +124,22 @@ class RegisteredSectionTransform:
             from atlastrack.registration.landmarks_warp import invert_points
 
             src, dst = self.manual_landmarks
-            x_px, y_px = invert_points(src, dst, [(x_px, y_px)])[0]
+            pts = invert_points(src, dst, pts, forward=self.landmarks_forward)
         elif self.manual_affine is not None:
             from atlastrack.registration.manual import invert_apply
 
-            x_px, y_px = invert_apply(self.manual_affine, x_px, y_px)
-        sx, sy = self._section_px_to_slice_px(x_px, y_px)
+            pts = np.array([invert_apply(self.manual_affine, x, y) for x, y in pts], dtype=float)
+        sl = np.array([self._section_px_to_slice_px(x, y) for x, y in pts], dtype=float)
+        sl = sl.reshape(-1, 2)
         h, w = self.output_size_px
-        su = sx / max(w, 1)
-        sv = sy / max(h, 1)
+        su = sl[:, 0] / max(w, 1)
+        sv = sl[:, 1] / max(h, 1)
         a = self.anchoring
         ap_idx = a.ox + su * a.ux + sv * a.vx
         dv_idx = a.oy + su * a.uy + sv * a.vy
         ml_idx = a.oz + su * a.uz + sv * a.vz
         ap_res, dv_res, ml_res = self.atlas_resolution_um
-        return ap_idx * ap_res, ml_idx * ml_res, dv_idx * dv_res
-
-    def apply_many(self, pts_px: np.ndarray) -> np.ndarray:
-        pts_px = np.asarray(pts_px, dtype=float).reshape(-1, 2)
-        out = np.empty((len(pts_px), 3), dtype=float)
-        for i, (x, y) in enumerate(pts_px):
-            out[i] = self.apply(float(x), float(y))
-        return out
+        return np.stack([ap_idx * ap_res, ml_idx * ml_res, dv_idx * dv_res], axis=1)
 
 
 def _invert_displacement(
@@ -606,4 +611,5 @@ def build_registered_transform(
         atlas_resolution_um=atlas_resolution_um(atlas),
         manual_affine=ma,
         manual_landmarks=lm,
+        landmarks_forward=bool(getattr(manual_landmarks, "forward", False)),
     )

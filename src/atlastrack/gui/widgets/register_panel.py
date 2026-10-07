@@ -922,6 +922,14 @@ class RegisterPanelWidget(QWidget):
         self._residuals_table.clearSelection()
         self._update_register_button()
 
+    def _landmarks_forward(self, section_index: int | None) -> bool:
+        """Whether that section's landmark spline is fitted forward (an import)."""
+        for slide in self._state.project.slides:
+            for section in slide.sections:
+                if section.index == section_index and section.manual_landmarks is not None:
+                    return bool(section.manual_landmarks.forward)
+        return False
+
     def _show_overlay(self) -> None:
         """Overlay registered atlas boundaries on each section in the viewer."""
         self._ensure_atlas(self._render_overlay)
@@ -987,6 +995,7 @@ class RegisterPanelWidget(QWidget):
                         labels,
                         np.asarray(section.manual_landmarks.source, dtype=float),
                         np.asarray(section.manual_landmarks.target, dtype=float),
+                        forward=section.manual_landmarks.forward,
                     )
                 edges = annotation_boundaries(labels)
             except Exception as exc:  # noqa: BLE001 - surface to user below
@@ -1360,6 +1369,7 @@ class RegisterPanelWidget(QWidget):
                 labels,
                 np.asarray(section.manual_landmarks.source, dtype=float),
                 np.asarray(section.manual_landmarks.target, dtype=float),
+                forward=section.manual_landmarks.forward,
             )
         return labels
 
@@ -1602,6 +1612,7 @@ class RegisterPanelWidget(QWidget):
             self._lm_base_edge_rc, source, target, self._lm_base_shape,
             thickness=_LANDMARK_CONTOUR_THICKNESS,
             close_gaps=_LANDMARK_CONTOUR_CLOSE_GAPS,
+            forward=self._landmarks_forward(self._landmark_idx),
         )
         self._viewer.layers[name].data = img
 
@@ -1627,7 +1638,9 @@ class RegisterPanelWidget(QWidget):
         target = np.column_stack([data[:, 1] - x0, data[:, 0] - y0])  # (x, y) section-local
         source = np.column_stack([sx - x0, sy - y0])
         section.manual_landmarks = ManualLandmarks(
-            source=source.tolist(), target=target.tolist()
+            source=source.tolist(), target=target.tolist(),
+            # Edited landmarks keep the way their spline is fitted (imports differ).
+            forward=self._landmarks_forward(section.index),
         )
         section.manual_affine = None  # landmarks take precedence
         self._rerender_section_overlay(section)

@@ -591,7 +591,8 @@ class PairPointsDialog(QDialog):
 
             source = np.array([s for s, _ in self._pairs], dtype=float)
             target = np.array([t for _, t in self._pairs], dtype=float)
-            return warp_label_image(base, source, target)
+            lm = self._section.manual_landmarks
+            return warp_label_image(base, source, target, forward=bool(lm and lm.forward))
         except Exception:
             return base
 
@@ -873,9 +874,12 @@ class PairPointsDialog(QDialog):
                 "nothing. Drag the tissue dots onto their features first."
             )
             return
+        old = self._section.manual_landmarks
         self._section.manual_landmarks = ManualLandmarks(
             source=[[s[0], s[1]] for s, _ in self._pairs],
             target=[[t[0], t[1]] for _, t in self._pairs],
+            # Edited landmarks keep the way their spline is fitted (imports differ).
+            forward=bool(old and old.forward),
         )
         self._section.manual_affine = None  # landmarks take precedence
         self._notify()

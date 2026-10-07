@@ -294,6 +294,10 @@ class ManualLandmarks(BaseModel):
 
     source: list[list[float]]
     target: list[list[float]]
+    # Which way round the spline is fitted (see registration.landmarks_warp). False:
+    # target -> source, as AtlasTrack's own landmarks always have been. True:
+    # source -> target, inverted exactly - slicereg's model, kept by its import.
+    forward: bool = False
 
 
 class Section(BaseModel):
