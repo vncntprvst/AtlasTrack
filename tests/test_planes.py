@@ -4,6 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from atlastrack.atlas.planes import (
     Anchoring,
@@ -58,6 +59,39 @@ def test_anchoring_round_trip() -> None:
     values = [10.0, 0.0, 0.0, 0.0, 0.0, 50.0, 0.0, 30.0, 0.0]
     a = Anchoring.from_iterable(values)
     assert list(a.as_tuple()) == values
+
+
+def test_tilts_turn_the_plane_about_its_centre(monkeypatch) -> None:
+    import atlastrack.atlas.planes as planes
+    from atlastrack.registration.pipeline import anchoring_center_ap_um
+
+    class _Atlas:
+        class annotation:
+            shape = (528, 320, 456)
+
+    monkeypatch.setattr(planes, "atlas_resolution_um", lambda atlas: (25.0, 25.0, 25.0))
+    for tilts in ({"dv_tilt_deg": 5.0}, {"ml_tilt_deg": -5.0}, {"dv_tilt_deg": 4.7, "ml_tilt_deg": 1.0}):
+        a = coronal_anchoring(_Atlas(), 10000.0, **tilts)
+        assert anchoring_center_ap_um(a.as_tuple(), 25.0) == pytest.approx(10000.0)
+
+
+def test_tilted_plane_is_slicereg_plane(monkeypatch) -> None:
+    """dv_tilt = -pitch, ml_tilt = -yaw gives slicereg's plane exactly."""
+    import atlastrack.atlas.planes as planes
+    from atlastrack.io.slicereg import plane_to_atlas_um
+
+    class _Atlas:
+        class annotation:
+            shape = (528, 320, 456)
+
+    monkeypatch.setattr(planes, "atlas_resolution_um", lambda atlas: (25.0, 25.0, 25.0))
+    al = {"ap_um": 10300.0, "pitch_deg": -4.7, "yaw_deg": 2.0, "plane_size_um": [11400.0, 8000.0]}
+    a = coronal_anchoring(_Atlas(), al["ap_um"], ml_tilt_deg=-al["yaw_deg"],
+                          dv_tilt_deg=-al["pitch_deg"])
+    o, u, v = (np.array(a.as_tuple()[k:k + 3]) * 25.0 for k in (0, 3, 6))
+    st = np.random.default_rng(0).uniform(0, 1, (20, 2)) * [11400.0, 8000.0]
+    ours = o + np.outer(st[:, 0] / 11400.0, u) + np.outer(st[:, 1] / 8000.0, v)
+    np.testing.assert_allclose(ours, plane_to_atlas_um(al, st), atol=1e-6)
 
 
 def test_ml_tilt_rotates_basis() -> None:

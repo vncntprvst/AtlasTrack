@@ -87,6 +87,7 @@ def coronal_anchoring(
     *,
     ml_tilt_deg: float = 0.0,
     dv_tilt_deg: float = 0.0,
+    seen_from: str = "front",
 ) -> Anchoring:
     """Build a coronal-plane anchoring at ``ap_um``, optionally tilted.
 
@@ -99,6 +100,13 @@ def coronal_anchoring(
     its medial edge moves anterior / posterior).
     ``dv_tilt_deg`` rotates about the ML axis (tilts so the dorsal edge moves
     anterior / posterior).
+
+    The plane turns about the atlas centre, so ``ap_um`` stays the AP of the plane
+    centre whatever the tilts - as :class:`PlaneParams` promises and
+    :func:`atlastrack.registration.pipeline.anchoring_center_ap_um` reads back.
+    (It used to turn about the top-left corner: a 5° tilt then moved the centre
+    350-500 µm.) The DV tilt is applied first, then the ML tilt, so the plane is
+    slicereg's with ``dv_tilt = -pitch`` and ``ml_tilt = -yaw``.
     """
     ap_res, dv_res, ml_res = atlas_resolution_um(atlas)
     ap_idx = ap_um / ap_res
@@ -107,7 +115,20 @@ def coronal_anchoring(
     # Untilted basis (atlas-voxel coords, ASR order).
     u = np.array([0.0, 0.0, float(ml_size)])
     v = np.array([0.0, float(dv_size), 0.0])
-    origin = np.array([ap_idx, 0.0, 0.0])
+
+    # dv_tilt: rotation about the ML axis (axis 2). Positive → dorsal edge moves
+    # anterior.
+    if dv_tilt_deg != 0.0:
+        a = np.deg2rad(dv_tilt_deg)
+        R = np.array(
+            [
+                [np.cos(a), -np.sin(a), 0.0],
+                [np.sin(a), np.cos(a), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        u = R @ u
+        v = R @ v
 
     # ml_tilt: rotation about the DV axis (axis 1). Positive tilt → medial-right
     # edge of the slice moves anterior (smaller AP index).
@@ -123,19 +144,11 @@ def coronal_anchoring(
         u = R @ u
         v = R @ v
 
-    # dv_tilt: rotation about the ML axis (axis 2). Positive → dorsal edge moves
-    # anterior.
-    if dv_tilt_deg != 0.0:
-        a = np.deg2rad(dv_tilt_deg)
-        R = np.array(
-            [
-                [np.cos(a), -np.sin(a), 0.0],
-                [np.sin(a), np.cos(a), 0.0],
-                [0.0, 0.0, 1.0],
-            ]
-        )
-        u = R @ u
-        v = R @ v
+    centre = np.array([ap_idx, dv_size / 2.0, ml_size / 2.0])
+    origin = centre - u / 2.0 - v / 2.0
+    if seen_from == "back":
+        origin[2] = ml_size - origin[2]
+        u[2], v[2] = -u[2], -v[2]
 
     return Anchoring(
         ox=float(origin[0]), oy=float(origin[1]), oz=float(origin[2]),
