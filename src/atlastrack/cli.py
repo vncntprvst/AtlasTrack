@@ -301,6 +301,43 @@ def register_one_cmd(
         typer.echo(f"wrote HERBS pkl -> {output_pkl}")
 
 
+@app.command("import")
+def import_cmd(
+    source: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "A slicereg project folder (project.json + slices/), or a QUINT "
+                "series file (QuickNII / DeepSlice / VisuAlign JSON) or its folder."
+            )
+        ),
+    ],
+    out_dir: Annotated[
+        Path | None,
+        typer.Option(help="Output folder. Defaults to the source's name + _atlastrack."),
+    ] = None,
+    pixel_um: Annotated[
+        float | None,
+        typer.Option(
+            help="slicereg only: pixel size (µm) to bring sections to. Defaults to the coarsest."
+        ),
+    ] = None,
+) -> None:
+    """Convert a registration made by another tool into an AtlasTrack project.
+
+    Reads each section's image, atlas plane and correction; writes the section
+    images and a .atlastrack.json to open with Project > Load. The source is not
+    changed.
+    """
+    from atlastrack.io.importers import import_registration
+
+    try:
+        project_path = import_registration(source, out_dir, pixel_um=pixel_um)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"wrote project -> {project_path}")
+
+
 @app.command("add-cells")
 def add_cells_cmd(
     project_json: Annotated[Path, typer.Argument(help="A project imported from slicereg.")],

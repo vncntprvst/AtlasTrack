@@ -104,6 +104,7 @@ atlastrack gui        # the app
 atlastrack version
 atlastrack gl-info    # check the graphics setup if the window will not open
 atlastrack split | register | export      # the same steps, without the window
+atlastrack import SOURCE                  # convert a slicereg or QuickNII/VisuAlign registration
 ```
 
 ## The window

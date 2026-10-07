@@ -572,6 +572,12 @@ def annotation_boundaries(labels: np.ndarray) -> np.ndarray:
     return edges
 
 
+def inverse_warp_path(path: str | Path) -> Path:
+    """Where an exact inverse of the warp file ``path`` is kept, if there is one."""
+    path = Path(path)
+    return path.with_name(f"{path.stem}_inverse{path.suffix}")
+
+
 def build_registered_transform(
     result: RegistrationResult,
     atlas: "BrainGlobeAtlas",
@@ -597,6 +603,18 @@ def build_registered_transform(
             path = project_dir / path
         with _HDF5_LOCK:
             bspline = sitk.ReadTransform(str(path))
+            inverse = inverse_warp_path(path)
+            if inverse.is_file():
+                # An exact inverse, e.g. VisuAlign's: points use it rather than
+                # a numerical inversion, which a folded warp defeats.
+                field = sitk.DisplacementFieldTransform(sitk.ReadTransform(str(inverse)))
+                # A copy the transform owns: the field image would otherwise still
+                # belong to `field`, and points crash once `field` is freed.
+                stored = field.GetDisplacementField()
+                own = sitk.GetImageFromArray(sitk.GetArrayFromImage(stored), isVector=True)
+                own.CopyInformation(stored)  # keep its spacing and origin
+                bspline = sitk.DisplacementFieldTransform(bspline)
+                bspline.SetInverseDisplacementField(own)
     ma = None if manual_affine is None else np.asarray(manual_affine, dtype=float).reshape(3, 3)
     lm = None
     if manual_landmarks is not None:

@@ -85,6 +85,8 @@ class QuickNiiSlice(BaseModel):
     width: int = Field(ge=1)
     height: int = Field(ge=1)
     anchoring: list[float] = Field(min_length=9, max_length=9)
+    # VisuAlign's non-linear adjustment, if any: [x, y, x', y'] per marker.
+    markers: list[list[float]] | None = None
 
     def get_anchoring(self) -> Anchoring:
         return Anchoring.from_iterable(self.anchoring)
@@ -113,7 +115,7 @@ def save_quicknii(doc: QuickNiiDocument, path: str | Path) -> Path:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
-        doc.model_dump_json(indent=2, by_alias=True),
+        doc.model_dump_json(indent=2, by_alias=True, exclude_none=True),
         encoding="utf-8",
     )
     return p

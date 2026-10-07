@@ -394,10 +394,43 @@ Needs the `ephys` extra and a probe with tip and entry already registered.
 atlastrack split IMAGE                  # find sections
 atlastrack register PROJECT.json        # register a whole project
 atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
+atlastrack import SOURCE                # convert a registration made by another tool
 atlastrack add-cells PROJECT.json DIR   # add slicereg's counted cells to its import
 atlastrack add-channel PROJECT.json NAME FILE...  # another image of the slide, e.g. one dye
 atlastrack seen-from PROJECT.json back  # which face the images show (--mirror-planes)
 ```
+
+### 5.12 Import a registration from another tool
+
+**Project ▸ Import from another tool**, or `atlastrack import SOURCE`, reads:
+
+- **slicereg** ([github.com/mvdokh/cell-counting](https://github.com/mvdokh/cell-counting)):
+  pick the project folder, the one holding `project.json` and `slices/`.
+- **QuickNII, DeepSlice or VisuAlign** (the QUINT tools): pick the JSON file that
+  lists the sections (a VisuAlign `.waln` works too). The section images must be in
+  the same folder. Only mouse atlases in the Allen space (Allen, Kim) are read.
+
+The result goes into a new folder named after the source with `_atlastrack` added,
+next to it; the source is not changed. The project opens straight away.
+
+What comes across, and how:
+
+- **Each section's image**, into its section folder. slicereg sections are brought
+  to one pixel size (the coarsest; `--pixel-um` sets another) and their channels
+  coloured as slicereg showed them; the alignment channel becomes **Align on**.
+- **The plane**, exactly.
+- **The non-linear correction**, exactly. slicereg's landmarks become landmark
+  corrections you can edit (with 8 fixed points just outside the image, where
+  slicereg holds its correction at zero). VisuAlign's markers bend the atlas in
+  straight-edged triangles, which landmarks cannot copy, so they come in as the
+  section's fitted warp instead; you can add landmarks on top.
+
+- **slicereg's counted cells** (`cells.csv`), drawn on their sections and in 3-D.
+  For a project imported before cells came across, `atlastrack add-cells
+  PROJECT.json SLICEREG_FOLDER` adds them.
+
+Atlas coordinates then match the source tool's to within 0.02 µm (slicereg) and
+1 µm (VisuAlign). Not imported: slicereg's 3-D renders.
 
 ---
 

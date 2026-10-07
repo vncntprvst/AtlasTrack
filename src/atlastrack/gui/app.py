@@ -679,6 +679,54 @@ def _install_project_menu(
     recent_menu.aboutToShow.connect(_rebuild_recent)
     _rebuild_recent()  # populate once so it isn't empty before first open
 
+    # "Import from another tool ▸": convert, then open the result like a project.
+    import_menu = menu.addMenu("Import from another tool")
+
+    def _import(kind: str) -> None:
+        from qtpy.QtWidgets import QFileDialog, QMessageBox
+
+        window = viewer.window._qt_window
+        if not _confirm_close(window, state):
+            return
+        if kind == "slicereg":
+            source = QFileDialog.getExistingDirectory(
+                window, "slicereg project folder (holds project.json and slices/)"
+            )
+        else:
+            source, _ = QFileDialog.getOpenFileName(
+                window, "QuickNII / DeepSlice / VisuAlign file", "",
+                "QUINT series (*.json *.waln *.wwrp)",
+            )
+        if not source:
+            return
+        from napari.qt.threading import thread_worker
+
+        from atlastrack.io.importers import import_registration
+
+        @thread_worker
+        def _run():
+            return import_registration(source)
+
+        def _done(project_path) -> None:
+            viewer.status = f"Imported {Path(source).name}"
+            helper.load_path(str(project_path))
+
+        def _failed(exc) -> None:
+            viewer.status = "Import failed"
+            QMessageBox.warning(window, "Import failed", str(exc)[:2000])
+
+        viewer.status = f"Importing {Path(source).name}... (section images are written first)"
+        worker = _run()
+        worker.returned.connect(_done)
+        worker.errored.connect(_failed)
+        worker.start()
+
+    slicereg_action = import_menu.addAction("slicereg project folder...")
+    slicereg_action.setToolTip("Martin Dokholyan's cell-counting app (slicereg)")
+    slicereg_action.triggered.connect(lambda: _import("slicereg"))
+    quint_action = import_menu.addAction("QuickNII / DeepSlice / VisuAlign file...")
+    quint_action.triggered.connect(lambda: _import("quint"))
+
     close_action = menu.addAction("Close Project")
     close_action.triggered.connect(_close)
 
