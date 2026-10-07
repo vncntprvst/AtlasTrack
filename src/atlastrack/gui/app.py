@@ -396,7 +396,10 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     slide_loader = SlideLoaderWidget(
         state,
         viewer=viewer,
-        on_slide_loaded=lambda idx, img: _on_slide_loaded(viewer, state, idx, img),
+        # A new slide also settles which face its sections are seen from.
+        on_slide_loaded=lambda idx, img: (
+            _on_slide_loaded(viewer, state, idx, img), image_tools._show_view()
+        ),
         on_sections_detected=lambda secs: _on_sections_detected(viewer, state, secs),
         on_section_selected=image_tools.select_section,
     )
@@ -480,12 +483,27 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # Naming a channel in Histology updates the Register tab's "Align on" list.
     image_tools.on_channel_names_changed = register_panel._populate_align_combo
 
+
+    def _after_planes_mirrored() -> None:
+        # Overlays drawn for the old planes are out of date: redraw those shown.
+        if any(layer.name.startswith("Atlas overlay ") for layer in viewer.layers):
+            register_panel._show_overlay()
+        register_panel._refresh_residuals()
+
+    image_tools.on_planes_mirrored = _after_planes_mirrored
     def _on_project_loaded() -> None:
         # A project was just opened; whatever was being read, the thing to look at
         # now is the project. Reading is never lost - the Help tab keeps its page.
         _show_project_tab(help_panel)
         _reload_project_display(viewer, state)
         _refresh_panels()
+        from atlastrack.project.checks import mirrored_sections_note
+
+        note = mirrored_sections_note(state.project)
+        if note:
+            from napari.utils.notifications import show_warning
+
+            show_warning(note)
         # Auto-load the project's atlas in the background so the overlay / 3D
         # brain are ready without a manual "Load atlas" click.
         atlas_browser.auto_load_atlas()

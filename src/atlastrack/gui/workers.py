@@ -117,6 +117,7 @@ def deepslice_worker(
     *,
     species: str = "mouse",
     order: dict[int, int] | None = None,
+    seen_from: str = "front",
 ) -> dict[int, list[float]]:
     """Predict per-section atlas anchorings with DeepSlice (background thread).
 
@@ -127,7 +128,8 @@ def deepslice_worker(
     from atlastrack.registration.deepslice_adapter import predict_anchorings
 
     return predict_anchorings(
-        section_images, atlas, workdir=workdir, species=species, order=order
+        section_images, atlas, workdir=workdir, species=species, order=order,
+        seen_from=seen_from,
     )
 
 
@@ -412,6 +414,10 @@ def register_worker_progressive(
 
     from loguru import logger
 
+    from atlastrack.project.orientation import project_view
+
+    # Hand-placed planes follow which face the sections are seen from.
+    seen_from = project_view(project)
     tfm_dir = Path(transforms_dir)
     tfm_dir.mkdir(parents=True, exist_ok=True)
     res_um = atlas_resolution_um(atlas)
@@ -433,7 +439,7 @@ def register_worker_progressive(
         # A manually assigned AP takes precedence over a DeepSlice prediction
         # (see anchoring_for_section); DeepSlice, on by default, otherwise silently
         # overrode every hand-set AP.
-        anchoring = anchoring_for_section(section, anchorings, atlas)
+        anchoring = anchoring_for_section(section, anchorings, atlas, seen_from=seen_from)
 
         # Optionally nudge the plane's tilt to better fit this section (fixes the
         # L/R-asymmetry where a paramedian nucleus sits on tissue one side but in a

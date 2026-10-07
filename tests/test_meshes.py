@@ -282,3 +282,36 @@ def test_annotation_boundaries() -> None:
     edges = annotation_boundaries(labels)
     assert edges[:, 2].all() and edges[:, 3].all()  # both sides of the seam
     assert not edges[:, 0].any()  # interior of a uniform region has no edge
+
+
+def test_predict_anchorings_mirrors_planes_for_back_view_images(tmp_path, monkeypatch) -> None:
+    """DeepSlice places sections as seen from the front; back-face images get the mirror."""
+    import subprocess
+
+    from atlastrack.io.quicknii import QuickNiiDocument, QuickNiiSlice, save_quicknii
+    from atlastrack.project.orientation import mirror_anchoring
+    from atlastrack.registration import deepslice_adapter as ds
+
+    class _Atlas:
+        class annotation:
+            shape = (528, 320, 456)
+
+    anchoring = [379.03, 107.44, 270.03, -320.33, -29.73, -10.68, -6.81, 19.19, -231.72]
+
+    def fake_run(cmd, **kwargs):
+        workdir = Path(cmd[-2])
+        save_quicknii(QuickNiiDocument(slices=[QuickNiiSlice(
+            filename="section_s000.png", nr=1, width=10, height=10, anchoring=anchoring,
+        )]), workdir / "deepslice_predictions.json")
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    images = {0: np.zeros((10, 10), dtype=np.uint8)}
+    front = ds.predict_anchorings(images, _Atlas(), workdir=tmp_path / "f")
+    back = ds.predict_anchorings(images, _Atlas(), workdir=tmp_path / "b", seen_from="back")
+    assert front[0][5] > 0 > back[0][5]
+    assert back[0] == pytest.approx(mirror_anchoring(front[0], 456))

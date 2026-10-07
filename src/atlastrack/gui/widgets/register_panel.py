@@ -622,8 +622,11 @@ class RegisterPanelWidget(QWidget):
             # Number DeepSlice's input by the user's AP sequence (ap_order), so its
             # serial-section ordering follows the intended order, not the raw
             # detection index.
+            from atlastrack.project.orientation import project_view
+
             ds = deepslice_worker(section_images, atlas, ds_dir,
-                                  order=self._section_order())
+                                  order=self._section_order(),
+                                  seen_from=project_view(self._state.project))
             ds.returned.connect(
                 lambda anch: self._start_register(section_images, transforms_dir, anch)
             )

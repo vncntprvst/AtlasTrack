@@ -150,13 +150,32 @@ class ImageToolsWidget(QWidget):
 
         # Flip controls
         flip_box = QGroupBox("Flip")
-        flip_row = QHBoxLayout(flip_box)
+        flip_layout = QVBoxLayout(flip_box)
+        flip_row = QHBoxLayout()
         flip_h_btn = QPushButton("Flip H")
         flip_h_btn.clicked.connect(self._flip_h)
         flip_v_btn = QPushButton("Flip V")
         flip_v_btn.clicked.connect(self._flip_v)
         flip_row.addWidget(flip_h_btn)
         flip_row.addWidget(flip_v_btn)
+        flip_layout.addLayout(flip_row)
+        # Which face the images show: the tissue can't tell, the atlas being
+        # almost symmetric, so it is said once for the project.
+        view_row = QHBoxLayout()
+        view_row.addWidget(QLabel("Sections seen from:"))
+        self._view_combo = QComboBox()
+        self._view_combo.addItem("Back", "back")
+        self._view_combo.addItem("Front (as atlas plates)", "front")
+        self._view_combo.setToolTip(
+            "Which face of the sections your images show, once flipped as you want "
+            "them. Seen from the back, the animal's right is on the image's right; "
+            "from the front (as atlas plates are drawn), on its left. Every atlas "
+            "plane - DeepSlice or set by hand - is placed for this, so ML and the "
+            "hemispheres come out right. Remembered for new projects."
+        )
+        self._view_combo.currentIndexChanged.connect(self._on_view_changed)
+        view_row.addWidget(self._view_combo, 1)
+        flip_layout.addLayout(view_row)
         layout.addWidget(flip_box)
 
         # Per-channel level controls
@@ -230,6 +249,80 @@ class ImageToolsWidget(QWidget):
         layout.addWidget(names_box)
         layout.addStretch()
 
+    # ------------------------------------------------------------------
+    # Which face the sections are seen from
+    # ------------------------------------------------------------------
+
+    #: Called after planes were mirrored (the app redraws the atlas overlays).
+    on_planes_mirrored: Callable[[], None] | None = None
+
+    @staticmethod
+    def default_view() -> str:
+        """The view new projects start with (the app's remembered choice)."""
+        try:
+            from atlastrack.config import load_app_settings
+
+            return load_app_settings().sections_seen_from or "front"
+        except Exception:  # noqa: BLE001 - settings unreadable: the atlas convention
+            return "front"
+
+    def _show_view(self) -> None:
+        from atlastrack.project.orientation import implied_view, project_view
+
+        project = self._state.project
+        if project.seen_from is None and implied_view(project) is None:
+            # A new project: it takes the remembered choice.
+            project.seen_from = self.default_view()  # type: ignore[assignment]
+        view = project_view(project)
+        self._view_combo.blockSignals(True)
+        self._view_combo.setCurrentIndex(max(0, self._view_combo.findData(view)))
+        self._view_combo.blockSignals(False)
+
+    def _on_view_changed(self, _index: int) -> None:
+        from qtpy.QtWidgets import QMessageBox
+
+        from atlastrack.project.orientation import anchoring_view, project_view, set_view
+
+        project = self._state.project
+        view = self._view_combo.currentData()
+        before = project_view(project)
+        planes = [
+            s for slide in project.slides for s in slide.sections
+            if (a := (s.registration.anchoring if s.registration else s.deepslice_anchoring))
+            is not None and anchoring_view(a) != view
+        ]
+        mirror = False
+        if planes:
+            n = len(planes)
+            answer = QMessageBox.question(
+                self, "Sections seen from",
+                f"{n} section(s) have atlas planes placed as if seen from the "
+                f"{'front' if view == 'back' else 'back'}. Mirror them to match?\n\n"
+                "Mirroring keeps each section's fit, warp and landmarks; every point "
+                "keeps its AP and DV and its ML is mirrored about the midline, so "
+                "the hemispheres swap. Re-export coordinates afterwards. (Sections "
+                "matched to another project are left; match again to turn them.)\n\n"
+                "No: change the setting only - for planes placed later.",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel,
+            )
+            if answer == QMessageBox.Cancel:
+                self._view_combo.blockSignals(True)
+                self._view_combo.setCurrentIndex(max(0, self._view_combo.findData(before)))
+                self._view_combo.blockSignals(False)
+                return
+            mirror = answer == QMessageBox.Yes
+        mirrored, _skipped = set_view(project, view, mirror_planes=mirror)
+        try:
+            from atlastrack.config import load_app_settings, save_app_settings
+
+            settings = load_app_settings()
+            settings.sections_seen_from = view
+            save_app_settings(settings)
+        except Exception:  # noqa: BLE001 - remembering is a convenience
+            pass
+        if mirrored and self.on_planes_mirrored is not None:
+            self.on_planes_mirrored()
+
 
     # ------------------------------------------------------------------
     # Channel names
@@ -256,6 +349,7 @@ class ImageToolsWidget(QWidget):
             edit.blockSignals(True)
             edit.setText(names.get(colour, ""))
             edit.blockSignals(False)
+        self._show_view()
 
     # ------------------------------------------------------------------
     # Section selection (drives the "Selected section" scope)

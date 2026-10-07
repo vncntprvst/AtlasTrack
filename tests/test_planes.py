@@ -102,3 +102,18 @@ def test_ml_tilt_rotates_basis() -> None:
     u = np.array([a.ux, a.uy, a.uz])
     assert abs(u[2]) > abs(u[0])  # ML component dominates
     assert u[0] != 0.0  # but AP component is now non-zero
+
+
+def test_a_back_view_plane_is_the_front_one_mirrored(monkeypatch) -> None:
+    import atlastrack.atlas.planes as planes
+    from atlastrack.project.orientation import mirror_anchoring
+
+    class _Atlas:
+        class annotation:
+            shape = (528, 320, 456)
+
+    monkeypatch.setattr(planes, "atlas_resolution_um", lambda atlas: (25.0, 25.0, 25.0))
+    front = coronal_anchoring(_Atlas(), 9000.0, dv_tilt_deg=4.0, ml_tilt_deg=1.0)
+    back = coronal_anchoring(_Atlas(), 9000.0, dv_tilt_deg=4.0, ml_tilt_deg=1.0, seen_from="back")
+    assert list(back.as_tuple()) == pytest.approx(mirror_anchoring(front.as_tuple(), 456))
+    assert front.uz > 0 > back.uz

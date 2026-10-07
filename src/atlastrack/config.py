@@ -109,6 +109,9 @@ class AppSettings(BaseModel):
     # re-mapping coordinates. Tolerance in [0,1]: 0 = strict, 1 = keep picks.
     rigid_array_enforce: bool = False
     rigid_array_tolerance: float = 0.25
+    # Which face of the sections new projects' images show: "front" (as atlas
+    # plates: the animal's right on the image's left) or "back".
+    sections_seen_from: str = "front"
 
     @field_validator("bspline_grid")
     @classmethod

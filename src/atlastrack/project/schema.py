@@ -395,3 +395,7 @@ class Project(BaseModel):
     # Inter-section AP spacing (µm) chosen in the ordering panel; persisted so it
     # reloads with the project. ``None`` until the user sets/applies a spacing.
     section_spacing_um: float | None = None
+    # Which face of the sections the images show (project.orientation): "front"
+    # puts the animal's right on the image's left, as atlas plates do; "back" on
+    # its right. None = not said; the planes' own orientation is used.
+    seen_from: Literal["front", "back"] | None = None

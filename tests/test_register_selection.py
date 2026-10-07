@@ -224,7 +224,7 @@ def test_re_registering_clears_the_old_fixes(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(
         pipeline, "anchoring_for_section",
-        lambda section, anchorings, atlas: Anchoring(*_reg().anchoring),
+        lambda section, anchorings, atlas, **kw: Anchoring(*_reg().anchoring),
     )
     state = WorkflowState()
     state.project.slides.append(Slide(image_path="s.png", sections=[

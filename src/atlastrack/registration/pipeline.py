@@ -108,17 +108,19 @@ def _lookup_manual(
 # ── Registered (M3) pipeline ──────────────────────────────────────────────────
 
 
-def anchoring_for_section(section: Section, anchorings: dict, atlas: BrainGlobeAtlas):
+def anchoring_for_section(
+    section: Section, anchorings: dict, atlas: BrainGlobeAtlas, *, seen_from: str = "front"
+):
     """Pick a section's atlas plane: a (guided) DeepSlice anchoring, else the plane.
 
     When DeepSlice ran, ``anchorings`` holds its per-section prediction - already
     **guided** by any user-assigned AP (see :func:`guide_anchorings_with_planes`),
     so it is used directly. Sections DeepSlice didn't cover fall back to the
-    hand-assigned plane.
+    hand-assigned plane, built for the project's ``seen_from``.
     """
     if section.index in anchorings:
         return Anchoring.from_iterable(anchorings[section.index])
-    return anchoring_from_plane_params(atlas, section.plane)
+    return anchoring_from_plane_params(atlas, section.plane, seen_from=seen_from)
 
 
 def _ap_center(anchoring9: list[float] | tuple[float, ...]) -> float:
@@ -619,7 +621,11 @@ def register_project_with_atlas(
                 anchoring = Anchoring.from_iterable(stored)
                 logger.debug("section {}: re-using stored anchoring", section.index)
             else:
-                anchoring = anchoring_from_plane_params(atlas, section.plane)
+                from atlastrack.project.orientation import project_view
+
+                anchoring = anchoring_from_plane_params(
+                    atlas, section.plane, seen_from=project_view(project)
+                )
             reg, sitk_transform = register_section_image(
                 img,
                 atlas,

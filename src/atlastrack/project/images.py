@@ -53,7 +53,9 @@ def deepslice_rotation_deg(anchoring: list[float] | tuple[float, ...]) -> float:
     """
     import math
 
-    return math.degrees(math.atan2(float(anchoring[4]), float(anchoring[5])))
+    # |u_ml|: a plane for the sections' back face runs the other way along ML, and
+    # must read as turned by a few degrees, not by about 180.
+    return math.degrees(math.atan2(float(anchoring[4]), abs(float(anchoring[5]))))
 
 
 def rotate_in_bbox(patch: np.ndarray, degrees: float) -> np.ndarray:

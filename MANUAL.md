@@ -193,6 +193,16 @@ section.
   For a tidy exported series you usually need none of this: the section-series
   export straightens on its own (Recipe 5.9).
 - **Flip H / Flip V** if the tissue is mirrored.
+- **Sections seen from** says which face of the sections your images show, once
+  flipped as you want them: **Back** puts the animal's right on the image's right;
+  **Front**, as atlas plates are drawn, puts it on the image's left. Set it once:
+  it is remembered for new projects. The atlas is almost symmetric, so the tissue
+  cannot tell the two apart - every plane, from DeepSlice or set by hand, is placed
+  for this setting, and getting it wrong mirrors ML and swaps the hemispheres.
+  Changing it on a project that already has planes offers to mirror them, keeping
+  each fit, warp and landmark (`atlastrack seen-from PROJECT.json back
+  --mirror-planes` does the same). Sections matched to another project are turned
+  by matching again instead.
 - **Levels** to brighten faint channels, or **Auto**.
 
 ### 5.4 Set the front-to-back level
@@ -375,11 +385,18 @@ Needs the `ephys` extra and a probe with tip and entry already registered.
 atlastrack split IMAGE                  # find sections
 atlastrack register PROJECT.json        # register a whole project
 atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
+atlastrack seen-from PROJECT.json back  # which face the images show (--mirror-planes)
 ```
 
 ---
 
 ## 6. Troubleshooting
+
+**"Planes placed as if seen from the front/back" when a project opens.** Some
+sections' planes were placed for the other face of the sections than the project
+says (Recipe 5.3, Sections seen from), so their ML is mirrored and the hemispheres
+swapped, while the outlines still look right. Mirror them from **Sections seen
+from**, or, for sections matched to another project, match again; then re-export.
 
 **Every section fails registration at once.** Usually the stain colour was
 mistaken for a fluorescent label and the tissue was left out of the fit. Update

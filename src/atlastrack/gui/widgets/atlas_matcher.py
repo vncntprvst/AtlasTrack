@@ -744,7 +744,9 @@ class AtlasMatcherDialog(QDialog):
         from atlastrack.atlas.planes import coronal_anchoring, resample_atlas_at_plane
 
         atlas = self._state.atlas
-        anchoring = coronal_anchoring(atlas, ap_abs)
+        from atlastrack.project.orientation import project_view
+
+        anchoring = coronal_anchoring(atlas, ap_abs, seen_from=project_view(self._state.project))
         return resample_atlas_at_plane(atlas, anchoring, out_shape)
 
     def _section_crop(self, section: "Section") -> np.ndarray | None:
@@ -1043,7 +1045,20 @@ class AtlasMatcherDialog(QDialog):
             f"{deepslice_run_note()}"
         )
         crashlog.note(f"DeepSlice pre-match starting on {len(section_images)} sections")
-        worker = deepslice_worker(section_images, atlas, ds_dir, order=order)
+        # DeepSlice sees only the channel the slide is aligned on, when one is set;
+        # the fingerprints stay on the full crops, which is what Register compares.
+        from atlastrack.project.images import align_channel_image
+
+        slides = self._state.project.slides
+        sec_slide = {s.index: s.slide_idx for s in self._ordered_sections()}
+        ds_images = {
+            idx: align_channel_image(img, slides[sec_slide[idx]].align_channel)
+            for idx, img in section_images.items()
+        }
+        from atlastrack.project.orientation import project_view
+
+        worker = deepslice_worker(ds_images, atlas, ds_dir, order=order,
+                                  seen_from=project_view(self._state.project))
         worker.returned.connect(lambda anch: self._apply_prematch(anch, section_images))
         worker.errored.connect(self._on_prematch_error)
         worker.start()

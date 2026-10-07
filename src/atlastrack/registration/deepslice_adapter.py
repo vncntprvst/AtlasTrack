@@ -126,8 +126,12 @@ def predict_anchorings(
     workdir: Path | str,
     species: str = "mouse",
     order: dict[int, int] | None = None,
+    seen_from: str = "front",
 ) -> dict[int, list[float]]:
     """Run DeepSlice on section crops and return per-section atlas anchorings.
+
+    DeepSlice places sections as seen from the front; for images of the back face
+    (``seen_from="back"``) its planes are mirrored about the midline.
 
     Writes each crop as ``section_s<token>.png`` (DeepSlice reads the section
     number from the ``_s<token>`` token and uses it to order the series for
@@ -178,6 +182,10 @@ def predict_anchorings(
         tok = _parse_section_index(sl.filename)
         if tok is not None and tok in idx_of_token:
             out[idx_of_token[tok]] = _quicknii_to_atlas_anchoring(list(sl.anchoring), shape)
+    if seen_from == "back":
+        from atlastrack.project.orientation import mirror_anchoring
+
+        out = {k: mirror_anchoring(a, shape[2]) for k, a in out.items()}
     return out
 
 

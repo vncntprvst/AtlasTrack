@@ -590,7 +590,7 @@ def test_atlas_matcher_prematch_deepslice(qtbot, monkeypatch) -> None:
 
     captured = {}
 
-    def fake_worker(section_images, atlas, ds_dir, *, order=None):
+    def fake_worker(section_images, atlas, ds_dir, *, order=None, seen_from="front"):
         captured["order"] = order
         captured["keys"] = set(section_images)
         return _FakeWorker()

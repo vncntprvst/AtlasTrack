@@ -91,6 +91,9 @@ def coronal_anchoring(
 ) -> Anchoring:
     """Build a coronal-plane anchoring at ``ap_um``, optionally tilted.
 
+    ``seen_from="back"`` mirrors it about the midline, for images that show the
+    sections' back face (see :mod:`atlastrack.project.orientation`).
+
     The default (zero tilts) coronal plane has:
         origin at (ap_idx, 0, 0) - top-left of the AP slab
         u along +ML (image x increases → lateral right)
@@ -158,7 +161,7 @@ def coronal_anchoring(
 
 
 def anchoring_from_plane_params(
-    atlas: "BrainGlobeAtlas", plane: PlaneParams
+    atlas: "BrainGlobeAtlas", plane: PlaneParams, *, seen_from: str = "front"
 ) -> Anchoring:
     """Build an anchoring from the simpler PlaneParams used by M1."""
     return coronal_anchoring(
@@ -166,6 +169,7 @@ def anchoring_from_plane_params(
         ap_um=plane.ap_um,
         ml_tilt_deg=plane.ml_tilt_deg,
         dv_tilt_deg=plane.dv_tilt_deg,
+        seen_from=seen_from,
     )
 
 

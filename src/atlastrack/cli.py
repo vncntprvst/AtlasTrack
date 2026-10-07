@@ -56,6 +56,14 @@ def _parse_bbox(s: str) -> tuple[int, int, int, int]:
         raise typer.BadParameter(f"--bbox expects 'x0,y0,x1,y1' (got {s!r})") from e
 
 
+def _warn_mirrored(project) -> None:
+    from atlastrack.project.checks import mirrored_sections_note
+
+    note = mirrored_sections_note(project)
+    if note:
+        typer.echo(f"warning: {note}", err=True)
+
+
 @app.command()
 def version() -> None:
     """Print the installed package version and exit."""
@@ -293,6 +301,37 @@ def register_one_cmd(
         typer.echo(f"wrote HERBS pkl -> {output_pkl}")
 
 
+@app.command("seen-from")
+def seen_from_cmd(
+    project_json: Annotated[Path, typer.Argument(help="The project.")],
+    view: Annotated[
+        str,
+        typer.Argument(help="'back' (animal's right on the image's right) or 'front' (on its left)."),
+    ],
+    mirror_planes: Annotated[
+        bool,
+        typer.Option(help="Mirror planes placed for the other face (keeps fits and landmarks)."),
+    ] = False,
+) -> None:
+    """Say which face of the sections the images show, and optionally fix planes.
+
+    Planes placed for the other face mirror ML about the midline. With
+    --mirror-planes they are mirrored back; re-export coordinates afterwards.
+    """
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.project.orientation import set_view
+
+    if view not in ("front", "back"):
+        raise typer.BadParameter("view must be 'front' or 'back'")
+    project = load_project(project_json)
+    mirrored, skipped = set_view(project, view, mirror_planes=mirror_planes)  # type: ignore[arg-type]
+    save_project(project, project_json)
+    typer.echo(f"sections seen from the {view}; {len(mirrored)} plane(s) mirrored -> {project_json}")
+    if skipped:
+        typer.echo(f"left as they are (matched to another project; match again): {skipped}")
+    _warn_mirrored(project)
+
+
 @app.command("register")
 def register_cmd(
     project_json: Annotated[
@@ -357,6 +396,7 @@ def register_cmd(
         raise typer.BadParameter(f"--bspline-grid expects 'NxM' (got {bspline_grid!r})") from e
 
     project = load_project(project_json)
+    _warn_mirrored(project)
     project_dir = project_json.parent
 
     logger.info("loading atlas {}", atlas)
@@ -491,6 +531,7 @@ def export_cmd(
     from atlastrack.project.provenance import write_export_provenance
 
     project = load_project(project_json)
+    _warn_mirrored(project)
     out_dir = out_dir or project_json.parent
     base = name or project_json.stem
     atlas_name = atlas or project.atlas.name
