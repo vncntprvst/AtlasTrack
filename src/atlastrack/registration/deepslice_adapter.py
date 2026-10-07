@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from atlastrack.io.quicknii import QuickNiiDocument, load_quicknii
+from atlastrack.io.quicknii import QuickNiiDocument, load_quicknii, quicknii_to_atlas_anchoring
 from atlastrack.project.schema import PlaneParams
 
 if TYPE_CHECKING:
@@ -106,53 +106,8 @@ def _parse_section_index(filename: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-# DeepSlice/QuickNII "ABA_Mouse_CCFv3" 25 µm volume, in its native voxel order
-# (ML, AP, DV) - i.e. dimensions 456 × 528 × 320. Expressed below in our
-# (AP, DV, ML) order for scaling against a brainglobe atlas of the same family.
-_QUICKNII_DIMS_APDVML = (528, 320, 456)
-
-# Axis-direction differences between QuickNII ABA and the brainglobe ASR atlas.
-# QuickNII's AP and DV run opposite to brainglobe (anterior/dorsal at the high
-# end), so those axes are flipped. ML appears to share direction; flip it here
-# if registered slices come out mirrored left↔right.
-_FLIP_AP, _FLIP_DV, _FLIP_ML = True, True, False
-
-
-def _quicknii_to_atlas_anchoring(
-    anchoring: list[float],
-    atlas_shape_apdvml: tuple[int, int, int],
-) -> list[float]:
-    """Convert a DeepSlice/QuickNII anchoring into our atlas's anchoring.
-
-    Three transforms are applied:
-
-    1. **Axis permutation.** QuickNII ABA voxels are ordered ``(ML, AP, DV)``;
-       our :class:`~atlastrack.atlas.planes.Anchoring` / ``sample_plane`` use
-       ``(AP, DV, ML)`` (brainglobe ASR order). Each origin/u/v triplet is
-       reordered ``(x, y, z) -> (y, z, x)``.
-    2. **Resolution scaling.** QuickNII predicts in the 25 µm grid; components
-       are scaled per axis to the loaded atlas's voxel grid.
-    3. **Axis flips.** QuickNII AP and DV run opposite to brainglobe, so for a
-       flipped axis the origin becomes ``size - o`` and the u/v components are
-       negated (``P_k -> size - P_k``).
-    """
-    ox, oy, oz, ux, uy, uz, vx, vy, vz = anchoring
-    # (ML, AP, DV) -> (AP, DV, ML)
-    o = [oy, oz, ox]
-    u = [uy, uz, ux]
-    v = [vy, vz, vx]
-    # Per-axis scale to the loaded atlas grid.
-    scale = [atlas_shape_apdvml[k] / _QUICKNII_DIMS_APDVML[k] for k in range(3)]
-    o = [o[k] * scale[k] for k in range(3)]
-    u = [u[k] * scale[k] for k in range(3)]
-    v = [v[k] * scale[k] for k in range(3)]
-    # Per-axis flips (origin -> size - origin; u, v negated).
-    for k, flip in enumerate((_FLIP_AP, _FLIP_DV, _FLIP_ML)):
-        if flip:
-            o[k] = atlas_shape_apdvml[k] - o[k]
-            u[k] = -u[k]
-            v[k] = -v[k]
-    return [*o, *u, *v]
+# The conversion lives with the QuickNII reader, which the QUINT importer shares.
+_quicknii_to_atlas_anchoring = quicknii_to_atlas_anchoring
 
 
 def _to_uint8(img: np.ndarray) -> np.ndarray:

@@ -21,16 +21,58 @@ atlas-plane parameters:
 
 Storing in this format lets users round-trip through QuickNII or VisuAlign
 without losing data, and lets DeepSlice predictions drop straight into our
-pipeline.
+pipeline. VisuAlign adds ``"markers"`` to a slice: ``[x, y, x', y']`` pairs in the
+slice's ``width`` x ``height`` pixel frame, moving the point the plane puts at
+``(x, y)`` to ``(x', y')``.
+
+QuickNII's axes are ``(x, y, z)`` = (ML, AP, DV) running left -> right,
+posterior -> anterior and inferior -> superior: every one the reverse of a
+BrainGlobe ASR atlas. :func:`quicknii_to_atlas_anchoring` converts.
 """
 from __future__ import annotations
 
-import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from atlastrack.atlas.planes import Anchoring
+
+# QuickNII's Allen CCFv3 25 µm volume is 456 x 528 x 320 voxels (ML, AP, DV);
+# here in (AP, DV, ML) order, to scale against a BrainGlobe atlas of the same family.
+QUICKNII_DIMS_APDVML = (528, 320, 456)
+
+
+def quicknii_to_atlas_anchoring(
+    anchoring: Sequence[float],
+    atlas_shape_apdvml: Sequence[int],
+    *,
+    quicknii_dims: Sequence[int] = QUICKNII_DIMS_APDVML,
+) -> list[float]:
+    """Convert a QuickNII/DeepSlice anchoring into a BrainGlobe-atlas anchoring.
+
+    1. **Axis order.** QuickNII voxels are ``(ML, AP, DV)``; an
+       :class:`~atlastrack.atlas.planes.Anchoring` is ``(AP, DV, ML)``.
+    2. **Resolution.** Each axis is scaled from QuickNII's grid (``quicknii_dims``,
+       (AP, DV, ML); 25 µm unless the file's ``target-resolution`` says otherwise)
+       to the loaded atlas's grid.
+    3. **Direction.** All three QuickNII axes run opposite to BrainGlobe's, so the
+       origin becomes ``size - o`` and ``u``/``v`` are negated on every axis.
+
+    The ML reversal follows PyNutil, the QUINT developers' own reader
+    (``transpose([2, 0, 1])[::-1, ::-1, ::-1]`` between the two volumes). Without
+    it a section comes out mirrored about the midline: the atlas is symmetric, so
+    the overlay looks right, but ML and hemisphere are swapped.
+    """
+    ox, oy, oz, ux, uy, uz, vx, vy, vz = anchoring
+    o = [oy, oz, ox]
+    u = [uy, uz, ux]
+    v = [vy, vz, vx]
+    scale = [atlas_shape_apdvml[k] / quicknii_dims[k] for k in range(3)]
+    o = [atlas_shape_apdvml[k] - o[k] * scale[k] for k in range(3)]
+    u = [-u[k] * scale[k] for k in range(3)]
+    v = [-v[k] * scale[k] for k in range(3)]
+    return [*o, *u, *v]
 
 
 class QuickNiiSlice(BaseModel):

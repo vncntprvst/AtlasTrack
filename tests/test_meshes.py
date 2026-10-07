@@ -106,13 +106,28 @@ def test_deepslice_anchoring_permutation_and_flips() -> None:
     # Real DeepSlice section-0 anchoring (QuickNII (ML, AP, DV) order).
     a = [379.03, 107.44, 270.03, -320.33, -29.73, -10.68, -6.81, 19.19, -231.72]
     out = _quicknii_to_atlas_anchoring(a, (528, 320, 456))  # 25 µm atlas → scale 1
-    # Permute (x,y,z)->(AP,DV,ML), then flip AP (528-o, -u, -v) and DV (320-o).
-    assert out == pytest.approx([528 - 107.44, 320 - 270.03, 379.03,
-                                 29.73, 10.68, -320.33,
-                                 -19.19, 231.72, -6.81])
+    # Permute (x,y,z)->(AP,DV,ML), then reverse every axis (size - o, -u, -v).
+    assert out == pytest.approx([528 - 107.44, 320 - 270.03, 456 - 379.03,
+                                 29.73, 10.68, 320.33,
+                                 -19.19, 231.72, 6.81])
     # Anatomy sanity: AP posterior, DV near the dorsal (top) end.
     assert out[0] > 400  # posterior brainstem section
     assert out[1] < 60   # dorsal surface near the top
+    # Same handedness as a hand-placed coronal plane: the image's left edge is in
+    # the right hemisphere (low ML index) and ML grows across the image.
+    assert out[2] < 228
+    assert out[5] > 0
+
+
+def test_quicknii_ml_matches_pynutil() -> None:
+    """QuickNII x is BrainGlobe ML reversed, as PyNutil converts between the two."""
+    from atlastrack.io.quicknii import quicknii_to_atlas_anchoring
+
+    # A plane whose image x runs along QuickNII +x (toward the animal's right).
+    out = quicknii_to_atlas_anchoring([100, 264, 160, 50, 0, 0, 0, 0, -10], (528, 320, 456))
+    # PyNutil: px = (S2 - 1) - bg_ml on voxel indices, i.e. bg_ml = S2 - px continuously.
+    assert out[2] == pytest.approx(456 - 100)
+    assert out[5] == pytest.approx(-50)
     # u dominated by ML, v by DV - as sample_plane expects.
     assert abs(out[5]) == max(abs(out[3]), abs(out[4]), abs(out[5]))  # u → ML
     assert abs(out[7]) == max(abs(out[6]), abs(out[7]), abs(out[8]))  # v → DV
@@ -211,9 +226,10 @@ def test_predict_anchorings_orders_by_ap_sequence(tmp_path, monkeypatch) -> None
     # Files were named by AP rank, not by section index.
     assert sorted(written) == ["section_s000.png", "section_s001.png"]
     # Token 0 (rank 0) maps back to section 11; token 1 to section 10. The token
-    # rode in the ML origin (index 2) through the QuickNII->atlas conversion.
-    assert out[11][2] == 0.0
-    assert out[10][2] == 1.0
+    # rode in the ML origin (index 2) through the QuickNII->atlas conversion,
+    # which reverses ML (456 - x).
+    assert out[11][2] == 456.0
+    assert out[10][2] == 455.0
 
 
 def test_deepslice_anchoring_scales_with_resolution() -> None:
