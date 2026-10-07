@@ -356,6 +356,50 @@ def _install_exception_handler() -> None:
     sys.excepthook = _handler
 
 
+def _scrollable(page: "QWidget") -> "QWidget":
+    """``page`` in a scroll area that scrolls up and down only.
+
+    It asks for the page's full width, so the panel can never be narrower than
+    its controls (a plain scroll area lets it shrink and cuts them off on the
+    right), and for almost no height, so the window can be as short as the screen.
+    """
+    from qtpy.QtCore import QSize, Qt
+    from qtpy.QtWidgets import QFrame, QScrollArea
+
+    class _VerticalScroll(QScrollArea):
+        #: Called when the page's layout changes (its width needs may have grown).
+        on_layout_changed = None
+
+        def eventFilter(self, obj, event) -> bool:  # noqa: N802 - Qt name
+            from qtpy.QtCore import QEvent, QTimer
+
+            if obj is self.widget() and event.type() == QEvent.LayoutRequest:
+                self.updateGeometry()
+                if self.on_layout_changed is not None:
+                    QTimer.singleShot(0, self.on_layout_changed)
+            return super().eventFilter(obj, event)
+
+        def minimumSizeHint(self) -> QSize:
+            inner = self.widget().minimumSizeHint() if self.widget() else QSize(0, 0)
+            bar = self.verticalScrollBar().sizeHint().width()
+            return QSize(inner.width() + bar, 60)
+
+        def sizeHint(self) -> QSize:
+            inner = self.widget().sizeHint() if self.widget() else QSize(0, 0)
+            bar = self.verticalScrollBar().sizeHint().width()
+            return QSize(inner.width() + bar, inner.height())
+
+    scroll = _VerticalScroll()
+    scroll.setWidget(page)
+    page.installEventFilter(scroll)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    # The panel is kept wide enough (see _fit_width_to_tab); should it still end
+    # up narrower, a scroll bar beats cutting the controls off.
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    return scroll
+
+
 def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     """Construct the main dock panel and wire up all sub-widgets."""
     from qtpy.QtWidgets import QTabWidget, QVBoxLayout, QWidget
@@ -451,11 +495,29 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # Tab order follows the workflow: load the histology, set each section's AP
     # against the atlas, register, then mark probes on the registered sections
     # and align ephys to them.
-    tabs.addTab(tab_load, "Histology")
-    tabs.addTab(tab_atlas, "Atlas")
-    tabs.addTab(tab_register, "Register")
-    tabs.addTab(tab_annotate, "Probes")
-    tabs.addTab(tab_ephys, "Ephys")
+    # Each tab scrolls when the screen is shorter than its controls; without this
+    # the tallest tab set the window's minimum height, which could exceed the
+    # screen and stop the window being resized at all.
+    tabs.addTab(_scrollable(tab_load), "Histology")
+    tabs.addTab(_scrollable(tab_atlas), "Atlas")
+    tabs.addTab(_scrollable(tab_register), "Register")
+    tabs.addTab(_scrollable(tab_annotate), "Probes")
+    tabs.addTab(_scrollable(tab_ephys), "Ephys")
+
+    def _fit_width_to_tab(_index: int = 0) -> None:
+        # As wide as the tab on show needs (its scroll bar included), so none is
+        # ever cut off - and no wider, so narrow tabs don't pay for the widest.
+        page = tabs.currentWidget()
+        if page is not None:
+            container.setMinimumWidth(max(320, page.minimumSizeHint().width() + 8))
+
+    tabs.currentChanged.connect(_fit_width_to_tab)
+    for k in range(tabs.count()):
+        # A tab whose content grows later (a project loaded, a list filled) asks again.
+        tabs.widget(k).on_layout_changed = (
+            lambda k=k: _fit_width_to_tab() if tabs.currentIndex() == k else None
+        )
+    _fit_width_to_tab()
 
     # 3D visualization + export live in their own permanent panel (right dock),
     # not inside the Register tab.

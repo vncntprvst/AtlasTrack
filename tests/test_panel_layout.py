@@ -121,3 +121,28 @@ def test_closing_mends_the_warped_contour_without_widening_it() -> None:
     # Far less ink than thickening, which is the whole point.
     assert int(closed.sum()) < int(thick.sum())
     assert int(closed.sum()) < 2 * n_plain
+
+
+@pytest.mark.qt
+def test_side_panel_does_not_set_a_tall_window(qtbot) -> None:
+    """Tabs scroll, so adding controls never makes the window taller than a screen."""
+    import napari
+
+    from atlastrack.gui.app import _build_panel
+
+    viewer = napari.Viewer(show=False)
+    try:
+        panel, viz = _build_panel(viewer)
+        qtbot.addWidget(panel)
+        qtbot.addWidget(viz)
+        assert panel.minimumSizeHint().height() < 300
+        # ...and never narrower than the tab on show, so nothing is cut off.
+        from qtpy.QtWidgets import QTabWidget
+
+        tabs = next(t for t in panel.findChildren(QTabWidget) if t.count() >= 5)
+        for k in range(tabs.count()):
+            tabs.setCurrentIndex(k)
+            need = tabs.widget(k).widget().minimumSizeHint().width()
+            assert panel.minimumWidth() >= need, tabs.tabText(k)
+    finally:
+        viewer.close()
