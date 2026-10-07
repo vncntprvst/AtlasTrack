@@ -422,6 +422,43 @@ def add_channel_cmd(
     typer.echo(f"added channel image {name!r} ({len(paths)} file(s)) -> {project_json}")
 
 
+@app.command("match")
+def match_cmd(
+    project_json: Annotated[Path, typer.Argument(help="The project to register (sections found).")],
+    reference_json: Annotated[
+        Path, typer.Argument(help="A registered project of the same sections, imaged differently.")
+    ],
+    output_json: Annotated[
+        Path | None, typer.Option(help="Where to write the result. Defaults to overwriting.")
+    ] = None,
+) -> None:
+    """Register sections by matching them to the same sections in a registered project.
+
+    Each section is paired with its counterpart by tissue outline, fitted to it
+    (flipped if needed), and given its counterpart's registration. Cells in the
+    reference come across too.
+    """
+    from atlastrack.project.io import load_project, save_project
+    from atlastrack.registration.reference_match import apply_matches, match_projects
+
+    project, reference = load_project(project_json), load_project(reference_json)
+    out = output_json or project_json
+    images: dict = {}
+    matches = match_projects(
+        project, project_json.parent, reference, reference_json.parent, slide_images=images,
+        progress=lambda done, total, msg: logger.info("{} ({}/{})", msg, done, total),
+    )
+    for m in matches:
+        typer.echo(
+            f"section {m.target_index:3d} -> reference {m.reference_label or m.reference_index:3}"
+            f"  outline overlap {m.fit.overlap:.3f}" + ("  (flipped)" if m.mirrored else "")
+        )
+    done = apply_matches(project, out, reference, reference_json, matches,
+                         slide_images=images)
+    save_project(project, out, slide_images=images)
+    typer.echo(f"registered {len(done)} section(s) -> {out}")
+
+
 @app.command("register")
 def register_cmd(
     project_json: Annotated[

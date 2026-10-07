@@ -300,6 +300,23 @@ class ManualLandmarks(BaseModel):
     forward: bool = False
 
 
+class ReferenceMatch(BaseModel):
+    """A section matched to its counterpart in another, registered project.
+
+    Both are images of the same tissue section. ``matrix`` (3x3, (x, y) pixels)
+    maps this section's pixels - after its flips - onto the counterpart's, and the
+    counterpart's registration composed with it is this section's registration.
+    """
+
+    project_path: str
+    section_index: int
+    slide_number: int | None = None
+    matrix: list[list[float]]
+    mirrored: bool = False
+    # Share of the two tissue outlines that overlap once matched (0-1).
+    overlap: float | None = None
+
+
 class Section(BaseModel):
     """One brain section extracted from a slide image."""
 
@@ -315,7 +332,7 @@ class Section(BaseModel):
     plane: PlaneParams | None = None
     # Where ``plane.ap_um`` came from, so the matcher can show it and the user can
     # tell a prediction from something they set. None = never assigned.
-    ap_source: Literal["deepslice", "manual", "even_spacing"] | None = None
+    ap_source: Literal["deepslice", "manual", "even_spacing", "reference"] | None = None
     # In-plane rotation for presenting the series (degrees, anticlockwise). Applied
     # by the section-series export and the section view, NOT baked into the image
     # registration runs on: the fit already absorbs in-plane rotation, so rotating
@@ -346,6 +363,9 @@ class Section(BaseModel):
     # with its flips and rotation applied - the pixels registration sees. Written
     # on save; used to rebuild the slide when the slide image itself is missing.
     image_path: str | None = None
+    # When this section's registration was taken from the same section in another
+    # (registered) project: which one, and how its pixels map onto that one's.
+    reference: ReferenceMatch | None = None
 
 
 #: A colour channel of a slide image, by name.

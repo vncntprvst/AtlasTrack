@@ -63,6 +63,7 @@ _AP_SOURCE_LABELS = {
     "deepslice": "DeepSlice",
     "manual": "set by hand",
     "even_spacing": "even spacing",
+    "reference": "from the matched section",
     None: "not set",
 }
 
@@ -213,6 +214,7 @@ _AP_SOURCE_COLORS = {
     "deepslice": "#4da6ff",
     "manual": "#5fd35f",
     "even_spacing": "#e0b040",
+    "reference": "#c080ff",
     None: "#8a8a8a",
 }
 

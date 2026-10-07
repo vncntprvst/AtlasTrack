@@ -483,6 +483,18 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # Naming a channel in Histology updates the Register tab's "Align on" list.
     image_tools.on_channel_names_changed = register_panel._populate_align_combo
 
+    def _after_match() -> None:
+        # A match may flip sections and brings cells: redraw both.
+        for slide_idx in list(state.slide_images):
+            name = f"Slide {slide_idx}"
+            if name in viewer.layers:
+                viewer.layers[name].data = _display_image_for_slide(
+                    state, slide_idx, state.slide_images[slide_idx]
+                )
+        _update_channel_layers(viewer, state)
+        _update_cells_layer(viewer, state)
+
+    register_panel.on_project_changed = _after_match
     # Channel images added or removed in Histology, and the one to show.
     image_tools.on_channel_images_changed = (
         lambda: _update_channel_layers(viewer, state, reload=True)
@@ -496,6 +508,7 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
         register_panel._refresh_residuals()
 
     image_tools.on_planes_mirrored = _after_planes_mirrored
+
     def _on_project_loaded() -> None:
         # A project was just opened; whatever was being read, the thing to look at
         # now is the project. Reading is never lost - the Help tab keeps its page.

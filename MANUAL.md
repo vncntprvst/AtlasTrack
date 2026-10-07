@@ -395,6 +395,7 @@ atlastrack split IMAGE                  # find sections
 atlastrack register PROJECT.json        # register a whole project
 atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
 atlastrack import SOURCE                # convert a registration made by another tool
+atlastrack match PROJECT.json REF.json  # register sections from the same sections in REF
 atlastrack add-cells PROJECT.json DIR   # add slicereg's counted cells to its import
 atlastrack add-channel PROJECT.json NAME FILE...  # another image of the slide, e.g. one dye
 atlastrack seen-from PROJECT.json back  # which face the images show (--mirror-planes)
@@ -431,6 +432,31 @@ What comes across, and how:
 
 Atlas coordinates then match the source tool's to within 0.02 µm (slicereg) and
 1 µm (VisuAlign). Not imported: slicereg's 3-D renders.
+
+### 5.13 The same sections, imaged twice
+
+When the sections on your slides were also imaged elsewhere and registered there
+- on a confocal for cell counts, say - the slides need no atlas registration of
+their own. Matching each section to its counterpart is quicker and more accurate,
+and puts probe tracks and cells in exactly the same atlas coordinates.
+
+1. Load the slides and find the sections as usual (5.1, 5.2). No need to flip
+   them: the match finds out which are mirrored.
+2. **Register ▸ Match to a registered project...** and pick the other project.
+   Each section is paired with its counterpart by the shape of its tissue
+   outline, then fitted to it on the stain (scale, turn, shift and a little
+   stretch).
+3. A table lists the pairs with how well the outlines overlap once fitted (1 =
+   perfectly). Pairs below 0.93 are left unticked for you to look at. **Apply
+   ticked**: those sections are flipped where needed and take their
+   counterpart's registration - its plane, its warp and its hand corrections.
+   Sections without a counterpart are left as they were; register them the
+   usual way.
+4. Place the probe tracks (5.8). The other project's cells come along, drawn on
+   the sections and in the 3-D view and HTML export.
+
+Each section remembers what it was matched to and how. The registration is a
+copy: if the other project is corrected later, match again.
 
 ---
 

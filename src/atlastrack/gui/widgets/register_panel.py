@@ -319,6 +319,16 @@ class RegisterPanelWidget(QWidget):
         self._series_btn.clicked.connect(self._show_series_check)
         layout.addWidget(self._series_btn)
 
+        self._match_btn = QPushButton("Match to a registered project...")
+        self._match_btn.setToolTip(
+            "For sections already registered in another project - the same sections, "
+            "imaged differently (e.g. on a confocal). Each section here is paired "
+            "with its counterpart, fitted to it, and takes its registration; cells "
+            "counted there come along."
+        )
+        self._match_btn.clicked.connect(self._match_to_reference)
+        layout.addWidget(self._match_btn)
+
         # Manual per-section atlas correction (drag in the viewer). Set well
         # apart from the automatic registration controls above - it is the
         # by-hand fallback for sections the automatic fit got wrong.
@@ -935,6 +945,120 @@ class RegisterPanelWidget(QWidget):
         self._select_anchor = None
         self._residuals_table.clearSelection()
         self._update_register_button()
+
+    #: Called after sections change outside a registration run (a match): the app
+    #: redraws the slide (flips) and the cells.
+    on_project_changed = None
+
+    def _match_to_reference(self) -> None:
+        from qtpy.QtCore import QTimer
+        from qtpy.QtWidgets import QFileDialog
+
+        from atlastrack.project.io import load_project
+
+        if not any(s.sections for s in self._state.project.slides):
+            _error_dialog(self, "No sections", "Find the sections on the slide first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Registered project of the same sections", "", "Projects (*.json)"
+        )
+        if not path:
+            return
+        try:
+            reference = load_project(path)
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "Not a project", f"{path} could not be read:\n{exc}")
+            return
+        if not any(s.registration for sl in reference.slides for s in sl.sections):
+            _error_dialog(self, "Nothing registered", f"{Path(path).name} has no "
+                          "registered sections to match to.")
+            return
+        project_path = self._ensure_project_path()
+        target_path = project_path or Path(path).with_name("matched.atlastrack.json")
+        target_dir = target_path.parent
+
+        from napari.qt.threading import thread_worker
+
+        from atlastrack.registration.reference_match import match_projects
+
+        latest = {"msg": "Reading sections...", "done": 0, "total": 1}
+
+        def progress(done, total, msg):
+            latest.update(done=done, total=total, msg=msg)
+
+        @thread_worker
+        def _run():
+            return match_projects(
+                self._state.project, target_dir, reference, Path(path).parent,
+                slide_images=dict(self._state.slide_images), progress=progress,
+            )
+
+        timer = QTimer(self)
+
+        def _tick():
+            self._on_progress({"current": latest["done"], "total": latest["total"],
+                               "msg": latest["msg"]})
+
+        timer.timeout.connect(_tick)
+        timer.start(300)
+        self._match_btn.setEnabled(False)
+        self._progress.setVisible(True)
+
+        def _finish():
+            timer.stop()
+            self._match_btn.setEnabled(True)
+            self._progress.setVisible(False)
+
+        def _done(matches):
+            _finish()
+            self._review_matches(matches, reference, Path(path), target_path)
+
+        def _failed(exc):
+            _finish()
+            _error_dialog(self, "Matching failed", str(exc))
+
+        worker = _run()
+        worker.returned.connect(_done)
+        worker.errored.connect(_failed)
+        worker.start()
+
+    def _review_matches(self, matches, reference, reference_path: Path, target_path: Path) -> None:
+        from atlastrack.gui.widgets.reference_match_dialog import ReferenceMatchDialog
+        from atlastrack.registration.reference_match import apply_matches
+
+        n_sections = sum(len(s.sections) for s in self._state.project.slides)
+        if not matches:
+            self._status.setText(f"No section matched one in {reference_path.name}.")
+            return
+        dialog = ReferenceMatchDialog(matches, reference_path.name, n_sections, parent=self)
+        if not dialog.exec():
+            self._status.setText("Matching cancelled; nothing changed.")
+            return
+        chosen = dialog.chosen()
+        try:
+            done = apply_matches(
+                self._state.project, target_path, reference, reference_path, chosen,
+                slide_images=self._state.slide_images,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "Could not apply the matches", str(exc))
+            return
+        self._reg_base_dir = target_path.parent
+        if self.on_project_changed is not None:
+            self.on_project_changed()
+        self._refresh_residuals()
+        msg = f"{len(done)} section(s) registered from {reference_path.name}."
+        path = self._state.project_path
+        if path is not None:
+            try:
+                from atlastrack.project.io import save_project
+
+                save_project(self._state.project, path, slide_images=self._state.slide_images)
+                msg += f"  ·  saved → {path.name}"
+            except Exception as exc:  # noqa: BLE001
+                msg += f"  ·  save failed: {exc}"
+        self._status.setText(msg)
+        self._show_overlay()
 
     def _landmarks_forward(self, section_index: int | None) -> bool:
         """Whether that section's landmark spline is fitted forward (an import)."""
