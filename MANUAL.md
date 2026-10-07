@@ -385,6 +385,7 @@ Needs the `ephys` extra and a probe with tip and entry already registered.
 atlastrack split IMAGE                  # find sections
 atlastrack register PROJECT.json        # register a whole project
 atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
+atlastrack add-cells PROJECT.json DIR   # add slicereg's counted cells to its import
 atlastrack seen-from PROJECT.json back  # which face the images show (--mirror-planes)
 ```
 

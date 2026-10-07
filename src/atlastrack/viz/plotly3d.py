@@ -233,6 +233,21 @@ def add_probe_traces(
 # Figure builder
 # ---------------------------------------------------------------------------
 
+def add_cell_traces(fig: "go.Figure", project: "Project") -> None:
+    """The project's counted cells as small markers, one trace per cell type."""
+    import plotly.graph_objects as go
+
+    from atlastrack.project.cells import cell_colour, cells_in_atlas
+
+    for cell_type, pts in cells_in_atlas(project).items():
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 1], y=pts[:, 0], z=pts[:, 2],  # ML, AP, DV
+            mode="markers",
+            marker={"size": 2, "color": cell_colour(project, cell_type), "opacity": 0.8},
+            name=f"cells: {cell_type} ({len(pts)})",
+        ))
+
+
 def _rereference_traces_to_bregma(
     fig: "go.Figure", atlas_name: str | None = None
 ) -> None:
@@ -303,6 +318,7 @@ def build_figure(
                 fig.add_trace(mesh)
 
     add_probe_traces(fig, project, style=style)
+    add_cell_traces(fig, project)
 
     # Optionally re-reference all traces (regions AND probes, so they stay
     # aligned) to bregma: ML 0 = midline, AP 0 = bregma level (anterior +,

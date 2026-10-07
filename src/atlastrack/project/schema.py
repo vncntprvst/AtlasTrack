@@ -374,6 +374,31 @@ class Slide(BaseModel):
     # The channel registration compares with the atlas. None = all channels, with
     # bright red/green labels left out automatically.
     align_channel: ChannelColour | None = None
+    # Pixel size of the slide image in µm, when known.
+    pixel_um: float | None = None
+
+
+class CellPoint(BaseModel):
+    """One counted cell: where it is in the atlas, and on which section."""
+
+    ap_um: float
+    ml_um: float
+    dv_um: float
+    # Section and section-local (x, y) pixel, when the cell is on a section of
+    # this project; None for cells known only in the atlas.
+    section_index: int | None = None
+    x_px: float | None = None
+    y_px: float | None = None
+    cell_type: str = "cell"
+    region: str | None = None
+
+
+class CellSet(BaseModel):
+    """A set of counted cells, e.g. from slicereg's cells.csv files."""
+
+    name: str
+    source: str | None = None
+    cells: list[CellPoint] = []
 
 
 class AtlasRef(BaseModel):
@@ -395,6 +420,8 @@ class Project(BaseModel):
     # Inter-section AP spacing (µm) chosen in the ordering panel; persisted so it
     # reloads with the project. ``None`` until the user sets/applies a spacing.
     section_spacing_um: float | None = None
+    # Counted cells, shown on the sections and in 3-D.
+    cell_sets: list[CellSet] = []
     # Which face of the sections the images show (project.orientation): "front"
     # puts the animal's right on the image's left, as atlas plates do; "back" on
     # its right. None = not said; the planes' own orientation is used.

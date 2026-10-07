@@ -959,6 +959,32 @@ def _section_outline_blending() -> str:
     return OVERLAY_BLENDING
 
 
+
+
+def _update_cells_layer(viewer: "napari.Viewer", state: "WorkflowState") -> None:
+    """Draw the project's counted cells on the sections they belong to."""
+    from atlastrack.gui.overlay_style import OVERLAY_BLENDING
+    from atlastrack.project.cells import cell_colour, cells_on_slide
+
+    for slide_idx, slide in enumerate(state.project.slides):
+        name = f"Cells {slide_idx}"
+        pts, types = cells_on_slide(state.project, slide_idx)
+        if name in viewer.layers:
+            viewer.layers.remove(name)
+        if not len(pts):
+            continue
+        # About 40 µm across when the pixel size is known: visible, not hiding much.
+        size = 40.0 / slide.pixel_um if slide.pixel_um else 20.0
+        colours = [cell_colour(state.project, t) for t in types]
+        kwargs = {"name": name, "size": size, "face_color": colours, "opacity": 0.95,
+                  "blending": OVERLAY_BLENDING}
+        # A dark rim keeps each dot readable over bright labelling.
+        try:
+            viewer.add_points(pts, border_width=0.15, border_color="black", **kwargs)
+        except TypeError:  # napari < 0.5
+            viewer.add_points(pts, edge_width=0.15, edge_color="black", **kwargs)
+
+
 def _update_section_numbers(
     viewer: "napari.Viewer", state: "WorkflowState", slide_idx: int
 ) -> None:
@@ -1054,6 +1080,7 @@ def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> 
                 )
             _update_section_numbers(viewer, state, slide_idx)
 
+    _update_cells_layer(viewer, state)
     if state.project.slides:
         state.active_slide_idx = 0
     try:

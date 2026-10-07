@@ -301,6 +301,24 @@ def register_one_cmd(
         typer.echo(f"wrote HERBS pkl -> {output_pkl}")
 
 
+@app.command("add-cells")
+def add_cells_cmd(
+    project_json: Annotated[Path, typer.Argument(help="A project imported from slicereg.")],
+    slicereg_dir: Annotated[
+        Path, typer.Argument(help="The slicereg project folder (holds project.json and slices/).")
+    ],
+) -> None:
+    """Add slicereg's counted cells (cells.csv) to a project imported from it."""
+    from atlastrack.project.cells import add_slicereg_cells
+    from atlastrack.project.io import load_project, save_project
+
+    project = load_project(project_json)
+    cell_set = add_slicereg_cells(project, slicereg_dir)
+    placed = sum(1 for c in cell_set.cells if c.section_index is not None)
+    save_project(project, project_json)
+    typer.echo(f"added {len(cell_set.cells)} cells ({placed} placed on sections) -> {project_json}")
+
+
 @app.command("seen-from")
 def seen_from_cmd(
     project_json: Annotated[Path, typer.Argument(help="The project.")],

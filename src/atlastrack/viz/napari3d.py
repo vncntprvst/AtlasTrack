@@ -97,6 +97,29 @@ def add_ephys_channel_layers(
     return added
 
 
+def add_cell_layers(
+    viewer: "napari.Viewer",
+    project: "Project",
+    *,
+    size: float = 40.0,
+) -> list:
+    """Add the project's counted cells as 3D Points layers, one per cell type."""
+    from atlastrack.project.cells import cell_colour, cells_in_atlas
+
+    added = []
+    for cell_type, pts in cells_in_atlas(project).items():
+        layer = viewer.add_points(
+            pts,  # (AP, ML, DV)
+            name=f"Cells: {cell_type}",
+            face_color=cell_colour(project, cell_type),
+            size=size,
+            ndim=3,
+            blending="translucent_no_depth",
+        )
+        added.append(layer)
+    return added
+
+
 def _solid_colormap(rgb: tuple[int, int, int], name: str):
     """A single-colour napari Colormap (both ends = ``rgb``) for flat shading."""
     from napari.utils.colormaps import Colormap
@@ -228,6 +251,7 @@ def show_3d_scene(
 
     added += add_probe_layers(viewer, project, line_width=line_width)
     added += add_ephys_channel_layers(viewer, project)
+    added += add_cell_layers(viewer, project)
     # Bregma is atlas-specific, so the display frame follows the project's atlas.
     _apply_bregma_display(added, getattr(project.atlas, "name", None))
     switch_to_3d(viewer)
