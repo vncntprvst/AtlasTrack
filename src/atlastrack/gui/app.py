@@ -477,6 +477,8 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # Renaming a probe must repopulate every panel's probe combo (Probes
     # tip/entry, Ephys) so they show the new label.
     probe_picker.on_probes_changed = _refresh_panels
+    # Naming a channel in Histology updates the Register tab's "Align on" list.
+    image_tools.on_channel_names_changed = register_panel._populate_align_combo
 
     def _on_project_loaded() -> None:
         # A project was just opened; whatever was being read, the thing to look at

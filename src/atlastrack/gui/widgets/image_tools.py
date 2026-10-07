@@ -12,6 +12,7 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
@@ -21,6 +22,7 @@ from superqt import QDoubleRangeSlider
 
 from atlastrack.gui.widgets.separators import section_header
 from atlastrack.gui.workflow import WorkflowState
+from atlastrack.project.schema import ChannelColour
 
 _CHANNELS = ("R", "G", "B")
 
@@ -199,7 +201,61 @@ class ImageToolsWidget(QWidget):
         auto_btn.clicked.connect(self._auto_levels)
         levels_layout.addWidget(auto_btn)
         layout.addWidget(levels_box)
+
+        # What each colour shows. Saved with the project; the Register tab lists
+        # these names under "Align on", so the stain can be picked by name.
+        names_box = QGroupBox("Channels")
+        names_box.setToolTip(
+            "Name what each colour channel shows (a stain such as Nissl or DAPI, "
+            "or a label such as DiI or GFP). Leave a channel empty if unused."
+        )
+        names_layout = QVBoxLayout(names_box)
+        self._name_edits: dict[ChannelColour, QLineEdit] = {}
+        rows: tuple[tuple[str, ChannelColour, str], ...] = (
+            ("R", "red", "e.g. DiI, rfp"),
+            ("G", "green", "e.g. GFP"),
+            ("B", "blue", "e.g. DAPI, Nissl"),
+        )
+        for ch, colour, hint in rows:
+            row = QHBoxLayout()
+            label = QLabel(f"{_CHANNEL_NAMES[ch]}:")
+            label.setFixedWidth(42)
+            row.addWidget(label)
+            edit = QLineEdit()
+            edit.setPlaceholderText(hint)
+            edit.editingFinished.connect(self._on_channel_names_edited)
+            row.addWidget(edit, 1)
+            names_layout.addLayout(row)
+            self._name_edits[colour] = edit
+        layout.addWidget(names_box)
         layout.addStretch()
+
+
+    # ------------------------------------------------------------------
+    # Channel names
+    # ------------------------------------------------------------------
+
+    #: Called after the names change (the Register tab's "Align on" list).
+    on_channel_names_changed: Callable[[], None] | None = None
+
+    def _on_channel_names_edited(self) -> None:
+        names = {c: e.text().strip() for c, e in self._name_edits.items() if e.text().strip()}
+        changed = False
+        for slide in self._state.project.slides:
+            if slide.channel_names != names:
+                slide.channel_names = dict(names)
+                changed = True
+        if changed and self.on_channel_names_changed is not None:
+            self.on_channel_names_changed()
+
+    def refresh_after_load(self) -> None:
+        """Show the loaded project's channel names (from its first slide)."""
+        slides = self._state.project.slides
+        names = slides[0].channel_names if slides else {}
+        for colour, edit in self._name_edits.items():
+            edit.blockSignals(True)
+            edit.setText(names.get(colour, ""))
+            edit.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Section selection (drives the "Selected section" scope)
