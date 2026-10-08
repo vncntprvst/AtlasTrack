@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -146,6 +146,44 @@ def _viewer_alive(viewer) -> bool:
         return False
 
 
+def _window_exists(viewer) -> bool:
+    """Whether the viewer's Qt window still exists (shown or hidden)."""
+    try:
+        viewer.window._qt_window.isVisible()
+        return True
+    except Exception:  # noqa: BLE001 - window deleted
+        return False
+
+
+class _HideOnClose(QObject):
+    """Turn closing a window into hiding it.
+
+    Closing a second napari window frees its OpenGL objects, which on Windows can
+    crash the whole application with an access violation. A hidden window keeps
+    them; the next "3D view" shows it again.
+    """
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt API
+        if event.type() == QEvent.Type.Close:
+            event.ignore()
+            obj.hide()
+            return True
+        return False
+
+
+class _OnClose(QObject):
+    """Call ``callback`` when the watched window is closed."""
+
+    def __init__(self, callback, parent=None) -> None:
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt API
+        if event.type() == QEvent.Type.Close:
+            self._callback()
+        return False
+
+
 def _bring_to_front(viewer) -> None:
     """Show a napari window above the others and give it the focus.
 
@@ -181,6 +219,7 @@ class VizExportPanelWidget(QWidget):
         self._state = state
         self._viewer = viewer
         self._viewer3d = None  # held so the separate 3D window isn't GC'd
+        self._close_filters: list[QObject] = []  # held so the filters aren't GC'd
         self._settings = None
         # Region/display atlas (request: view/export regions in a compatible atlas
         # without re-registering). None until resolved by _ensure_display_atlas.
@@ -579,6 +618,20 @@ class VizExportPanelWidget(QWidget):
             self._render_napari3d()
         self._status.setText(msg)
 
+    def _watch_windows(self, viewer3d) -> None:
+        """Hide the 3D window when it is closed; close it with the main window."""
+        win3d = viewer3d.window._qt_window
+        hide = _HideOnClose(win3d)
+        win3d.installEventFilter(hide)
+        self._close_filters.append(hide)
+        try:
+            main = self._viewer.window._qt_window
+        except Exception:  # noqa: BLE001 - no main window (tests)
+            return
+        follow = _OnClose(win3d.hide, main)
+        main.installEventFilter(follow)
+        self._close_filters.append(follow)
+
     def _view_napari3d(self) -> None:
         # Re-map first so the 3D view always reflects the latest corrections; the
         # region atlas (possibly different from the registration atlas) is resolved
@@ -598,16 +651,21 @@ class VizExportPanelWidget(QWidget):
 
             from atlastrack.viz.napari3d import show_3d_scene
 
-            if self._viewer3d is None or not _viewer_alive(self._viewer3d):
+            new_window = self._viewer3d is None or not _window_exists(self._viewer3d)
+            if new_window:
                 self._viewer3d = napari.Viewer(title="Registered histology and probe tracks - 3D view")
+                self._watch_windows(self._viewer3d)
             else:
-                self._viewer3d.layers.clear()
+                self._viewer3d.window._qt_window.show()
 
+            # The scene is updated in place, never cleared: removing layers from
+            # this second window crashed the application (see napari3d).
             added = show_3d_scene(
                 self._viewer3d,
                 self._state.project,
                 self._display_atlas,
                 extra_regions=self._extra_region_list(),
+                reset_camera=new_window,
             )
             # Bring the 3D window to the front: a second napari window otherwise
             # opens behind the main one, which keeps the focus.

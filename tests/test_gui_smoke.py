@@ -1611,6 +1611,75 @@ def test_show_3d_scene_adds_ephys_channel_layer(qtbot) -> None:
         viewer.close()
 
 
+@pytest.mark.qt
+def test_3d_scene_is_updated_in_place_never_removed(qtbot) -> None:
+    """A second run changes the layers in place and only hides what is gone.
+
+    Removing a layer from the separate 3D window crashed the application on
+    "Update probe coordinates" (an OpenGL access violation on Windows).
+    """
+    import napari
+    from atlastrack.project.schema import EphysAlignment, ProbeSpec, ProbeType, Shank
+    from atlastrack.viz.napari3d import show_3d_scene
+
+    def probe(label, ml):
+        shank = Shank(
+            index=0, tip_ccf_um=(4000.0, ml, 5000.0), entry_ccf_um=(4000.0, ml, 1000.0),
+            ephys=EphysAlignment(channel_ccf_um=[(4000.0, ml, 5000.0), (4000.0, ml, 3000.0)]),
+        )
+        return ProbeSpec(label=label, type=ProbeType(name="NP", n_shanks=1), shanks=[shank])
+
+    viewer = napari.Viewer(show=False)
+    try:
+        project = Project(probes=[probe("A", 2000.0), probe("B", 3000.0)])
+        show_3d_scene(viewer, project, None)
+        first = {layer.name: layer for layer in viewer.layers}
+        assert set(first) == {"Probe A", "Probe B", "Ephys channels A", "Ephys channels B"}
+        removed = []
+        viewer.layers.events.removed.connect(lambda e: removed.append(e.value.name))
+
+        project.probes[0].shanks[0].tip_ccf_um = (4000.0, 2500.0, 5000.0)
+        project.probes[0].shanks[0].ephys.channel_ccf_um.append((4000.0, 2500.0, 4000.0))
+        project.probes[1].shanks[0].tip_ccf_um = None  # probe B no longer drawn
+        project.probes[1].shanks[0].ephys = None
+        show_3d_scene(viewer, project, None, reset_camera=False)
+
+        assert removed == []
+        assert {layer.name: layer for layer in viewer.layers} == first  # same objects
+        assert np.asarray(first["Probe A"].data[0])[0][1] == 2500.0
+        assert first["Probe A"].shape_type == ["line"]
+        assert len(first["Ephys channels A"].data) == 3
+        assert first["Probe A"].visible and first["Ephys channels A"].visible
+        assert not first["Probe B"].visible and not first["Ephys channels B"].visible
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_3d_window_hides_on_close_and_follows_the_main_window(qtbot) -> None:
+    """Closing the 3D window hides it (its OpenGL objects stay alive), and closing
+    the main window closes the 3D window too."""
+    from qtpy.QtWidgets import QWidget
+
+    from atlastrack.gui.widgets.viz_export_panel import _HideOnClose, _OnClose
+
+    main, win3d = QWidget(), QWidget()
+    qtbot.addWidget(main)
+    qtbot.addWidget(win3d)
+    hide = _HideOnClose(win3d)
+    win3d.installEventFilter(hide)
+    follow = _OnClose(win3d.hide, main)
+    main.installEventFilter(follow)
+    main.show()
+    win3d.show()
+
+    assert win3d.close() is False  # the close was turned into a hide
+    assert win3d.isHidden()
+    win3d.show()
+    main.close()
+    assert win3d.isHidden()
+
+
 # ---------------------------------------------------------------------------
 # Reload repopulates tab fields
 # ---------------------------------------------------------------------------

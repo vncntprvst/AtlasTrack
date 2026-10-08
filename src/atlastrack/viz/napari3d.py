@@ -2,6 +2,12 @@
 
 This module IS allowed to import napari (it lives under viz/, not core modules).
 All functions accept a live napari Viewer and add layers to it.
+
+Run again on the same viewer, they reuse the layers they added before (found by a
+tag in ``layer.metadata``): the data is changed in place, and layers no longer
+needed are hidden. They never remove a layer. Removing a layer from a second napari
+window frees its OpenGL objects, and on Windows the next repaint then crashes with
+an access violation (the 3D window crashed on every "Update probe coordinates").
 """
 from __future__ import annotations
 
@@ -13,6 +19,24 @@ if TYPE_CHECKING:
     import napari
     from brainglobe_atlasapi import BrainGlobeAtlas
     from atlastrack.project.schema import Project
+
+#: ``layer.metadata`` key holding the tag a scene layer is found by on the next run.
+_SCENE_KEY = "atlastrack_3d"
+
+
+def _put_layer(viewer: "napari.Viewer", key: str, make, update=None):
+    """The layer tagged ``key``, shown and passed to ``update``; else ``make()``'s."""
+    for layer in viewer.layers:
+        if layer.metadata.get(_SCENE_KEY) == key:
+            if update is not None:
+                update(layer)
+            layer.visible = True
+            return layer
+    layer = make()
+    if layer is not None:
+        layer.metadata[_SCENE_KEY] = key
+    return layer
+
 
 _PROBE_COLORS = [
     (1.0, 0.1, 0.1, 1.0),
@@ -51,13 +75,24 @@ def add_probe_layers(
 
         if not lines:
             continue
-        layer = viewer.add_shapes(
-            lines,
-            name=f"Probe {probe.label}",
-            shape_type="line",
-            edge_color=[color] * len(lines),
-            edge_width=line_width,
-            ndim=3,
+
+        def _update(layer, lines=lines, color=color):
+            # Type given with the data: the shape_type setter fails on 3D shapes.
+            layer.data = [(line, "line") for line in lines]
+            layer.edge_color = [color] * len(lines)
+            layer.edge_width = line_width
+
+        layer = _put_layer(
+            viewer, f"probe:{probe.label}",
+            lambda lines=lines, color=color, label=probe.label: viewer.add_shapes(
+                lines,
+                name=f"Probe {label}",
+                shape_type="line",
+                edge_color=[color] * len(lines),
+                edge_width=line_width,
+                ndim=3,
+            ),
+            _update,
         )
         added.append(layer)
     return added
@@ -86,12 +121,23 @@ def add_ephys_channel_layers(
             pts.extend([tuple(float(v) for v in c) for c in shank.ephys.channel_ccf_um])
         if not pts:
             continue
-        layer = viewer.add_points(
-            np.array(pts, dtype=float),  # (AP, ML, DV)
-            name=f"Ephys channels {probe.label}",
-            face_color=[color] * len(pts),
-            size=size,
-            ndim=3,
+        pts = np.array(pts, dtype=float)  # (AP, ML, DV)
+
+        def _update(layer, pts=pts, color=color):
+            layer.data = pts
+            layer.face_color = [color] * len(pts)
+            layer.size = size
+
+        layer = _put_layer(
+            viewer, f"ephys:{probe.label}",
+            lambda pts=pts, color=color, label=probe.label: viewer.add_points(
+                pts,
+                name=f"Ephys channels {label}",
+                face_color=[color] * len(pts),
+                size=size,
+                ndim=3,
+            ),
+            _update,
         )
         added.append(layer)
     return added
@@ -108,13 +154,24 @@ def add_cell_layers(
 
     added = []
     for cell_type, pts in cells_in_atlas(project).items():
-        layer = viewer.add_points(
-            pts,  # (AP, ML, DV)
-            name=f"Cells: {cell_type}",
-            face_color=cell_colour(project, cell_type),
-            size=size,
-            ndim=3,
-            blending="translucent_no_depth",
+        colour = cell_colour(project, cell_type)
+
+        def _update(layer, pts=pts, colour=colour):
+            layer.data = pts
+            layer.face_color = colour
+            layer.size = size
+
+        layer = _put_layer(
+            viewer, f"cells:{cell_type}",
+            lambda pts=pts, colour=colour, cell_type=cell_type: viewer.add_points(
+                pts,  # (AP, ML, DV)
+                name=f"Cells: {cell_type}",
+                face_color=colour,
+                size=size,
+                ndim=3,
+                blending="translucent_no_depth",
+            ),
+            _update,
         )
         added.append(layer)
     return added
@@ -137,7 +194,24 @@ def _add_region_surface(
     opacity: float,
     blending: str = "translucent_no_depth",
 ):
-    """Add one region mesh as a flat-coloured napari Surface layer."""
+    """Add one region mesh as a flat-coloured napari Surface layer.
+
+    A mesh already added from the same atlas is shown again instead.
+    """
+    def _restyle(layer):
+        layer.opacity = opacity
+        layer.blending = blending
+
+    return _put_layer(
+        viewer, f"region:{getattr(atlas, 'atlas_name', '')}:{acronym}",
+        lambda: _new_region_surface(
+            viewer, atlas, acronym, rgb=rgb, opacity=opacity, blending=blending
+        ),
+        _restyle,
+    )
+
+
+def _new_region_surface(viewer, atlas, acronym, *, rgb, opacity, blending):
     from atlastrack.atlas.meshes import mesh_vertices_faces
 
     try:
@@ -206,8 +280,12 @@ def show_3d_scene(
     extra_regions: "list[str] | tuple[str, ...]" = (),
     show_tip_regions: bool = True,
     line_width: float = 40.0,
+    reset_camera: bool = True,
 ) -> list:
     """Build a clean 3D scene: brain shell + tip regions + probe tracks.
+
+    Run again on the same viewer, it updates the scene in place (see the module
+    notes); pass ``reset_camera=False`` to keep the user's view.
 
     The 2D working layers are hidden first so they do not clutter the 3D view.
     The whole-brain outline and the large context divisions use *additive*
@@ -222,6 +300,8 @@ def show_3d_scene(
         styled_regions,
     )
 
+    # Everything not part of this scene stays hidden: the 2D working layers, and
+    # the regions and probes of an earlier run that are no longer needed.
     for layer in list(viewer.layers):
         layer.visible = False
 
@@ -255,7 +335,8 @@ def show_3d_scene(
     # Bregma is atlas-specific, so the display frame follows the project's atlas.
     _apply_bregma_display(added, getattr(project.atlas, "name", None))
     switch_to_3d(viewer)
-    _set_default_camera(viewer)
+    if reset_camera:
+        _set_default_camera(viewer)
     return added
 
 

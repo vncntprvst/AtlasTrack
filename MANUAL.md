@@ -361,7 +361,9 @@ straightens a multi-shank probe so its shanks are parallel and evenly spaced.
 
 **3D Visualization** - **Region atlas** names regions from a different atlas
 without re-registering (this is how you get Franklin-Paxinos names). **3D view**
-opens the brain and probes in a 3-D window.
+opens the brain and probes in a 3-D window. **Update probe coordinates** redraws
+the probes in that window and keeps your view. Closing the main window closes the
+3-D window too.
 
 **Export** - pick a **Format**, then **Export…**:
 
