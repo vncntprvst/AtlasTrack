@@ -237,31 +237,27 @@ def test_export_warns_when_nothing_to_export(tmp_path) -> None:
 # enforce_rigid_arrays (shared by the CLI and the viz/export panel)
 # ---------------------------------------------------------------------------
 
-def test_enforce_rigid_arrays_evens_out_shank_spacing() -> None:
+def test_enforce_rigid_arrays_uses_the_probes_own_shank_pitch() -> None:
+    """Estimating the spacing from the picks gave 404 µm for a 250 µm probe (LO_03)."""
     project = _make_project()
-    tips_before = np.array(
-        [s.tip_ccf_um for s in project.probes[0].shanks], dtype=float
-    )
-    gaps_before = np.linalg.norm(np.diff(tips_before, axis=0), axis=1)
-    assert gaps_before.std() > 50.0  # the picks really are uneven
+    entries_before = np.array([s.entry_ccf_um for s in project.probes[0].shanks], float)
+    assert np.linalg.norm(np.diff(entries_before, axis=0), axis=1).std() > 50.0  # uneven
 
     infos = enforce_rigid_arrays(project, tolerance=0.0)
 
-    tips_after = np.array(
-        [s.tip_ccf_um for s in project.probes[0].shanks], dtype=float
-    )
-    gaps_after = np.linalg.norm(np.diff(tips_after, axis=0), axis=1)
-    assert gaps_after.std() == pytest.approx(0.0, abs=1e-6)
-    assert "ProbeA" in infos
-    assert infos["ProbeA"]["spacing_um"] > 0
-
-
-def test_enforce_rigid_arrays_lock_spacing_overrides_the_estimate() -> None:
-    project = _make_project()
-    enforce_rigid_arrays(project, tolerance=0.0, lock_spacing_um=250.0)
-    tips = np.array([s.tip_ccf_um for s in project.probes[0].shanks], dtype=float)
-    gaps = np.linalg.norm(np.diff(tips, axis=0), axis=1)
+    assert infos["ProbeA"]["spacing_um"] == project.probes[0].type.shank_pitch_um == 250.0
+    entries = np.array([s.entry_ccf_um for s in project.probes[0].shanks], float)
+    gaps = np.linalg.norm(np.diff(entries, axis=0), axis=1)
     assert gaps == pytest.approx([250.0, 250.0, 250.0], abs=1e-6)
+
+
+def test_enforce_rigid_arrays_lock_spacing_overrides_the_pitch() -> None:
+    project = _make_project()
+    infos = enforce_rigid_arrays(project, tolerance=0.0, lock_spacing_um=300.0)
+    entries = np.array([s.entry_ccf_um for s in project.probes[0].shanks], float)
+    gaps = np.linalg.norm(np.diff(entries, axis=0), axis=1)
+    assert gaps == pytest.approx([300.0, 300.0, 300.0], abs=1e-6)
+    assert infos["ProbeA"]["spacing_um"] == 300.0
 
 
 def test_enforce_rigid_arrays_skips_probes_with_too_few_shanks() -> None:

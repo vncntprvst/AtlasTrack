@@ -612,21 +612,22 @@ def export_cmd(
         bool,
         typer.Option(
             help=(
-                "Regularize each multi-shank probe to a parallel, evenly-spaced "
-                "array before exporting."
+                "Before exporting, move each multi-shank probe's tracks so their "
+                "entries form the probe's evenly spaced row (each track moves as a "
+                "whole, so the tips keep their spread)."
             )
         ),
     ] = False,
     rigid_tolerance: Annotated[
         float,
         typer.Option(
-            help="0 snaps exactly to the rigid array, 1 leaves picks unchanged."
+            help="0 puts the entries exactly on the row, 1 leaves picks unchanged."
         ),
     ] = 0.25,
     lock_spacing_um: Annotated[
         float | None,
         typer.Option(
-            help="Force an exact inter-shank spacing in µm (e.g. 250 for NP2.0)."
+            help="Shank spacing in µm; the probe's own shank pitch by default."
         ),
     ] = None,
     paxinos_alignment: Annotated[

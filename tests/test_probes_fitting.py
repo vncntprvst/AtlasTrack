@@ -31,35 +31,53 @@ def _noisy_array():
     return tips, entries, ranks
 
 
-def test_fit_rigid_array_strict_even_spacing() -> None:
+def test_fit_rigid_array_puts_the_entries_on_the_probe_row() -> None:
     tips, entries, _ = _noisy_array()
-    nt, ne, info = fit_rigid_array(tips, entries, tolerance=0.0)
-    # Consecutive tip gaps become equal (strict).
-    gaps = np.linalg.norm(np.diff(nt, axis=0), axis=1)
-    assert np.allclose(gaps, gaps[0], atol=1e-6)
-    # Shanks are parallel: every tip→entry vector is identical.
-    dirs = nt - ne
-    assert np.allclose(dirs, dirs[0], atol=1e-6)
-    assert info["spacing_um"] > 0
+    nt, ne, info = fit_rigid_array(tips, entries, tolerance=0.0, lock_spacing_um=250.0)
+    # Compared at one depth, the entries are now exactly one pitch apart.
+    assert np.allclose(info["new_entry_gaps_um"], 250.0, atol=1e-6)
+    assert not np.allclose(info["old_entry_gaps_um"], 250.0, atol=10.0)
+    assert info["spacing_um"] == 250.0
+
+
+def test_fit_rigid_array_moves_each_track_whole() -> None:
+    """Shanks bend: a tip that spread away from the row must keep that spread."""
+    tips, entries, _ = _noisy_array()
+    tips[3, 1] += 300.0  # shank 3 bent outward near the tip
+    nt, ne, _ = fit_rigid_array(tips, entries, tolerance=0.0, lock_spacing_um=250.0)
+    assert np.allclose(nt - ne, tips - entries)  # every track keeps direction and length
+    # The move is across the shanks, not along them: the depth is unchanged.
+    u = (tips - entries).mean(0)
+    u /= np.linalg.norm(u)
+    assert np.allclose((ne - entries) @ u, 0.0, atol=15.0)
+
+
+def test_fit_rigid_array_compares_entries_at_one_depth() -> None:
+    """Entries clicked at different heights on an even row are already right."""
+    ml = np.array([0.0, 250.0, 500.0, 750.0])
+    tips = np.stack([np.full(4, 11000.0), ml, np.full(4, 6000.0)], axis=1)
+    entries = tips.copy()
+    entries[:, 2] = [1000.0, 1400.0, 900.0, 1200.0]
+    nt, ne, info = fit_rigid_array(tips, entries, tolerance=0.0, lock_spacing_um=250.0)
+    assert info["max_shift_um"] == pytest.approx(0.0, abs=1e-6)
+    assert np.allclose(nt, tips) and np.allclose(ne, entries)
+
+
+def test_fit_rigid_array_keeps_the_shank_order() -> None:
+    tips, entries, _ = _noisy_array()
+    nt, ne, _ = fit_rigid_array(tips, entries, tolerance=0.0, lock_spacing_um=250.0)
+    assert np.all(np.diff(ne[:, 1]) > 0)  # shank 0 .. 3 still run along +ML
 
 
 def test_fit_rigid_array_tolerance_blends() -> None:
     tips, entries, _ = _noisy_array()
-    strict_t, _, _ = fit_rigid_array(tips, entries, tolerance=0.0)
-    mid_t, _, _ = fit_rigid_array(tips, entries, tolerance=0.5)
+    strict_t, _, _ = fit_rigid_array(tips, entries, tolerance=0.0, lock_spacing_um=250.0)
+    mid_t, _, _ = fit_rigid_array(tips, entries, tolerance=0.5, lock_spacing_um=250.0)
     # tolerance=1 leaves the picks untouched.
-    keep_t, keep_e, _ = fit_rigid_array(tips, entries, tolerance=1.0)
+    keep_t, keep_e, _ = fit_rigid_array(tips, entries, tolerance=1.0, lock_spacing_um=250.0)
     assert np.allclose(keep_t, tips) and np.allclose(keep_e, entries)
-    # tolerance=0.5 sits between strict and the original picks.
-    assert np.all(np.abs(mid_t - tips) <= np.abs(strict_t - tips) + 1e-9)
-
-
-def test_fit_rigid_array_lock_spacing() -> None:
-    tips, entries, _ = _noisy_array()
-    nt, _, info = fit_rigid_array(tips, entries, tolerance=0.0, lock_spacing_um=250.0)
-    gaps = np.linalg.norm(np.diff(nt, axis=0), axis=1)
-    assert np.allclose(gaps, 250.0, atol=1e-6)
-    assert info["spacing_um"] == 250.0
+    # tolerance=0.5 moves each track half way.
+    assert np.allclose(mid_t - tips, 0.5 * (strict_t - tips))
 
 
 def test_fit_rigid_array_too_few_shanks_noop() -> None:

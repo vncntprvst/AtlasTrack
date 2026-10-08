@@ -256,25 +256,26 @@ class VizExportPanelWidget(QWidget):
         rigid_row = QHBoxLayout()
         self._rigid_check = QCheckBox("Enforce rigid array")
         self._rigid_check.setToolTip(
-            "Regularize each multi-shank probe (>=3 shanks) to a parallel, evenly-"
-            "spaced array after mapping tip/entry from pixels. Spacing is estimated "
-            "from your picks. The physical probe is rigid, so this removes picking "
-            "noise (uneven spacing, an off-axis shank) while the tolerance keeps a "
-            "little slack. Re-applied on every Update coordinates / View 3D."
+            "For a probe with 3 or more shanks: after mapping the markers, move "
+            "each track so the entries form the probe's own row - in line, one "
+            "shank pitch apart (250 µm on a Neuropixels 2.0). Each track moves as a "
+            "whole, keeping its direction, so tips that spread apart as the shanks "
+            "bent still do. The tolerance keeps a little slack. Re-applied on every "
+            "Update coordinates / View 3D."
         )
         rigid_row.addWidget(self._rigid_check)
         # Without the stretch the checkbox label and "tolerance" run together and
         # read as one sentence.
         rigid_row.addStretch(1)
         tol_label = QLabel("tolerance")
-        tol_label.setToolTip("0 = strict even array; 1 = keep picks unchanged.")
+        tol_label.setToolTip("0 = entries exactly on the row; 1 = keep picks unchanged.")
         rigid_row.addWidget(tol_label)
         self._rigid_tol = QDoubleSpinBox()
         self._rigid_tol.setRange(0.0, 1.0)
         self._rigid_tol.setSingleStep(0.05)
         self._rigid_tol.setValue(0.25)
         self._rigid_tol.setFixedWidth(88)
-        self._rigid_tol.setToolTip("0 = strict even array; 1 = keep picks unchanged.")
+        self._rigid_tol.setToolTip("0 = entries exactly on the row; 1 = keep picks unchanged.")
         rigid_row.addWidget(self._rigid_tol)
         probe_layout.addLayout(rigid_row)
         layout.addWidget(probe_box)

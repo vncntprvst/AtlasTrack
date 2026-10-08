@@ -357,7 +357,11 @@ Everything is in the right-hand **3D & Export** panel.
 
 **Update probe coordinates** first if you have moved a marker or corrected a
 section - exports use the last computed coordinates. **Enforce rigid array**
-straightens a multi-shank probe so its shanks are parallel and evenly spaced.
+moves a multi-shank probe's tracks so that their entries form the probe's own row:
+in line, one shank pitch apart (250 µm on a Neuropixels 2.0). Each track moves as a
+whole and keeps its direction, so tips that spread apart as the shanks bent still
+do. **Tolerance** 0 puts the entries exactly on the row; 1 leaves your markers as
+they are.
 
 **3D Visualization** - **Region atlas** names regions from a different atlas
 without re-registering (this is how you get Franklin-Paxinos names). **3D view**

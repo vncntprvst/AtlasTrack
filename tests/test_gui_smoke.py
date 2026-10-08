@@ -314,7 +314,7 @@ def test_viz_panel_enforce_rigid_array(qtbot) -> None:
         widget._enforce_rigid_arrays()
         tips = np.array([s.tip_ccf_um for s in state.project.probes[0].shanks])
         gaps = np.linalg.norm(np.diff(tips, axis=0), axis=1)
-        assert np.allclose(gaps, gaps[0], atol=1e-6)  # even spacing now
+        assert np.allclose(gaps, 250.0, atol=1e-6)  # the probe's own shank pitch
     finally:
         viewer.close()
 
