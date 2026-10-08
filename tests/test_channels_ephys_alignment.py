@@ -386,3 +386,33 @@ def test_unregistered_shank_is_skipped_not_written_blank(tmp_path):
     project.probes[0].shanks[0].tip_ccf_um = None
 
     assert export_ibl_channel_locations(project, tmp_path) == []
+
+
+def test_feature_reference_is_the_deepest_recording_insertion_depth() -> None:
+    """Stacking puts every recording into the deepest insertion's frame, so the
+    feature axis, Apply and the channel placement all use that depth."""
+    from types import SimpleNamespace
+
+    from atlastrack.probes.channels import feature_reference_depth_um
+
+    rec = lambda d: SimpleNamespace(insertion_depth_um=d)  # noqa: E731
+    assert feature_reference_depth_um(SimpleNamespace(recordings=[rec(4600.0), rec(4800.0)])) == 4800.0
+    assert feature_reference_depth_um(SimpleNamespace(recordings=[rec(0.0)])) is None
+    assert feature_reference_depth_um(SimpleNamespace(recordings=[])) is None
+
+
+def test_channels_land_where_the_features_were_drawn() -> None:
+    """A feature drawn at ``reference - depth_from_tip`` below the surface and left
+    where it is (identity landmarks) puts the channel at that depth on the track."""
+    from atlastrack.probes.channels import aligned_site_depths_from_tip
+    from atlastrack.project.schema import EphysAlignment, Shank
+
+    track_length, reference = 5000.0, 4800.0
+    shank = Shank(index=0, ephys=EphysAlignment(
+        feature_um=[0.0, track_length], track_um=[0.0, track_length],
+        insertion_depth_um=reference))
+    from_tip = np.array([217.0, 1000.0])
+    drawn_below_surface = reference - from_tip
+    out, used = aligned_site_depths_from_tip(shank, from_tip, track_length)
+    assert used
+    assert np.allclose(track_length - out, drawn_below_surface)

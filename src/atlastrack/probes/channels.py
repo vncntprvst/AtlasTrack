@@ -85,6 +85,27 @@ def channel_ccf_coords(
 # High-level shank / project helpers
 # ---------------------------------------------------------------------------
 
+def feature_reference_depth_um(probe) -> float | None:
+    """The depth the probe's ephys feature axis is measured from, or None.
+
+    Features sit at ``reference - depth_from_tip`` below the surface. The reference
+    is the manipulator insertion depth: the deepest among the probe's recordings,
+    because stacking puts every recording into that one's frame. ``None`` (no
+    recording gives a depth) means the histology track length is used instead.
+
+    The alignment dialog draws the features with this reference and Apply stores it,
+    so what is lined up on screen is what the channels get. They used to differ: the
+    dialog drew against the track length while the channels used the insertion depth,
+    moving every channel by the difference (several hundred µm on LO_04).
+    """
+    depths = [
+        float(r.insertion_depth_um)
+        for r in (getattr(probe, "recordings", None) or [])
+        if r.insertion_depth_um
+    ]
+    return max(depths) if depths else None
+
+
 def aligned_site_depths_from_tip(
     shank: Shank,
     site_depths_from_tip_um: np.ndarray,

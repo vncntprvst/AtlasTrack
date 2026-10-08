@@ -489,13 +489,16 @@ class EphysPanelWidget(QWidget):
     def _stack_exports(self, probe) -> list:
         """Turn the stacks into :class:`ShankFeatureExport` records.
 
-        The depth-below-surface column is ``track_length - depth_from_tip``, the same
-        convention the single-recording path uses, so an alignment made before this
-        existed still lines up with the same features.
+        The depth-below-surface column is ``reference - depth_from_tip``, with the
+        reference from :func:`feature_reference_depth_um` (the insertion depth, else
+        the track length) - the same one Apply stores and the channels use.
         """
         import numpy as np
 
         from atlastrack.ephys.export import ShankFeatureExport
+        from atlastrack.probes.channels import feature_reference_depth_um
+
+        reference = feature_reference_depth_um(probe)
 
         out = []
         for shank in probe.shanks:
@@ -513,7 +516,7 @@ class EphysPanelWidget(QWidget):
                 lfp_psd=np.asarray(stack.psd, dtype=float),
                 lfp_freqs_hz=np.asarray(stack.freqs_hz, dtype=float),
                 channel_depth_from_tip_um=from_tip,
-                channel_depth_below_surface_um=track - from_tip,
+                channel_depth_below_surface_um=(reference or track) - from_tip,
             ))
         return out
 
@@ -527,6 +530,7 @@ class EphysPanelWidget(QWidget):
 
         from atlastrack.ephys.export import ShankFeatureExport
         from atlastrack.probes.catalog import tip_to_lowest_site_um
+        from atlastrack.probes.channels import feature_reference_depth_um
 
         if self._stacks:
             return self._stack_exports(probe)
@@ -555,13 +559,14 @@ class EphysPanelWidget(QWidget):
                 track = float(np.linalg.norm(
                     np.asarray(shank.tip_ccf_um) - np.asarray(shank.entry_ccf_um)))
             from_tip = y[mask] - y[mask].min() + tip_to_lowest_site_um(probe.type.name)
+            reference = feature_reference_depth_um(probe) or track
             out.append(ShankFeatureExport(
                 shank_index=shank.index,
                 track_length_um=track,
                 lfp_psd=psd[mask],
                 lfp_freqs_hz=freqs,
                 channel_depth_from_tip_um=from_tip,
-                channel_depth_below_surface_um=track - from_tip,
+                channel_depth_below_surface_um=reference - from_tip,
             ))
         return out
 

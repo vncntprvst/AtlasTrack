@@ -851,10 +851,12 @@ class EphysProbeAlignmentDialog(QDialog):
             )
         elif lfp_result is not None and track_length > 0:
             from atlastrack.probes.catalog import tip_to_lowest_site_um
+            from atlastrack.probes.channels import feature_reference_depth_um
 
             self._load_shank_lfp(
                 panel, shank, lfp_result, track_length,
                 tip_to_lowest_um=tip_to_lowest_site_um(self._probe.type.name),
+                reference_um=feature_reference_depth_um(self._probe),
             )
         panel.refresh_display_modes()
         if shank.ephys is not None:
@@ -862,7 +864,8 @@ class EphysProbeAlignmentDialog(QDialog):
 
     @staticmethod
     def _load_shank_lfp(panel: EphysAlignmentPanel, shank, lfp_result,
-                        track_length_um: float, *, tip_to_lowest_um: float) -> None:
+                        track_length_um: float, *, tip_to_lowest_um: float,
+                        reference_um: float | None = None) -> None:
         """Feed this shank's slice of the recording's LFP into its panel.
 
         Split by the probe's **shank ids**, never by x: a NP2.0 shank has two
@@ -893,7 +896,10 @@ class EphysProbeAlignmentDialog(QDialog):
         # size as the nuclei being aligned to.
         depth_from_tip = depths_from_tip[mask] - depths_from_tip[mask].min()
         depth_from_tip = depth_from_tip + tip_to_lowest_um
-        panel.view().set_lfp(track_length_um - depth_from_tip, psd[mask], freqs)
+        # Below the surface on the feature axis: from the insertion depth when a
+        # recording gives one, as Apply and the channel placement assume.
+        reference = reference_um if reference_um else track_length_um
+        panel.view().set_lfp(reference - depth_from_tip, psd[mask], freqs)
 
     def load_landmarks_from_file(self, path: str | None = None) -> int:
         """Apply the landmarks from a saved export. Returns how many shanks were set.
@@ -1049,15 +1055,11 @@ class EphysProbeAlignmentDialog(QDialog):
         from atlastrack.project.schema import EphysAlignment
 
         stamp = datetime.now().isoformat(timespec="seconds")
-        # One insertion depth for the whole penetration when the recordings agree;
-        # None means "assume it matches the histology track", the honest default
-        # before any recording has pinned it.
-        depths = {
-            r.insertion_depth_um
-            for r in (self._probe.recordings or [])
-            if r.insertion_depth_um
-        }
-        insertion = float(next(iter(depths))) if len(depths) == 1 else None
+        # The same reference the features were drawn with (None: the histology
+        # track length), so the channels land where the user lined them up.
+        from atlastrack.probes.channels import feature_reference_depth_um
+
+        insertion = feature_reference_depth_um(self._probe)
 
         for panel, shank in zip(self.panels, self._shanks, strict=True):
             landmarks = panel.landmarks()
