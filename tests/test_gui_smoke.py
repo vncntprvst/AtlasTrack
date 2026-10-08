@@ -2206,3 +2206,83 @@ def test_the_section_picker_refreshes_when_the_tab_is_shown(qtbot) -> None:
         assert panel._adjust_combo.itemData(0) == 4, "listed by its stored id"
     finally:
         viewer.close()
+
+
+def _editing_section_0(qtbot, tmp_path):
+    """A register panel with section 0's landmarks on screen, one of them dragged."""
+    import napari
+
+    from atlastrack.gui.widgets.register_panel import RegisterPanelWidget
+    from atlastrack.project.schema import RegistrationResult
+
+    viewer = napari.Viewer(show=False)
+    state = _populated_state()
+    state.project.slides[0].sections[1].registration = RegistrationResult(
+        anchoring=[0.0] * 9, output_size_px=(80, 80), residual=0.5)
+    state.project_path = tmp_path / "p.atlastrack.json"
+    panel = RegisterPanelWidget(state, viewer)
+    qtbot.addWidget(panel)
+    panel._populate_adjust_combo()
+    panel._adjust_combo.setCurrentIndex(panel._adjust_combo.findData(0))
+    src = np.array([[10, 10], [70, 10], [40, 40], [10, 70], [70, 70]], float)  # (x, y)
+    data = src[:, ::-1].copy()
+    data[2, 1] += 12.0                                   # dragged: a warp to keep
+    viewer.add_points(data, name="Atlas landmarks 0", size=12,
+                      features={"sy": src[:, 1], "sx": src[:, 0]})
+    panel._landmark_idx = 0
+    return panel, state, viewer
+
+
+@pytest.mark.qt
+def test_going_to_another_section_keeps_the_landmark_edits(qtbot, tmp_path) -> None:
+    """LO_05: section 0 edited, then section 1 edited and applied - section 0's edits
+    were only on screen and were lost, and Apply on section 0 said to place them."""
+    panel, state, viewer = _editing_section_0(qtbot, tmp_path)
+    try:
+        sec0 = state.project.slides[0].sections[0]
+        assert sec0.manual_landmarks is None
+        panel._adjust_combo.setCurrentIndex(panel._adjust_combo.findData(1))
+
+        assert sec0.manual_landmarks is not None
+        tgt = np.array(sec0.manual_landmarks.target)
+        assert tgt[2, 0] == pytest.approx(52.0)
+        assert panel._landmark_idx is None                        # edit mode left
+        assert not any(l.name.startswith("Atlas landmarks") for l in viewer.layers)
+        assert state.project_path.exists()                        # and saved
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_saving_the_project_keeps_landmark_edits_on_screen(qtbot, tmp_path) -> None:
+    from atlastrack.gui.widgets.save_panel import SavePanelWidget
+    from atlastrack.project.io import load_project
+
+    panel, state, viewer = _editing_section_0(qtbot, tmp_path)
+    try:
+        saver = SavePanelWidget(state)
+        qtbot.addWidget(saver)
+        saver._path_edit.setText(str(tmp_path / "saved.json"))
+        saver._save()
+
+        saved = load_project(tmp_path / "saved.json").slides[0].sections[0]
+        assert saved.manual_landmarks is not None
+        assert np.array(saved.manual_landmarks.target)[2, 0] == pytest.approx(52.0)
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_apply_on_a_section_already_applied_says_so(qtbot, tmp_path, monkeypatch) -> None:
+    from atlastrack.gui.widgets import register_panel as rp
+
+    panel, state, viewer = _editing_section_0(qtbot, tmp_path)
+    try:
+        panel._apply_landmarks()                                   # applies section 0
+        said = []
+        monkeypatch.setattr(rp, "_error_dialog", lambda _p, title, text: said.append((title, text)))
+        panel._apply_landmarks()                                   # nothing on screen now
+        assert said and said[0][0] == "Nothing being edited"
+        assert "already applied" in said[0][1]
+    finally:
+        viewer.close()

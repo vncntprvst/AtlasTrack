@@ -339,6 +339,7 @@ class RegisterPanelWidget(QWidget):
         sec_row.addWidget(QLabel("Section:"))
         self._adjust_combo = QComboBox()
         self._adjust_combo.setToolTip("Pick a registered section to nudge its atlas overlay.")
+        self._adjust_combo.currentIndexChanged.connect(self._on_adjust_section_changed)
         sec_row.addWidget(self._adjust_combo, 1)
         av.addLayout(sec_row)
 
@@ -439,6 +440,9 @@ class RegisterPanelWidget(QWidget):
         # Active landmark-edit state. Source (atlas anchor) per point lives in the
         # Points layer `features` (travels through add/delete); `data` is the target.
         self._landmark_idx: int | None = None
+        # Saving the project keeps landmark edits that are still only on screen.
+        if hasattr(self._state, "before_save"):
+            self._state.before_save.append(self._store_pending_before_save)
         self._lm_prev_data = None  # for per-move delta tracking
         self._lm_ctrl_drag = False  # set while Ctrl is held during a drag
         # Live-preview cache: the un-warped atlas boundary (section-local row/col)
@@ -1585,6 +1589,9 @@ class RegisterPanelWidget(QWidget):
         )
         if section is None:
             return
+        if self._landmark_idx is not None and self._landmark_idx != section.index:
+            # Another section's edits are still only on screen: keep them.
+            self._commit_pending_landmarks(save=True)
         labels = self._warp_labels_for(section, apply_landmarks=False)
         crashlog.note(
             f"place landmarks: labels={None if labels is None else labels.shape} "
@@ -1600,9 +1607,11 @@ class RegisterPanelWidget(QWidget):
 
         # Keep most of the boundary (dense) so the warped preview reads as lines,
         # not dots; the forward-TPS is cheap even at ~20k points.
+        # Every boundary pixel up to a generous cap: thinning to 20k points made the
+        # outline of a large section a dotted line while dragging.
         edge_rc = np.argwhere(annotation_boundaries(labels))
-        if len(edge_rc) > 20000:
-            edge_rc = edge_rc[:: int(np.ceil(len(edge_rc) / 20000))]
+        if len(edge_rc) > 400000:
+            edge_rc = edge_rc[:: int(np.ceil(len(edge_rc) / 400000))]
         self._lm_base_edge_rc = edge_rc
         self._lm_base_shape = (int(labels.shape[0]), int(labels.shape[1]))
         self._lm_origin_xy = (int(section.bbox_px[0]), int(section.bbox_px[1]))
@@ -1624,8 +1633,12 @@ class RegisterPanelWidget(QWidget):
         name = f"Atlas landmarks {section.index}"
         if name in self._viewer.layers:
             self._viewer.layers.remove(name)
+        # Sized to the section: a fixed 16 px vanished on large high-resolution
+        # sections, where the handles must still be easy to grab.
+        w, h = section.bbox_px[2] - section.bbox_px[0], section.bbox_px[3] - section.bbox_px[1]
+        size = max(16.0, 0.018 * max(w, h))
         layer = self._viewer.add_points(
-            data, name=name, size=16, face_color="red", border_color="white",
+            data, name=name, size=size, face_color="red", border_color="white",
             features=feats, ndim=2, blending=OVERLAY_BLENDING,
         )
         layer.mode = "select"
@@ -1773,35 +1786,100 @@ class RegisterPanelWidget(QWidget):
 
         from atlastrack.project.schema import ManualLandmarks
 
-        section = self._adjust_section()
+        selected = self._adjust_section()
+        layer = self._landmark_layer()
+        if layer is None:
+            if selected is not None and selected.manual_landmarks is not None:
+                _error_dialog(
+                    self, "Nothing being edited",
+                    f"Section {selected.index}'s landmarks are already applied and "
+                    "saved with the project. Click 'Place landmarks' to edit them again.",
+                )
+            else:
+                _error_dialog(self, "No landmarks", "Click 'Place landmarks' first.")
+            return
+        # Apply the section whose landmarks are on screen, even if the picker has
+        # since moved on: those are the edits the user means.
+        section = self._section_by_index(self._landmark_idx)
         if section is None:
             return
-        layer = self._landmark_layer()
-        if layer is None or self._landmark_idx != section.index:
-            _error_dialog(self, "No landmarks", "Click 'Place landmarks' first.")
+        if len(layer.data) < 4:
+            _error_dialog(self, "Too few landmarks", "Keep at least 4 landmark points.")
             return
-        x0, y0 = section.bbox_px[0], section.bbox_px[1]
+        self._commit_pending_landmarks(save=True)
+        note = (f" (the section being edited; section {selected.index} is selected)"
+                if selected is not None and selected.index != section.index else "")
+        self._status.setText(
+            self._status.text() + f"{note}  ·  editing done (drag pans; 'Place landmarks' "
+            "to re-edit)."
+        )
+
+    def _section_by_index(self, index):
+        for slide in self._state.project.slides:
+            for sec in slide.sections:
+                if sec.index == index:
+                    return sec
+        return None
+
+    def _store_landmarks(self) -> bool:
+        """Write the on-screen landmarks into their section. True if anything stored.
+
+        Until this runs the edits exist only as points on the canvas, which is how
+        a section's hand edits were lost when the user went on to the next section
+        without pressing "Apply landmark warp".
+        """
+        import numpy as np
+
+        from atlastrack.project.schema import ManualLandmarks
+
+        layer = self._landmark_layer()
+        section = self._section_by_index(self._landmark_idx)
+        if layer is None or section is None:
+            return False
         data = np.asarray(layer.data, dtype=float)  # (row, col) world = target
         sy = np.asarray(layer.features["sy"], dtype=float)
         sx = np.asarray(layer.features["sx"], dtype=float)
-        if len(data) < 4:
-            _error_dialog(self, "Too few landmarks", "Keep at least 4 landmark points.")
-            return
+        if len(data) < 4 or len(sy) != len(data):
+            return False
+        x0, y0 = section.bbox_px[0], section.bbox_px[1]
         target = np.column_stack([data[:, 1] - x0, data[:, 0] - y0])  # (x, y) section-local
         source = np.column_stack([sx - x0, sy - y0])
+        if section.manual_landmarks is None and np.allclose(source, target):
+            return False   # placed but never dragged: nothing to keep
         section.manual_landmarks = ManualLandmarks(
             source=source.tolist(), target=target.tolist(),
             # Edited landmarks keep the way their spline is fitted (imports differ).
             forward=self._landmarks_forward(section.index),
         )
         section.manual_affine = None  # landmarks take precedence
-        self._rerender_section_overlay(section)
-        self._remap_and_save(section)
-        # Leave edit mode so the dots clear and dragging pans again.
+        return True
+
+    def _commit_pending_landmarks(self, *, save: bool) -> None:
+        """Apply the landmarks being edited and leave edit mode (as Apply does).
+
+        ``save`` re-maps the probes and writes the project; without it (just before
+        the project is saved anyway) the edits are only stored in the section.
+        """
+        section = self._section_by_index(self._landmark_idx)
+        stored = self._store_landmarks()
+        if stored and section is not None:
+            self._rerender_section_overlay(section)
+            if save:
+                self._remap_and_save(section)
         self._exit_landmark_edit()
-        self._status.setText(
-            self._status.text() + "  ·  editing done (drag pans; 'Place landmarks' to re-edit)."
-        )
+
+    def _on_adjust_section_changed(self, _index: int) -> None:
+        """Moving to another section keeps the edits of the one being edited."""
+        selected = self._adjust_combo.currentData()
+        if self._landmark_idx is not None and selected != self._landmark_idx:
+            self._commit_pending_landmarks(save=True)
+
+    def _store_pending_before_save(self) -> None:
+        """Before the project is saved: put on-screen landmark edits into it."""
+        if self._landmark_idx is not None and self._store_landmarks():
+            section = self._section_by_index(self._landmark_idx)
+            if section is not None:
+                self._rerender_section_overlay(section)
 
     def _open_pair_points(self) -> None:
         """Open the side-by-side pairing window for the chosen section."""

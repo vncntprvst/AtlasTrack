@@ -131,6 +131,8 @@ class SavePanelWidget(QWidget):
 
         out_path = Path(raw)
         self._state.project_path = out_path
+        for hook in list(getattr(self._state, "before_save", []) or []):
+            hook()
         from atlastrack.project.io import save_project
 
         save_project(self._state.project, out_path, slide_images=self._state.slide_images)

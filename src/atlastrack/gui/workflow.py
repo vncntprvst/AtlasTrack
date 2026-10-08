@@ -71,6 +71,9 @@ class WorkflowState:
     # with the same flips and rotations.
     channel_raw: dict[int, list[np.ndarray]] = field(default_factory=dict)
     shown_rotations: dict[int, dict[int, float]] = field(default_factory=dict)
+    # Called just before the project is written, so edits still held by a widget
+    # (landmarks being dragged) go into the file instead of being lost.
+    before_save: list = field(default_factory=list)
 
     @property
     def atlas(self) -> "BrainGlobeAtlas | None":
