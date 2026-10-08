@@ -4,10 +4,13 @@ This module IS allowed to import napari (it lives under viz/, not core modules).
 All functions accept a live napari Viewer and add layers to it.
 
 Run again on the same viewer, they reuse the layers they added before (found by a
-tag in ``layer.metadata``): the data is changed in place, and layers no longer
-needed are hidden. They never remove a layer. Removing a layer from a second napari
-window frees its OpenGL objects, and on Windows the next repaint then crashes with
-an access violation (the 3D window crashed on every "Update probe coordinates").
+tag in ``layer.metadata``): the data is changed in place. Layers no longer needed
+(an earlier project's probes and regions) are removed, but only after making the 3D
+window's OpenGL context the current one. Removing a layer frees its OpenGL objects;
+done while the main window's context was current, it crashed the application on
+Windows with an access violation (every "Update probe coordinates", and every
+switch between projects with the 3D view open). With the right context current it
+survived 8 project switches in a stress test that crashed on the second without.
 """
 from __future__ import annotations
 
@@ -300,8 +303,8 @@ def show_3d_scene(
         styled_regions,
     )
 
-    # Everything not part of this scene stays hidden: the 2D working layers, and
-    # the regions and probes of an earlier run that are no longer needed.
+    # Hide everything first; what this scene uses is shown again below, and scene
+    # layers it no longer needs are removed at the end.
     for layer in list(viewer.layers):
         layer.visible = False
 
@@ -334,10 +337,30 @@ def show_3d_scene(
     added += add_cell_layers(viewer, project)
     # Bregma is atlas-specific, so the display frame follows the project's atlas.
     _apply_bregma_display(added, getattr(project.atlas, "name", None))
+    _remove_unused(viewer, added)
     switch_to_3d(viewer)
     if reset_camera:
         _set_default_camera(viewer)
     return added
+
+
+def _remove_unused(viewer, keep) -> None:
+    """Remove the scene layers this run did not use (an earlier project's probes).
+
+    The viewer's own OpenGL context is made current first: removing a layer frees
+    its OpenGL objects, and freeing them in another window's context crashed.
+    """
+    keep_ids = {id(layer) for layer in keep}
+    stale = [layer for layer in viewer.layers
+             if layer.metadata.get(_SCENE_KEY) and id(layer) not in keep_ids]
+    if not stale:
+        return
+    try:
+        viewer.window._qt_viewer.canvas._scene_canvas.set_current()
+    except Exception:  # noqa: BLE001 - no window (headless): nothing to make current
+        pass
+    for layer in stale:
+        viewer.layers.remove(layer)
 
 
 # Layer data is in CCF (AP, ML, DV) µm. The 3D scene is shown **bregma-referenced**

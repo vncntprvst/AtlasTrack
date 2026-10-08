@@ -1614,11 +1614,12 @@ def test_show_3d_scene_adds_ephys_channel_layer(qtbot) -> None:
 
 
 @pytest.mark.qt
-def test_3d_scene_is_updated_in_place_never_removed(qtbot) -> None:
-    """A second run changes the layers in place and only hides what is gone.
+def test_3d_scene_is_updated_in_place_and_drops_what_is_gone(qtbot) -> None:
+    """A second run changes the layers in place and removes those no longer needed.
 
-    Removing a layer from the separate 3D window crashed the application on
-    "Update probe coordinates" (an OpenGL access violation on Windows).
+    Layers used to be only hidden, so every earlier project's probes stayed in the 3D
+    window's layer list. They are removed with the 3D window's own OpenGL context
+    current; removing them otherwise crashed the application on Windows.
     """
     import napari
     from atlastrack.project.schema import EphysAlignment, ProbeSpec, ProbeType, Shank
@@ -1637,8 +1638,6 @@ def test_3d_scene_is_updated_in_place_never_removed(qtbot) -> None:
         show_3d_scene(viewer, project, None)
         first = {layer.name: layer for layer in viewer.layers}
         assert set(first) == {"Probe A", "Probe B", "Ephys channels A", "Ephys channels B"}
-        removed = []
-        viewer.layers.events.removed.connect(lambda e: removed.append(e.value.name))
 
         project.probes[0].shanks[0].tip_ccf_um = (4000.0, 2500.0, 5000.0)
         project.probes[0].shanks[0].ephys.channel_ccf_um.append((4000.0, 2500.0, 4000.0))
@@ -1646,13 +1645,13 @@ def test_3d_scene_is_updated_in_place_never_removed(qtbot) -> None:
         project.probes[1].shanks[0].ephys = None
         show_3d_scene(viewer, project, None, reset_camera=False)
 
-        assert removed == []
-        assert {layer.name: layer for layer in viewer.layers} == first  # same objects
-        assert np.asarray(first["Probe A"].data[0])[0][1] == 2500.0
-        assert first["Probe A"].shape_type == ["line"]
-        assert len(first["Ephys channels A"].data) == 3
-        assert first["Probe A"].visible and first["Ephys channels A"].visible
-        assert not first["Probe B"].visible and not first["Ephys channels B"].visible
+        now = {layer.name: layer for layer in viewer.layers}
+        assert set(now) == {"Probe A", "Ephys channels A"}            # B removed
+        assert now["Probe A"] is first["Probe A"]                      # A kept, updated
+        assert np.asarray(now["Probe A"].data[0])[0][1] == 2500.0
+        assert now["Probe A"].shape_type == ["line"]
+        assert len(now["Ephys channels A"].data) == 3
+        assert now["Probe A"].visible and now["Ephys channels A"].visible
     finally:
         viewer.close()
 
