@@ -175,3 +175,20 @@ def test_side_panel_combo_boxes_do_not_size_to_their_longest_entry(qtbot) -> Non
         assert not wide, wide
     finally:
         viewer.close()
+
+
+def test_long_probe_names_do_not_widen_the_panel(qtbot) -> None:
+    """The "N probe(s) in project: ..." line set the side panel's width (550 px with
+    three long names), and the panel stayed that wide on every tab."""
+    from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
+    from atlastrack.gui.workflow import WorkflowState
+    from atlastrack.project.schema import ProbeSpec, ProbeType
+
+    state = WorkflowState()
+    for label in ("ProbeA_green_01302026", "ProbeA_red_01282026", "ProbeA_red_01292026"):
+        state.project.probes.append(ProbeSpec(label=label, type=ProbeType(name="NP", n_shanks=1)))
+    picker = ProbePickerWidget(state)
+    qtbot.addWidget(picker)
+    picker._refresh_rename_combo()
+    picker._status.setText("3 probe(s) in project: " + ", ".join(p.label for p in state.project.probes))
+    assert picker.minimumSizeHint().width() < 400

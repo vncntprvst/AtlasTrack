@@ -90,6 +90,9 @@ class ProbePickerWidget(QWidget):
         layout.addLayout(rename_row)
 
         self._status = QLabel("")
+        # Wraps: the list of probe names otherwise set the panel's width - three
+        # long names made the whole side panel 550 px wide.
+        self._status.setWordWrap(True)
         layout.addWidget(self._status)
         self._refresh_rename_combo()
 
