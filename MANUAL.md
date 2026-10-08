@@ -305,7 +305,9 @@ Drag the auto-placed points:
 1. **Place landmarks** drops points on recognisable features - outline tips,
    junctions, corners.
 2. Drag each onto the matching spot on your tissue. The outline follows as you
-   drag. **Ctrl+drag** moves a point without warping.
+   drag. **Ctrl+drag** (or **Move without warping**) moves a point to a better
+   spot without changing the outline. **Add points** adds one where you click; it
+   holds the outline as it is drawn there, so adding points never moves it.
 3. **Apply landmark warp**. Going on to another section (picking it, or
    **Place landmarks** there) or saving the project also keeps your edits, so
    they are not lost if you forget this step.

@@ -385,7 +385,7 @@ class RegisterPanelWidget(QWidget):
             "border + 3 inside). Drag each onto the matching tissue feature for a "
             "thin-plate-spline warp that fixes LOCAL distortions a box transform can't.\n"
             "• drag = warp (pull the atlas to the tissue)\n"
-            "• Ctrl+drag (or 'Move points' on) = relocate the landmark, no warp\n"
+            "• Ctrl+drag (or 'Move without warping' on) = move the landmark, outline stays\n"
             "• 'Add points' on, then click = add; select a point + Delete = remove"
         )
         self._place_lm_btn.clicked.connect(self._place_landmarks)
@@ -397,11 +397,12 @@ class RegisterPanelWidget(QWidget):
         self._lm_add_btn.setToolTip("Click in the viewer to add a landmark. Select a point + Delete removes it.")
         self._lm_add_btn.toggled.connect(self._on_lm_add_toggled)
         lm_row.addWidget(self._lm_add_btn)
-        self._lm_move_btn = QPushButton("Move points")
+        self._lm_move_btn = QPushButton("Move without warping")
         self._lm_move_btn.setCheckable(True)
         self._lm_move_btn.setToolTip(
-            "Relocate landmarks (move the point + its atlas anchor together, no warp). "
-            "Same as holding Ctrl while dragging."
+            "Drag a landmark to a better spot without changing the outline: it is "
+            "re-anchored to the atlas point drawn there. Same as holding Ctrl while "
+            "dragging."
         )
         self._lm_move_btn.toggled.connect(self._on_lm_move_toggled)
         lm_row.addWidget(self._lm_move_btn)
@@ -1656,7 +1657,7 @@ class RegisterPanelWidget(QWidget):
         )
         self._status.setText(
             f"Section {section.index}: drag landmarks onto the tissue (warp); Ctrl+drag "
-            f"or 'Move points' to relocate; 'Add points' + click to add, Delete to remove. "
+            f"or 'Move without warping' to move a point; 'Add points' + click to add, Delete to remove. "
             f"Then 'Apply landmark warp'."
         )
 
@@ -1696,23 +1697,64 @@ class RegisterPanelWidget(QWidget):
             sx = np.resize(sx, len(data))
 
         if prev is None or len(data) > len(prev):
-            # Added point(s) (appended at the end): anchor each where it was dropped.
+            # Added point(s), appended at the end: anchored to the atlas point the
+            # current warp already draws there, so adding a handle changes nothing.
+            # Anchoring it where it was dropped pinned that spot to its un-warped
+            # place, and the outline jumped - sometimes a long way - once the other
+            # handles had been dragged.
             n_new = len(data) if prev is None else len(data) - len(prev)
-            sy[-n_new:] = data[-n_new:, 0]
-            sx[-n_new:] = data[-n_new:, 1]
+            anchors = self._anchors_under(data[-n_new:], prev, sy[:-n_new], sx[:-n_new])
+            sy[-n_new:] = anchors[:, 0]
+            sx[-n_new:] = anchors[:, 1]
             layer.features = {"sy": sy, "sx": sx}
         elif len(data) == len(prev) and (self._lm_ctrl_drag or self._lm_move_btn.isChecked()):
-            # Relocate (Ctrl / 'Move points'): shift the atlas anchor WITH the point so
-            # the displacement (target - source) is unchanged - repositions the handle
-            # without warping. A plain drag (below) moves only the target = warp.
-            delta = data - prev
-            layer.features = {"sy": sy + delta[:, 0], "sx": sx + delta[:, 1]}
+            # Move without warping (Ctrl, or the button): the moved handle is re-anchored
+            # to the atlas point the current warp draws at its new place, so the outline
+            # stays as it is. (Shifting the anchor by the move instead kept the handle's
+            # displacement, which carried its warp along with it once it had been dragged.)
+            moved = np.any(np.abs(data - prev) > 1e-9, axis=1)
+            if moved.any():
+                anchors = self._anchors_under(data[moved], prev, sy, sx)
+                sy[moved] = anchors[:, 0]
+                sx[moved] = anchors[:, 1]
+                layer.features = {"sy": sy, "sx": sx}
         # deletes keep features aligned automatically (napari drops the row).
         self._lm_prev_data = data.copy()
         # ALWAYS re-render so the shown outline matches the current anchors/targets.
         # (A relocate keeps every displacement, so with undragged handles this changes
         # nothing; skipping it here desynced the display and made the *next* drag jump.)
         self._preview_landmark_warp()
+
+    def _anchors_under(self, points_rc, prev_rc, prev_sy, prev_sx):
+        """Atlas anchors (row, col) that the current warp draws at ``points_rc``.
+
+        The current warp is the one the handles described before this edit
+        (``prev_rc`` targets, ``prev_sy``/``prev_sx`` anchors). With fewer than three
+        handles, or none dragged yet, there is no warp: the anchor is the point.
+        """
+        import numpy as np
+
+        points_rc = np.asarray(points_rc, dtype=float).reshape(-1, 2)
+        if prev_rc is None:
+            return points_rc.copy()
+        prev_rc = np.asarray(prev_rc, dtype=float).reshape(-1, 2)
+        anchors_rc = np.column_stack([np.asarray(prev_sy, float), np.asarray(prev_sx, float)])
+        if len(prev_rc) < 3 or len(anchors_rc) != len(prev_rc) or np.allclose(anchors_rc, prev_rc):
+            return points_rc.copy()
+        from atlastrack.registration.landmarks_warp import invert_points
+
+        y0 = self._lm_origin_xy[1] if self._lm_origin_xy else 0
+        x0 = self._lm_origin_xy[0] if self._lm_origin_xy else 0
+        # Section-local (x, y), as the preview and the final warp use.
+        source = np.column_stack([anchors_rc[:, 1] - x0, anchors_rc[:, 0] - y0])
+        target = np.column_stack([prev_rc[:, 1] - x0, prev_rc[:, 0] - y0])
+        pts = np.column_stack([points_rc[:, 1] - x0, points_rc[:, 0] - y0])
+        try:
+            back = invert_points(source, target, pts,
+                                 forward=self._landmarks_forward(self._landmark_idx))
+        except Exception:  # noqa: BLE001 - a degenerate set of handles: no warp
+            return points_rc.copy()
+        return np.column_stack([back[:, 1] + y0, back[:, 0] + x0])
 
     def _exit_landmark_edit(self) -> None:
         """Leave landmark-edit mode: drop the draggable handles + return to pan/zoom.

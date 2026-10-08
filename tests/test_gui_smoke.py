@@ -1908,11 +1908,21 @@ def test_landmark_warp_apply_and_reset(qtbot, tmp_path) -> None:
         assert np.asarray(lm.features["sy"])[0] == pytest.approx(15.0)  # anchor unchanged
         assert np.asarray(lm.data)[0, 0] == pytest.approx(22.0)          # target moved
 
-        # (3) Add a point: its anchor is set to where it was dropped.
+        # (3) Add a point after warping: it is anchored to the atlas point the warp
+        # already draws there, so the outline does not move (anchoring it where it
+        # was dropped made the outline jump).
+        from atlastrack.registration.landmarks_warp import warp_points
+
+        def warp_of(layer):
+            src = np.column_stack([layer.features["sx"], layer.features["sy"]])
+            tgt = np.asarray(layer.data, dtype=float)[:, ::-1]
+            grid = np.stack(np.meshgrid(np.arange(5, 80, 7.0), np.arange(5, 80, 7.0)), -1)
+            return warp_points(src, tgt, grid.reshape(-1, 2))
+
+        before = warp_of(lm)
         lm.add(np.array([[33.0, 44.0]]))  # (row, col)
         assert len(lm.data) == 6
-        assert np.asarray(lm.features["sx"])[-1] == pytest.approx(44.0)
-        assert np.asarray(lm.features["sy"])[-1] == pytest.approx(33.0)
+        assert np.abs(warp_of(lm) - before).max() < 1.0      # px: the outline stays put
 
         # (4) Delete a point: features stay aligned.
         lm.selected_data = {1}
@@ -2284,5 +2294,35 @@ def test_apply_on_a_section_already_applied_says_so(qtbot, tmp_path, monkeypatch
         panel._apply_landmarks()                                   # nothing on screen now
         assert said and said[0][0] == "Nothing being edited"
         assert "already applied" in said[0][1]
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_moving_a_dragged_landmark_without_warping_leaves_the_outline(qtbot, tmp_path) -> None:
+    """Moving a handle that has already warped the outline used to carry its warp along."""
+    from atlastrack.registration.landmarks_warp import warp_points
+
+    panel, state, viewer = _editing_section_0(qtbot, tmp_path)
+    try:
+        lm = viewer.layers["Atlas landmarks 0"]
+        panel._lm_origin_xy = (0, 0)
+        panel._lm_prev_data = np.asarray(lm.data, dtype=float).copy()
+        lm.events.data.connect(panel._on_landmark_data)
+
+        def warp_of():
+            src = np.column_stack([lm.features["sx"], lm.features["sy"]])
+            tgt = np.asarray(lm.data, dtype=float)[:, ::-1]
+            grid = np.stack(np.meshgrid(np.arange(5, 80, 7.0), np.arange(5, 80, 7.0)), -1)
+            return warp_points(src, tgt, grid.reshape(-1, 2))
+
+        before = warp_of()
+        panel._lm_move_btn.setChecked(True)
+        d = np.asarray(lm.data, dtype=float)
+        d[2] += (6.0, -8.0)                  # the dragged handle, moved without warping
+        lm.data = d
+        # Only the spot the handle left relaxes a little (its pin moved away); the
+        # old way carried the handle's whole 12 px warp along with it.
+        assert np.abs(warp_of() - before).max() < 3.0
     finally:
         viewer.close()
