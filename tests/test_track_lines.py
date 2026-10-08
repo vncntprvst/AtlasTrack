@@ -82,6 +82,10 @@ def test_carried_through_the_atlas_when_both_sections_are_registered(qtbot) -> N
     # Section 1's image is shifted 30 px relative to section 0 in ML.
     transforms = {0: _Linear(1000.0, 9000.0), 1: _Linear(970.0, 9500.0)}
     widget._section_transform = lambda idx: transforms.get(idx)
+    from atlastrack.project.schema import RegistrationResult
+
+    for sec in widget._state.project.slides[0].sections:
+        sec.registration = RegistrationResult(anchoring=[0.0] * 9, output_size_px=(120, 150))
     widget._state.atlas = object()          # any atlas: the transforms are faked
     widget._atlas_in_background = False     # build them right away, not in a thread
     try:
@@ -89,7 +93,8 @@ def test_carried_through_the_atlas_when_both_sections_are_registered(qtbot) -> N
         assert out is not None
         assert abs(out[0] - 70.0) < 2 and abs(out[1] - 50.0) < 2  # ML 1000+70, DV 50
         # The line uses it rather than the tissue estimate.
-        assert np.allclose(widget._carry_over((260.0, 50.0), 1, 0), out)
+        point, final = widget._carry_over((260.0, 50.0), 1, 0)
+        assert final and np.allclose(point, out)
     finally:
         viewer.close()
 
@@ -98,7 +103,7 @@ def test_without_an_image_the_box_is_used(qtbot) -> None:
     widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
     try:
         widget._state.slide_images.clear()
-        assert widget._carry_over((215.0, 40.0), 1, 0) is None   # -> same spot in the box
+        assert widget._carry_over((215.0, 40.0), 1, 0)[0] is None   # -> same spot in the box
     finally:
         viewer.close()
 
@@ -115,8 +120,46 @@ def test_atlas_transforms_are_built_off_the_gui_thread(qtbot) -> None:
         widget._state.atlas = object()
         started = []
         widget._build_transforms_in_background = lambda idx: started.append(list(idx))
-        out = widget._carry_over((215.0, 40.0), 1, 0)
+        out, final = widget._carry_over((215.0, 40.0), 1, 0)
         assert started == [[1, 0]]
         assert np.allclose(out, widget._carry_by_tissue((215.0, 40.0), 1, 0))
+        assert not final  # redone through the atlas once the transforms are built
+    finally:
+        viewer.close()
+
+
+def test_moving_one_shanks_marker_leaves_the_other_lines_alone(qtbot) -> None:
+    """Dragging a marker used to redraw every shank's line the quick way, so all the
+    lines moved, and some did not land back where they were."""
+    from atlastrack.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        def shank(i, x):
+            return Shank(index=i, tip_px=Point2D(x_px=x, y_px=90.0), tip_section_idx=0,
+                         entry_px=Point2D(x_px=x + 160.0, y_px=30.0), entry_section_idx=1)
+
+        widget._state.project.probes.append(ProbeSpec(
+            label="P", type=ProbeType(name="Neuropixels 2.0 (4-shank)", n_shanks=2),
+            shanks=[shank(0, 50.0), shank(1, 80.0)]))
+        quick = []
+        real = widget._carry_over
+
+        def spy(xy, a, b, *, quick_flag=None, **kw):
+            quick.append(kw.get("quick", False))
+            return real(xy, a, b, **kw)
+
+        widget._carry_over = lambda xy, a, b, **kw: spy(xy, a, b, **kw)
+        widget._rebuild_markers()
+        before = [np.array(seg) for seg in widget._segments_for(0, 1)]
+
+        quick.clear()
+        widget._move_marker(0, 0, "entry", 215.0, 35.0, commit=False)   # dragging
+        assert quick and all(quick)   # only the dragged shank was recomputed, quickly
+        assert all(np.array_equal(a, b) for a, b in zip(widget._segments_for(0, 1), before))
+        widget._move_marker(0, 0, "entry", 215.0, 35.0, commit=True)    # dropped
+        after = widget._segments_for(0, 1)
+        assert len(after) == len(before)
+        assert all(np.array_equal(a, b) for a, b in zip(after, before))
     finally:
         viewer.close()

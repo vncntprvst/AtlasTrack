@@ -173,9 +173,12 @@ class ClickOverlayWidget(QWidget):
         self._tissue_cache: dict = {}
         self._transform_cache: dict = {}
         self._carry_cache: dict = {}
-        # While a marker is dragged the quick (tissue) method is used; the atlas
-        # one runs when it is dropped.
-        self._quick_carry = False
+        # Each shank's line, kept until that shank's own markers, sections or
+        # registrations change: editing one shank must never move another's line.
+        self._segment_cache: dict = {}
+        # The shank whose marker is being dragged: only its line uses the quick
+        # (tissue) method; the atlas one runs when the marker is dropped.
+        self._dragging: tuple[int, int] | None = None
         # The atlas the lines were last drawn with: it often loads after the project,
         # so the lines are redrawn (now through the atlas) when the tab is shown.
         self._drawn_with_atlas = None
@@ -635,12 +638,13 @@ class ClickOverlayWidget(QWidget):
             shank.entry_px = pt
             if commit:
                 shank.entry_section_idx = self._find_section_for_point(x, y)
-        # Quick (tissue) carry-over while dragging; the atlas one once dropped.
-        self._quick_carry = not commit
+        # Quick (tissue) carry-over for this shank while dragging; the atlas one once
+        # dropped. The other shanks keep their lines.
+        self._dragging = None if commit else (p_idx, s_idx)
         try:
             self._rebuild_markers()
         finally:
-            self._quick_carry = False
+            self._dragging = None
         if commit:
             self._refresh_table()
 
@@ -745,6 +749,13 @@ class ClickOverlayWidget(QWidget):
         return None
 
     def _segments_for(self, p_idx: int, s_idx: int) -> list:
+        """The line pieces of one shank's track.
+
+        Cached per shank, keyed by everything the line depends on, so a redraw caused
+        by another shank's edit returns exactly the same line. A line drawn with the
+        quick method (while dragging, or before the atlas transforms were ready) is
+        redone with the atlas method on the next redraw that allows it.
+        """
         shank = self._state.project.probes[p_idx].shanks[s_idx]
         if shank.tip_px is None or shank.entry_px is None:
             return []
@@ -752,12 +763,25 @@ class ClickOverlayWidget(QWidget):
         entry = (shank.entry_px.x_px, shank.entry_px.y_px)
         t_sec, e_sec = shank.tip_section_idx, shank.entry_section_idx
         tip_box, entry_box = self._box_of(t_sec), self._box_of(e_sec)
+        quick = self._dragging == (p_idx, s_idx)
+        key = (tip, entry, t_sec, e_sec,
+               None if tip_box is None else tuple(tip_box),
+               None if entry_box is None else tuple(entry_box),
+               self._transform_key(t_sec), self._transform_key(e_sec),
+               id(getattr(self._state, "atlas", None)))
+        cached = self._segment_cache.get((p_idx, s_idx))
+        if cached is not None and cached[0] == key and (cached[2] or quick):
+            return cached[1]
         entry_here = tip_there = None
+        final = True
         if tip_box is not None and entry_box is not None and t_sec != e_sec:
-            entry_here = self._carry_over(entry, e_sec, t_sec)
-            tip_there = self._carry_over(tip, t_sec, e_sec)
-        return track_segments(tip, tip_box, entry, entry_box,
-                              entry_here=entry_here, tip_there=tip_there)
+            entry_here, final_a = self._carry_over(entry, e_sec, t_sec, quick=quick)
+            tip_there, final_b = self._carry_over(tip, t_sec, e_sec, quick=quick)
+            final = final_a and final_b
+        segments = track_segments(tip, tip_box, entry, entry_box,
+                                  entry_here=entry_here, tip_there=tip_there)
+        self._segment_cache[(p_idx, s_idx)] = (key, segments, final)
+        return segments
 
     # ------------------------------------------------------------------
     # Carrying a marker over to another section
@@ -770,27 +794,44 @@ class ClickOverlayWidget(QWidget):
                     return slide_idx, section
         return None, None
 
-    def _carry_over(self, xy, from_idx, to_idx):
+    def _carry_over(self, xy, from_idx, to_idx, *, quick: bool = False):
         """Where point ``xy`` of section ``from_idx`` would be on section ``to_idx``.
 
-        Through the atlas when both sections are registered (and not while a
-        marker is being dragged): the same left-right and depth position, which
-        takes each section's rotation, size and placement into account. Otherwise
-        against the tissue: the same distance from the midline, in tissue
+        Through the atlas when both sections are registered (and not ``quick``, as
+        while a marker is being dragged): the same left-right and depth position,
+        which takes each section's rotation, size and placement into account.
+        Otherwise against the tissue: the same distance from the midline, in tissue
         half-widths, and from the tissue's top, in tissue heights. None if neither
         works - the line then uses the same spot in the box.
+
+        Returns ``(point, final)``: ``final`` is False when the atlas method could
+        apply but was not used (``quick``, or its transforms are still being built).
         """
         key = (round(float(xy[0]), 1), round(float(xy[1]), 1), from_idx, to_idx)
-        if not self._quick_carry and key + ("atlas",) in self._carry_cache:
-            return self._carry_cache[key + ("atlas",)]
-        if not self._quick_carry and self._transforms_ready((from_idx, to_idx)):
-            out = self._carry_through_atlas(xy, from_idx, to_idx)
-            if out is not None:
-                self._carry_cache[key + ("atlas",)] = out
-                return out
+        if not quick and key + ("atlas",) in self._carry_cache:
+            return self._carry_cache[key + ("atlas",)], True
+        final = True
+        if self._could_use_atlas((from_idx, to_idx)):
+            if quick or not self._transforms_ready((from_idx, to_idx)):
+                final = False
+            else:
+                out = self._carry_through_atlas(xy, from_idx, to_idx)
+                if out is not None:
+                    self._carry_cache[key + ("atlas",)] = out
+                    return out, True
         if key + ("tissue",) not in self._carry_cache:
             self._carry_cache[key + ("tissue",)] = self._carry_by_tissue(xy, from_idx, to_idx)
-        return self._carry_cache[key + ("tissue",)]
+        return self._carry_cache[key + ("tissue",)], final
+
+    def _could_use_atlas(self, indices) -> bool:
+        """An atlas is loaded and every one of these sections is registered."""
+        if getattr(self._state, "atlas", None) is None:
+            return False
+        for idx in indices:
+            _, section = self._section(idx)
+            if section is None or section.registration is None:
+                return False
+        return True
 
     def _tissue_extent(self, section_idx):
         """(midline x, half-width, top y, height) of a section's tissue, in slide pixels."""
@@ -955,6 +996,7 @@ class ClickOverlayWidget(QWidget):
         self._tissue_cache.clear()
         self._transform_cache.clear()
         self._carry_cache.clear()
+        self._segment_cache.clear()
         self._drop_stale_layer_refs()
         self._refresh_probe_combo()
         self._rebuild_markers()
@@ -966,6 +1008,7 @@ class ClickOverlayWidget(QWidget):
         if atlas is not None and atlas is not self._drawn_with_atlas:
             self._carry_cache.clear()
             self._transform_cache.clear()
+            self._segment_cache.clear()
             self._rebuild_markers()
 
     def _rebuild_markers(self) -> None:
