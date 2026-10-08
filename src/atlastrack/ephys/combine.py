@@ -50,7 +50,7 @@ from atlastrack.ephys.recordings import (
     channels_for_shank,
     resolve_bank_offset,
 )
-from atlastrack.probes.geometry import SHANK_TIP_LENGTH_UM
+from atlastrack.probes.catalog import NP2_TIP_TO_LOWEST_SITE_UM
 
 
 @dataclass
@@ -104,8 +104,9 @@ class ShankStack:
     """One shank's LFP map, assembled from every recording that reached it.
 
     ``depth_from_tip_um`` is a uniform grid in the reference insertion's frame and
-    **includes the 175 µm chisel tip**, so it is directly comparable with the
-    histology track, whose tip is the physical tip and not the lowest electrode.
+    **includes the 217 µm from the lowest electrode to the tip**, so it is directly
+    comparable with the histology track, whose tip is the physical tip and not the
+    lowest electrode.
     """
 
     shank_index: int
@@ -169,14 +170,14 @@ def _runs(grid: np.ndarray, flag: np.ndarray, bin_um: float
 def depths_from_tip(rec: RecordingFeatures, mask: np.ndarray) -> np.ndarray:
     """Depth from the physical tip for the masked channels of one recording.
 
-    Adds the chisel tip length: the histology track ends at the physical tip, which
-    is 175 µm below the lowest electrode (Neuropixels 2.0 spec). Leaving it out puts
-    every channel 175 µm too deep - small, but the same size as the nuclei being
-    aligned to.
+    Adds the tip: the histology track ends at the physical tip, which is 217 µm
+    below the lowest electrode (Neuropixels 2.0, from imec's ProbeTable). Leaving it
+    out puts every channel that much too deep - small, but the same size as the
+    nuclei being aligned to.
     """
     axial = np.asarray(rec.axial_um, dtype=float)[mask]
     offset = resolve_bank_offset(axial, rec.electrode_range)
-    return axial + offset + SHANK_TIP_LENGTH_UM
+    return axial + offset + NP2_TIP_TO_LOWEST_SITE_UM
 
 
 def _interp_to(freqs_from: np.ndarray, psd: np.ndarray,

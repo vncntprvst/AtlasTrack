@@ -75,8 +75,12 @@ def test_exports_carry_both_depth_conventions_and_the_tip_offset(qtbot) -> None:
 
         first = widget._computed_exports(widget._state.project.probes[0])[0]
 
-        # The lowest channel sits 175 µm above the physical tip, not on it.
-        assert first.channel_depth_from_tip_um.min() == pytest.approx(175.0)
+        # The lowest channel sits above the physical tip, not on it.
+        from atlastrack.probes.catalog import tip_to_lowest_site_um
+
+        expected = tip_to_lowest_site_um(widget._state.project.probes[0].type.name)
+        assert expected > 200.0
+        assert first.channel_depth_from_tip_um.min() == pytest.approx(expected)
         assert np.allclose(
             first.channel_depth_below_surface_um,
             4000.0 - first.channel_depth_from_tip_um,

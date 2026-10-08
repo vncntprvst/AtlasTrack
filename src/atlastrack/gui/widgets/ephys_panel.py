@@ -526,7 +526,7 @@ class EphysPanelWidget(QWidget):
         import numpy as np
 
         from atlastrack.ephys.export import ShankFeatureExport
-        from atlastrack.probes.geometry import SHANK_TIP_LENGTH_UM
+        from atlastrack.probes.catalog import tip_to_lowest_site_um
 
         if self._stacks:
             return self._stack_exports(probe)
@@ -554,7 +554,7 @@ class EphysPanelWidget(QWidget):
             if shank.tip_ccf_um is not None and shank.entry_ccf_um is not None:
                 track = float(np.linalg.norm(
                     np.asarray(shank.tip_ccf_um) - np.asarray(shank.entry_ccf_um)))
-            from_tip = y[mask] - y[mask].min() + SHANK_TIP_LENGTH_UM
+            from_tip = y[mask] - y[mask].min() + tip_to_lowest_site_um(probe.type.name)
             out.append(ShankFeatureExport(
                 shank_index=shank.index,
                 track_length_um=track,

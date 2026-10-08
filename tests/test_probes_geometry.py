@@ -17,7 +17,7 @@ from atlastrack.probes.geometry import (
 def test_constants() -> None:
     assert SHANK_WIDTH_UM == 70.0
     assert SHANK_THICKNESS_UM == 24.0
-    assert SHANK_TIP_LENGTH_UM == 175.0
+    assert SHANK_TIP_LENGTH_UM == 206.0
     assert SHANK_PITCH_UM == 250.0
 
 

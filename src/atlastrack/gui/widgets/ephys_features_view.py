@@ -471,9 +471,9 @@ class EphysFeaturesView(QWidget):
         #   surface - draggable on the ephys panel, because "the brain starts here" is
         #             something the LFP can say and the histology can be wrong about;
         #   tip     - draggable on the region column only. Its position on the ephys
-        #             panel is fixed geometry (the bottom channel plus the 175 µm
-        #             chisel tip), so dragging it there would let the user contradict
-        #             the probe's own dimensions.
+        #             panel is fixed geometry (the bottom channel plus the 217 µm
+        #             to the tip on Neuropixels 2.0), so dragging it there would
+        #             let the user contradict the probe's own dimensions.
         marks = [(0.0, "brain surface (drag me)", (120, 220, 255), "ephys", 0.55)]
         if self._track_length_um > 0:
             marks.append(

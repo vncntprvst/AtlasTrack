@@ -12,7 +12,7 @@ import numpy as np
 # ---------------------------------------------------------------------------
 SHANK_WIDTH_UM: float = 70.0
 SHANK_THICKNESS_UM: float = 24.0
-SHANK_TIP_LENGTH_UM: float = 175.0
+SHANK_TIP_LENGTH_UM: float = 206.0  # the taper (Neuropixels 2.0, imec ProbeTable)
 SHANK_PITCH_UM: float = 250.0
 ELECTRODE_COLUMN_CENTER_UM: float = 16.0
 

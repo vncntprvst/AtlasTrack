@@ -850,14 +850,19 @@ class EphysProbeAlignmentDialog(QDialog):
                 saved.channel_depth_below_surface_um, saved.lfp_psd, saved.lfp_freqs_hz
             )
         elif lfp_result is not None and track_length > 0:
-            self._load_shank_lfp(panel, shank, lfp_result, track_length)
+            from atlastrack.probes.catalog import tip_to_lowest_site_um
+
+            self._load_shank_lfp(
+                panel, shank, lfp_result, track_length,
+                tip_to_lowest_um=tip_to_lowest_site_um(self._probe.type.name),
+            )
         panel.refresh_display_modes()
         if shank.ephys is not None:
             panel.restore_landmarks(shank.ephys.feature_um, shank.ephys.track_um)
 
     @staticmethod
     def _load_shank_lfp(panel: EphysAlignmentPanel, shank, lfp_result,
-                        track_length_um: float) -> None:
+                        track_length_um: float, *, tip_to_lowest_um: float) -> None:
         """Feed this shank's slice of the recording's LFP into its panel.
 
         Split by the probe's **shank ids**, never by x: a NP2.0 shank has two
@@ -883,13 +888,11 @@ class EphysProbeAlignmentDialog(QDialog):
         if not mask.any():
             return
         # The recording's y is measured from the lowest electrode, but the histology
-        # track ends at the **physical tip**, which is a 175 µm chisel below it
-        # (Neuropixels spec: TIP LENGTH 175 µm). Without this every channel sits
-        # 175 µm too deep - small, but the same size as the nuclei being aligned to.
-        from atlastrack.probes.geometry import SHANK_TIP_LENGTH_UM
-
+        # track ends at the **physical tip** below it (217 µm on Neuropixels 2.0).
+        # Without this every channel sits that much too deep - small, but the same
+        # size as the nuclei being aligned to.
         depth_from_tip = depths_from_tip[mask] - depths_from_tip[mask].min()
-        depth_from_tip = depth_from_tip + SHANK_TIP_LENGTH_UM
+        depth_from_tip = depth_from_tip + tip_to_lowest_um
         panel.view().set_lfp(track_length_um - depth_from_tip, psd[mask], freqs)
 
     def load_landmarks_from_file(self, path: str | None = None) -> int:

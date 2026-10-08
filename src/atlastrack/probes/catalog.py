@@ -8,6 +8,8 @@ References
 ----------
 - NP 1.0: https://www.neuropixels.org/probe10a (imec)
 - NP 2.0: https://www.neuropixels.org/probe20 (imec)
+- Neuropixels geometry: imec's ProbeTable (https://github.com/billkarsh/ProbeTable),
+  as copied into probeinterface's ``neuropixels_probe_features.json``.
 """
 from __future__ import annotations
 
@@ -84,6 +86,50 @@ class ProbeLayout:
 
 NEURONEXUS_A1X32_POLY3 = "NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP"
 
+#: From the top of a Neuropixels shank's taper to the centre of its lowest electrode.
+#: ProbeTable does not give it; probeinterface uses this value to draw the probe.
+_NP_TAPER_TOP_TO_LOWEST_SITE_UM = 11.0
+
+
+def _neuropixels(
+    name: str,
+    *,
+    n_channels: int,
+    tip_length_um: float,
+    row_pitch_um: float,
+    even_row_x_um: float,
+    odd_row_x_um: float,
+    col_pitch_um: float = 32.0,
+    shank_width_um: float = 70.0,
+) -> ProbeLayout:
+    """The lowest ``n_channels`` electrodes of one Neuropixels shank.
+
+    Values are ProbeTable's: ``tip_length_um`` is the taper, and ``*_row_x_um`` is
+    the distance from the shank's left edge to the left electrode of a row (row 0
+    is an even row). Both electrodes of a row are at the same depth; on NP 1.0 the
+    rows alternate between two x positions, on NP 2.0 they do not.
+
+    The lowest electrode sits ``tip_length_um + 11`` µm above the physical tip
+    (220 µm on NP 1.0, 217 µm on NP 2.0). This used to be 175 µm on NP 1.0 and 0 on
+    NP 2.0, which put every NP 2.0 electrode about 0.2 mm too deep.
+    """
+    tip_to_lowest = tip_length_um + _NP_TAPER_TOP_TO_LOWEST_SITE_UM
+    depths, offsets = [], []
+    for k in range(n_channels):
+        row, col = divmod(k, 2)
+        left = even_row_x_um if row % 2 == 0 else odd_row_x_um
+        depths.append(tip_to_lowest + row * row_pitch_um)
+        offsets.append(left + col * col_pitch_um - shank_width_um / 2.0)
+    return ProbeLayout(
+        name=name,
+        n_channels=n_channels,
+        tip_to_first_site_um=tip_to_lowest,
+        n_columns=2,
+        col_pitch_um=col_pitch_um,
+        explicit_depths_um=tuple(depths),
+        explicit_offsets_um=tuple(offsets),
+    )
+
 
 def _neuronexus_a1x32_poly3() -> ProbeLayout:
     """Build the NeuroNexus A1x32-Poly3-10mm-25s-177(-OA32LP) site layout.
@@ -139,24 +185,29 @@ def _neuronexus_a1x32_poly3() -> ProbeLayout:
 
 
 CATALOG: dict[str, ProbeLayout] = {
-    "Neuropixels 1.0": ProbeLayout(
-        name="Neuropixels 1.0",
-        n_channels=384,
-        tip_to_first_site_um=175.0,  # base of the taper
-        site_row_pitch_um=10.0,       # 10 µm between alternating rows (20 µm same-col)
-        n_columns=2,
-        col_pitch_um=32.0,            # ±16 µm from centreline
+    # ProbeTable NP1000.
+    "Neuropixels 1.0": _neuropixels(
+        "Neuropixels 1.0", n_channels=384, tip_length_um=209.0, row_pitch_um=20.0,
+        even_row_x_um=27.0, odd_row_x_um=11.0,
     ),
-    "Neuropixels 2.0 (4-shank)": ProbeLayout(
-        name="Neuropixels 2.0 (4-shank)",
-        n_channels=384,               # per shank
-        tip_to_first_site_um=0.0,
-        site_row_pitch_um=7.5,
-        n_columns=2,
-        col_pitch_um=32.0,
+    # ProbeTable NP2013 / NP2014 / NP2020 / NP2021 (all the same shank). The lowest
+    # 384 electrodes of each shank: which electrodes were recorded is in the
+    # recording's own channel map, not here.
+    "Neuropixels 2.0 (4-shank)": _neuropixels(
+        "Neuropixels 2.0 (4-shank)", n_channels=384, tip_length_um=206.0,
+        row_pitch_um=15.0, even_row_x_um=27.0, odd_row_x_um=27.0,
     ),
     NEURONEXUS_A1X32_POLY3: _neuronexus_a1x32_poly3(),
 }
+
+
+#: Physical tip to the lowest electrode of a Neuropixels 2.0 shank (217 µm).
+NP2_TIP_TO_LOWEST_SITE_UM: float = CATALOG["Neuropixels 2.0 (4-shank)"].tip_to_first_site_um
+
+
+def tip_to_lowest_site_um(probe_name: str) -> float:
+    """Distance from the physical tip to the lowest electrode of ``probe_name``."""
+    return float(get_layout(probe_name).site_depths_from_tip_um().min())
 
 
 def get_layout(probe_name: str) -> ProbeLayout:

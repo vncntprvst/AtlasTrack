@@ -69,8 +69,8 @@ def test_depths_from_tip_adds_the_chisel_tip():
 
     d = depths_from_tip(rec, mask)
 
-    assert float(d.min()) == pytest.approx(175.0)  # tip length, not 0
-    assert float(d.max()) == pytest.approx(175.0 + 15.0)
+    assert float(d.min()) == pytest.approx(217.0)  # tip to lowest electrode, not 0
+    assert float(d.max()) == pytest.approx(217.0 + 15.0)
 
 
 def test_depths_from_tip_does_not_double_count_an_absolute_bank():
@@ -80,7 +80,7 @@ def test_depths_from_tip_does_not_double_count_an_absolute_bank():
 
     d = depths_from_tip(rec, mask)
 
-    assert float(d.min()) == pytest.approx(720.0 + 175.0)
+    assert float(d.min()) == pytest.approx(720.0 + 217.0)
 
 
 # ---------------------------------------------------------------------- stacking

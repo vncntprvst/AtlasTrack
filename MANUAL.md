@@ -383,6 +383,12 @@ the acronym, the Allen structure id, and the atlas colour as `#rrggbb`. A channe
 outside the atlas has an empty acronym, id `0` and an empty colour. The atlas is
 loaded on first use, so the first CSV export can take a moment.
 
+The tip marker is the physical tip of the shank. The electrodes start above it, as
+on the real probe: the lowest electrode is 217 µm above the tip on a Neuropixels
+2.0 probe and 220 µm on a Neuropixels 1.0 probe (from imec's probe tables). Without
+an ephys alignment, the CSV lists the lowest 384 electrodes of each shank; which
+ones were recorded is in the recording's own channel map.
+
 **Convert to Paxinos stereotaxic coordinates** (CSV only) converts the finished
 coordinates to millimetres from bregma. The **?** explains the choices and how far
 apart they are - they are published estimates, so validate against your histology.

@@ -62,11 +62,15 @@ def test_neuronexus_poly3_layout() -> None:
     assert layout.fiber_offset_above_top_site_um == pytest.approx(50.0)
 
 
-def test_np10_depths_start_at_175() -> None:
+def test_np10_depths_start_220_um_above_the_tip() -> None:
+    """ProbeTable NP1000: a 209 µm taper, then 11 µm to the lowest electrode's centre."""
     layout = CATALOG["Neuropixels 1.0"]
     depths = layout.site_depths_from_tip_um()
-    assert depths[0] == pytest.approx(175.0)
+    assert depths[0] == pytest.approx(220.0)
     assert len(depths) == 384
+    # Both electrodes of a row are at the same depth; rows are 20 µm apart.
+    assert np.allclose(depths[::2], depths[1::2])
+    assert np.allclose(np.diff(depths[::2]), 20.0)
 
 
 def test_np10_lateral_offsets_are_symmetric() -> None:
@@ -75,10 +79,36 @@ def test_np10_lateral_offsets_are_symmetric() -> None:
     assert lats.mean() == pytest.approx(0.0, abs=1.0)  # centred on shank
 
 
-def test_np20_depths_start_near_zero() -> None:
+def test_np20_depths_start_217_um_above_the_tip() -> None:
+    """The lowest electrode is not at the tip: 0 here put every NP 2.0 electrode
+    about 0.2 mm too deep."""
     layout = CATALOG["Neuropixels 2.0 (4-shank)"]
     depths = layout.site_depths_from_tip_um()
-    assert depths[0] == pytest.approx(0.0)
+    assert depths[0] == pytest.approx(217.0)
+    assert np.allclose(depths[::2], depths[1::2])
+    assert np.allclose(np.diff(depths[::2]), 15.0)
+    # Both columns sit at the same x in every row: 8 µm left, 24 µm right of centre.
+    assert sorted(set(layout.site_lateral_offsets_um())) == [-8.0, 24.0]
+
+
+@pytest.mark.parametrize(
+    "name, part", [("Neuropixels 1.0", "NP1000"), ("Neuropixels 2.0 (4-shank)", "NP2014")]
+)
+def test_neuropixels_layouts_match_probeinterface(name, part) -> None:
+    """The catalog's Neuropixels electrodes are where probeinterface puts them."""
+    pytest.importorskip("probeinterface")
+    from probeinterface.neuropixels_tools import build_neuropixels_probe
+
+    probe = build_neuropixels_probe(part)
+    pos = np.asarray(probe.contact_positions, dtype=float)
+    if probe.shank_ids is not None:
+        pos = pos[np.asarray(probe.shank_ids).astype(int) == 0]
+    tip_x, tip_y = np.asarray(probe.annotations["shank_tips"][0], dtype=float)
+    pos = pos[np.lexsort((pos[:, 0], pos[:, 1]))][:384]  # lowest first, left to right
+
+    layout = CATALOG[name]
+    assert np.allclose(layout.site_depths_from_tip_um(), pos[:, 1] - tip_y)
+    assert np.allclose(layout.site_lateral_offsets_um(), pos[:, 0] - tip_x)
 
 
 def test_get_layout_fallback() -> None:
