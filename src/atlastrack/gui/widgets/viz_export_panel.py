@@ -338,8 +338,7 @@ class VizExportPanelWidget(QWidget):
         export_layout = QVBoxLayout(export_box)
         export_layout.addWidget(
             _muted(
-                "Writes the registered coordinates to a file. Pick the format, then "
-                "Export."
+                "Write the registered coordinates to a file."
             )
         )
 
@@ -433,7 +432,7 @@ class VizExportPanelWidget(QWidget):
         figures_box = QGroupBox("Create figures")
         figures_layout = QVBoxLayout(figures_box)
         figures_layout.addWidget(
-            _muted("Makes pictures of the registered result. Pick one, then Create.")
+            _muted("Create figures of the registered result.")
         )
         fig_row = QHBoxLayout()
         fig_row.addWidget(QLabel("Figure:"))
@@ -825,8 +824,10 @@ class VizExportPanelWidget(QWidget):
         except Exception as exc:  # noqa: BLE001
             _error_dialog(self, "Figures failed", str(exc))
             return
+        # Short: the panel is narrow, and the three names differ only at the end.
         self._status.setText(
-            "Saved " + ", ".join(p.name for p in written) + f" \u2192 {Path(directory).name}"
+            f"Saved {len(written)} views ({stem} - back / top / side) \u2192 "
+            f"{Path(directory).name}"
         )
 
     def _export_series(self) -> None:
