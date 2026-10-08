@@ -186,7 +186,8 @@ def test_long_probe_names_do_not_widen_the_panel(qtbot) -> None:
 
     state = WorkflowState()
     for label in ("ProbeA_green_01302026", "ProbeA_red_01282026", "ProbeA_red_01292026"):
-        state.project.probes.append(ProbeSpec(label=label, type=ProbeType(name="NP", n_shanks=1)))
+        state.project.probes.append(ProbeSpec(label=label, type=ProbeType(name="NP", n_shanks=1),
+                                              shanks=[]))
     picker = ProbePickerWidget(state)
     qtbot.addWidget(picker)
     picker._refresh_rename_combo()
