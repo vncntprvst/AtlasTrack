@@ -825,8 +825,10 @@ class VizExportPanelWidget(QWidget):
         except Exception as exc:  # noqa: BLE001
             _error_dialog(self, "Figures failed", str(exc))
             return
+        # Short: the panel is narrow, and the three names differ only at the end.
         self._status.setText(
-            "Saved " + ", ".join(p.name for p in written) + f" \u2192 {Path(directory).name}"
+            f"Saved {len(written)} views ({stem} - back / top / side) \u2192 "
+            f"{Path(directory).name}"
         )
 
     def _export_series(self) -> None:

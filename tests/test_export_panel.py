@@ -468,6 +468,6 @@ def test_the_three_views_are_written_with_the_project_name(qtbot, monkeypatch, t
         viz._create_figure()
 
         assert seen["stem"] == "LO_test" and seen["out_dir"] == str(tmp_path)
-        assert "LO_test - back.png" in viz._status.text()
+        assert "Saved 3 views (LO_test - back / top / side)" in viz._status.text()
     finally:
         viewer.close()
