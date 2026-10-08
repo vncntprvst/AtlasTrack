@@ -168,6 +168,9 @@ class ClickOverlayWidget(QWidget):
         self._adding: str | None = None
         self._pending_tip: tuple[float, float] | None = None   # (x, y)
         self._selected: tuple[int, int] | None = None          # (probe, shank)
+        # The marker of the selected track that the arrow keys move.
+        self._selected_marker: str = "entry"
+        self._syncing_combos = False
         # Carrying a marker over to another section (for the line's direction):
         # tissue extents and section transforms are costly, so they are cached.
         self._tissue_cache: dict = {}
@@ -220,6 +223,7 @@ class ClickOverlayWidget(QWidget):
         shank_row.addWidget(QLabel("Shank:"))
         self._shank_combo = QComboBox()
         self._shank_combo.setToolTip("The shank the next track is added to.")
+        self._shank_combo.currentIndexChanged.connect(self._on_shank_changed)
         shank_row.addWidget(self._shank_combo, 1)
         layout.addLayout(shank_row)
         self._refresh_probe_combo()
@@ -235,6 +239,16 @@ class ClickOverlayWidget(QWidget):
         )
         self._add_btn.toggled.connect(self._on_add_toggled)
         layout.addWidget(self._add_btn)
+
+        self._from_ccf_btn = QPushButton("Markers from coordinates")
+        self._from_ccf_btn.setToolTip(
+            "For the probe above: give every shank that has atlas coordinates but no "
+            "markers a tip and an entry marker, each on the section nearest it in AP, "
+            "so the track can be adjusted by hand. Needs the atlas and registered "
+            "sections. A marker takes the AP of the section it is placed on."
+        )
+        self._from_ccf_btn.clicked.connect(self._markers_from_coordinates)
+        layout.addWidget(self._from_ccf_btn)
 
         clear_btn = QPushButton("Clear all tracks")
         clear_btn.setToolTip("Remove every track of every probe.")
@@ -285,6 +299,19 @@ class ClickOverlayWidget(QWidget):
 
     def _on_probe_changed(self, *_args) -> None:
         self._refresh_shank_combo()
+        self._select_from_combos()
+
+    def _on_shank_changed(self, *_args) -> None:
+        self._select_from_combos()
+
+    def _select_from_combos(self) -> None:
+        """Choosing a probe or shank selects that track, placed or not."""
+        if self._syncing_combos:
+            return
+        p_idx, s_idx = self._current_ps()
+        probes = self._state.project.probes
+        if 0 <= p_idx < len(probes) and 0 <= s_idx < len(probes[p_idx].shanks):
+            self._select_track(p_idx, s_idx)
 
     # ------------------------------------------------------------------
     # Sizes (in slide pixels, so markers look alike at any slide resolution)
@@ -577,7 +604,7 @@ class ClickOverlayWidget(QWidget):
         if hit is None:
             return
         p_idx, s_idx, kind = hit
-        self._select_track(p_idx, s_idx)
+        self._select_track(p_idx, s_idx, kind)
         if kind not in ("tip", "entry"):
             return
         # Drag the marker: stop the view panning while it moves.
@@ -652,17 +679,32 @@ class ClickOverlayWidget(QWidget):
     # Selection and removal
     # ------------------------------------------------------------------
 
-    def _select_track(self, p_idx: int, s_idx: int) -> None:
+    def _select_track(self, p_idx: int, s_idx: int, marker: str | None = None) -> None:
         self._selected = (p_idx, s_idx)
-        self._probe_combo.setCurrentIndex(p_idx)
-        self._shank_combo.setCurrentIndex(s_idx)
+        # A clicked marker is the one the arrow keys move; selecting the track any
+        # other way (its line, its row, the dropdowns) means its entry.
+        self._selected_marker = marker if marker in ("tip", "entry") else "entry"
+        self._syncing_combos = True
+        try:
+            if self._probe_combo.currentIndex() != p_idx:
+                self._probe_combo.setCurrentIndex(p_idx)
+            if self._shank_combo.currentIndex() != s_idx:
+                self._shank_combo.setCurrentIndex(s_idx)
+        finally:
+            self._syncing_combos = False
         self._rebuild_markers()
         self._refresh_table()
-        label = self._state.project.probes[p_idx].label
-        self._status.setText(
-            f"Selected: {label}, shank {s_idx}. Drag a marker to move it; Delete removes "
-            "the track."
-        )
+        probe = self._state.project.probes[p_idx]
+        shank = probe.shanks[s_idx]
+        if shank.tip_px is None and shank.entry_px is None:
+            hint = ("No markers yet: use Add track"
+                    + (", or Markers from coordinates." if shank.tip_ccf_um is not None
+                       else "."))
+        else:
+            hint = (f"Drag a marker to move it; the arrow keys nudge the "
+                    f"{self._selected_marker} marker by 1 px (Shift: 0.1 px). Click the "
+                    "other marker to nudge that one. Delete removes the track.")
+        self._status.setText(f"Selected: {probe.label}, shank {s_idx}. {hint}")
 
     def _on_row_clicked(self, row: int, _col: int) -> None:
         item = self._table.item(row, 0)
@@ -710,10 +752,118 @@ class ClickOverlayWidget(QWidget):
                     return True
                 if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and overlay._interactive():
                     return overlay._delete_selected()
+                steps = {Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0),
+                         Qt.Key.Key_Up: (0, -1), Qt.Key.Key_Down: (0, 1)}
+                if key in steps and overlay._interactive() and overlay._adding is None:
+                    fine = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                    dx, dy = steps[key]
+                    size = 0.1 if fine else 1.0
+                    return overlay._nudge_selected(dx * size, dy * size)
                 return False
 
         self._key_filter = _Keys(self)
         widget.installEventFilter(self._key_filter)
+
+    def _markers_from_coordinates(self) -> None:
+        """Give the chosen probe's coordinate-only shanks a tip and an entry marker.
+
+        For a probe placed from coordinates (a script, or another tool) rather than by
+        clicking: without markers it cannot be dragged. Each point goes on the
+        registered section of the slide nearest to it in AP, at the pixel with its
+        atlas left-right and depth. Its AP becomes that section's AP.
+        """
+        p_idx = self._probe_combo.currentIndex()
+        probes = self._state.project.probes
+        slide_idx = self._state.active_slide_idx
+        if not 0 <= p_idx < len(probes) or slide_idx is None:
+            return
+        if getattr(self._state, "atlas", None) is None:
+            self._status.setText("Markers from coordinates needs the atlas: load it first.")
+            return
+        sections = [s for s in self._state.project.slides[slide_idx].sections
+                    if s.registration is not None]
+        if not sections:
+            self._status.setText("Markers from coordinates needs registered sections.")
+            return
+        self._status.setText("Placing markers from coordinates…")
+        self._status.repaint()   # not processEvents: no other events mid-change
+
+        def place(ccf):
+            best = None
+            for sec in sections:
+                tx = self._section_transform(sec.index)
+                if tx is None:
+                    continue
+                found = self._pixel_at(tx, np.asarray(ccf, dtype=float)[1:], sec.bbox_px)
+                if found is None or found[1] > 150.0:
+                    continue
+                x0, y0 = sec.bbox_px[:2]
+                ap = float(tx.apply_many(np.array([[found[0][0] - x0, found[0][1] - y0]]))[0][0])
+                gap = abs(ap - float(ccf[0]))
+                if best is None or gap < best[0]:
+                    best = (gap, sec.index, found[0])
+            return best
+
+        placed, missed, gaps = 0, 0, []
+        for shank in probes[p_idx].shanks:
+            if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
+                continue
+            for kind, ccf in (("tip", shank.tip_ccf_um), ("entry", shank.entry_ccf_um)):
+                if (shank.tip_px if kind == "tip" else shank.entry_px) is not None:
+                    continue
+                hit = place(ccf)
+                if hit is None:
+                    missed += 1
+                    continue
+                gap, sec_idx, px = hit
+                pt = Point2D(x_px=float(px[0]), y_px=float(px[1]))
+                if kind == "tip":
+                    shank.tip_px, shank.tip_section_idx = pt, sec_idx
+                else:
+                    shank.entry_px, shank.entry_section_idx = pt, sec_idx
+                placed += 1
+                gaps.append(gap)
+        self._segment_cache.clear()
+        self._rebuild_markers()
+        self._refresh_table()
+        label = probes[p_idx].label
+        if not placed:
+            self._status.setText(
+                f"{label}: no markers placed" + (f" ({missed} point(s) are on no section)."
+                                                 if missed else " - every shank already has them."))
+            return
+        self._status.setText(
+            f"{label}: placed {placed} marker(s); each is up to {max(gaps):.0f} µm from its "
+            "point in AP, the distance to the nearest section."
+            + (f" {missed} point(s) are on no section." if missed else "")
+            + " Update probe coordinates turns them back into coordinates.")
+
+    def _nudge_selected(self, dx: float, dy: float) -> bool:
+        """Move the selected track's chosen marker by (dx, dy) slide pixels.
+
+        For fine adjustments: when tip and entry are on different sections, a pixel at
+        the entry can turn the line by half a degree on the tip's section, which is
+        hard to hit by dragging. The marker stays on its section.
+        """
+        if self._selected is None:
+            return False
+        p_idx, s_idx = self._selected
+        probes = self._state.project.probes
+        if not (0 <= p_idx < len(probes) and 0 <= s_idx < len(probes[p_idx].shanks)):
+            return False
+        shank = probes[p_idx].shanks[s_idx]
+        kind = self._selected_marker
+        pt = shank.tip_px if kind == "tip" else shank.entry_px
+        if pt is None:
+            return False
+        new = Point2D(x_px=float(pt.x_px + dx), y_px=float(pt.y_px + dy))
+        if kind == "tip":
+            shank.tip_px = new
+        else:
+            shank.entry_px = new
+        self._rebuild_markers()
+        self._refresh_table()
+        return True
 
     def _clear_tracks(self) -> None:
         n = sum(1 for p in self._state.project.probes for s in p.shanks
@@ -967,27 +1117,54 @@ class ClickOverlayWidget(QWidget):
         try:
             fx0, fy0 = from_sec.bbox_px[:2]
             target = src.apply_many(np.array([[xy[0] - fx0, xy[1] - fy0]], dtype=float))[0]
-            want = target[1:]                                  # (ML, DV) um
-            tx0, ty0, tx1, ty1 = to_sec.bbox_px
-            w, h = tx1 - tx0, ty1 - ty0
-            best = None
-            # Coarse grid, then two finer passes around the best point.
-            cx, cy, span = w / 2.0, h / 2.0, max(w, h) / 2.0
-            for _ in range(3):
-                g = np.linspace(-span, span, 25)
-                gx, gy = np.meshgrid(cx + g, cy + g)
-                px = np.stack([np.clip(gx.ravel(), 0, w - 1), np.clip(gy.ravel(), 0, h - 1)], 1)
-                ccf = dst.apply_many(px)
-                d = np.linalg.norm(ccf[:, 1:] - want[None, :], axis=1)
-                k = int(np.argmin(d))
-                best = (px[k], float(d[k]))
-                cx, cy = best[0]
-                span = span / 8.0
-            if best is None or best[1] > 200.0:               # um: no such point there
+            found = self._pixel_at(dst, target[1:], to_sec.bbox_px)   # (ML, DV) um
+            if found is None or found[1] > 200.0:             # um: no such point there
                 return None
-            return np.array([tx0 + best[0][0], ty0 + best[0][1]])
+            return found[0]
         except Exception:  # noqa: BLE001
             return None
+
+    @staticmethod
+    def _pixel_at(transform, want_ml_dv, box):
+        """The slide pixel of a section whose atlas (ML, DV) is ``want_ml_dv``.
+
+        Returns ``(pixel, error_um)``. A grid search over the box finds the area, then
+        a few Newton steps place it to a fraction of a pixel.
+
+        The answer can still move unevenly as the source point moves: a section's
+        non-linear warp can be irregular at the pixel scale near the image edge (on
+        LO_04, up to 90 µm of depth per 2 px at the entries). That is the
+        registration, not this search; the arrow keys allow fine steps through it.
+        """
+        want = np.asarray(want_ml_dv, dtype=float)
+        x0, y0, x1, y1 = box
+        w, h = x1 - x0, y1 - y0
+        best = None
+        # Coarse grid, then two finer passes around the best point.
+        cx, cy, span = w / 2.0, h / 2.0, max(w, h) / 2.0
+        for _ in range(3):
+            g = np.linspace(-span, span, 25)
+            gx, gy = np.meshgrid(cx + g, cy + g)
+            px = np.stack([np.clip(gx.ravel(), 0, w - 1), np.clip(gy.ravel(), 0, h - 1)], 1)
+            ccf = transform.apply_many(px)
+            d = np.linalg.norm(ccf[:, 1:] - want[None, :], axis=1)
+            k = int(np.argmin(d))
+            best = (px[k].astype(float), float(d[k]))
+            cx, cy = best[0]
+            span = span / 8.0
+        assert best is not None
+        p, err = best
+        for _ in range(4):
+            base = transform.apply_many(p[None, :])[0][1:]
+            jx = transform.apply_many((p + [1.0, 0.0])[None, :])[0][1:] - base
+            jy = transform.apply_many((p + [0.0, 1.0])[None, :])[0][1:] - base
+            step = np.linalg.lstsq(np.stack([jx, jy], 1), want - base, rcond=None)[0]
+            trial = p + np.clip(step, -2.0, 2.0)       # stay within the grid's cell
+            trial_err = float(np.linalg.norm(transform.apply_many(trial[None, :])[0][1:] - want))
+            if trial_err >= err:
+                break
+            p, err = trial, trial_err
+        return np.array([x0 + p[0], y0 + p[1]]), err
 
     def refresh_after_load(self) -> None:
         """Redraw the tracks and the list from a freshly-loaded project."""
@@ -1086,11 +1263,11 @@ class ClickOverlayWidget(QWidget):
         from qtpy.QtCore import Qt
         from qtpy.QtGui import QColor
 
+        # Every shank of every probe, placed or not: a probe whose tracks have no
+        # markers yet must still be findable and selectable here.
         rows = []
         for p_idx, probe in enumerate(self._state.project.probes):
             for s_idx, shank in enumerate(probe.shanks):
-                if shank.tip_px is None and shank.entry_px is None:
-                    continue
                 rows.append((p_idx, s_idx, probe.label, shank))
         self._table.setRowCount(len(rows))
         for i, (p_idx, s_idx, label, shank) in enumerate(rows):
@@ -1100,7 +1277,8 @@ class ClickOverlayWidget(QWidget):
             first.setData(Qt.ItemDataRole.UserRole, (p_idx, s_idx))
             cells = [first, QTableWidgetItem(str(shank.index))]
             for pt in (shank.tip_px, shank.entry_px):
-                cells.append(QTableWidgetItem("" if pt is None else f"{pt.x_px:.0f}, {pt.y_px:.0f}"))
+                cells.append(QTableWidgetItem(
+                    "not placed" if pt is None else f"{pt.x_px:.1f}, {pt.y_px:.1f}"))
             for col, item in enumerate(cells):
                 if col:
                     item.setForeground(color)

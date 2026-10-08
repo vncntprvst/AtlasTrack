@@ -1081,7 +1081,9 @@ def test_delete_removes_only_the_selected_track(qtbot) -> None:
         assert shanks[0].tip_px is None and shanks[0].entry_px is None
         assert shanks[1].tip_px is not None
         assert len(w._tip_layer.data) == 1
-        assert w._table.rowCount() == 1
+        # The list keeps every shank; the removed one reads "not placed".
+        assert w._table.rowCount() == 2
+        assert w._table.item(0, 2).text() == "not placed"
     finally:
         viewer.close()
 

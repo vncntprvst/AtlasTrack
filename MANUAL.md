@@ -347,9 +347,15 @@ start for torn tissue or a missing piece, which you then fit with landmarks.
    the tissue (its midline, width, top and height). The atlas version is worked
    out in the background, so the line may shift slightly a few seconds after
    the tab opens.
-4. To change a track, click its marker or line (or its row in the list) to
-   select it. Drag a marker to move it; press **Delete** to remove the track.
-   **Clear all tracks** removes every track.
+4. To change a track, select it: click its marker or line, its row in the list, or
+   pick its **Probe** and **Shank** above. The list shows every shank of every
+   probe, including those not placed yet. Drag a marker to move it, or use the
+   arrow keys for fine steps: 1 pixel, or 0.1 pixel with **Shift**. The keys move
+   the marker you last clicked (the entry if you selected the track another way).
+   Press **Delete** to remove the track. **Clear all tracks** removes every track.
+5. A probe that has coordinates but no markers (placed by a script or another
+   tool) can be given markers with **Markers from coordinates**. Each point goes on
+   the registered section nearest to it in AP, so it takes that section's AP.
 
 ### 5.9 Export
 

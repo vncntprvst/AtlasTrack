@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from atlastrack.gui.widgets.click_overlay import track_segments
 
@@ -161,5 +162,104 @@ def test_moving_one_shanks_marker_leaves_the_other_lines_alone(qtbot) -> None:
         after = widget._segments_for(0, 1)
         assert len(after) == len(before)
         assert all(np.array_equal(a, b) for a, b in zip(after, before))
+    finally:
+        viewer.close()
+
+
+def _two_probes(widget):
+    from atlastrack.project.schema import Point2D, ProbeSpec, ProbeType, Shank
+
+    placed = Shank(index=0, tip_px=Point2D(x_px=50.0, y_px=90.0), tip_section_idx=0,
+                   entry_px=Point2D(x_px=210.0, y_px=30.0), entry_section_idx=1)
+    coords_only = Shank(index=0, tip_ccf_um=(9000.0, 1050.0, 90.0),
+                        entry_ccf_um=(9500.0, 1080.0, 30.0))
+    widget._state.project.probes += [
+        ProbeSpec(label="A", type=ProbeType(name="Neuropixels 2.0 (4-shank)", n_shanks=1),
+                  shanks=[placed]),
+        ProbeSpec(label="B", type=ProbeType(name="Neuropixels 2.0 (4-shank)", n_shanks=1),
+                  shanks=[coords_only]),
+    ]
+    widget._refresh_probe_combo()
+    widget._refresh_table()
+
+
+def test_the_list_shows_shanks_without_markers_and_the_dropdowns_select(qtbot) -> None:
+    """A probe placed from coordinates had no rows, so it could not be found or picked."""
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        _two_probes(widget)
+        labels = [widget._table.item(r, 0).text() for r in range(widget._table.rowCount())]
+        assert labels == ["A", "B"]
+        assert widget._table.item(1, 2).text() == "not placed"
+        widget._probe_combo.setCurrentIndex(1)
+        assert widget._selected == (1, 0)
+        assert widget._table.selectedItems()[0].row() == 1
+        assert "Markers from coordinates" in widget._status.text()
+    finally:
+        viewer.close()
+
+
+def test_arrow_keys_nudge_the_chosen_marker(qtbot) -> None:
+    from qtpy.QtCore import QEvent, Qt
+    from qtpy.QtGui import QKeyEvent
+    from qtpy.QtWidgets import QApplication
+
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        _two_probes(widget)
+        widget.show()   # the keys are the Probes tab's only while it is shown
+        widget._select_track(0, 0, "tip")
+        canvas = widget._canvas_widget()
+        for key, mods in ((Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier),
+                          (Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)):
+            QApplication.sendEvent(canvas, QKeyEvent(QEvent.Type.KeyPress, key, mods))
+        tip = widget._state.project.probes[0].shanks[0].tip_px
+        assert (tip.x_px, tip.y_px) == pytest.approx((51.0, 90.1))
+        entry = widget._state.project.probes[0].shanks[0].entry_px
+        assert (entry.x_px, entry.y_px) == (210.0, 30.0)     # the other marker stays
+    finally:
+        viewer.close()
+
+
+class _Linear:
+    """Section pixel -> (AP, ML, DV): ML = a + x, DV = y (one um per pixel)."""
+
+    def __init__(self, ml0, ap):
+        self.ml0, self.ap = ml0, ap
+
+    def apply_many(self, px):
+        px = np.asarray(px, dtype=float).reshape(-1, 2)
+        return np.stack([np.full(len(px), self.ap), self.ml0 + px[:, 0], px[:, 1]], 1)
+
+
+def test_the_pixel_search_is_finer_than_a_pixel(qtbot) -> None:
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        px, err = widget._pixel_at(_Linear(1000.0, 9000.0), (1033.37, 41.62), (0, 0, 150, 120))
+        assert err < 0.01
+        assert np.allclose(px, (33.37, 41.62), atol=0.01)
+    finally:
+        viewer.close()
+
+
+def test_markers_from_coordinates_go_on_the_nearest_section_in_ap(qtbot) -> None:
+    from atlastrack.project.schema import RegistrationResult
+
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        _two_probes(widget)
+        for sec in widget._state.project.slides[0].sections:
+            sec.registration = RegistrationResult(anchoring=[0.0] * 9, output_size_px=(120, 150))
+        widget._state.atlas = object()
+        transforms = {0: _Linear(1000.0, 9000.0), 1: _Linear(970.0, 9500.0)}
+        widget._section_transform = lambda idx: transforms.get(idx)
+        widget._atlas_in_background = False     # the transforms are faked: no thread
+        widget._probe_combo.setCurrentIndex(1)
+        widget._markers_from_coordinates()
+        shank = widget._state.project.probes[1].shanks[0]
+        assert shank.tip_section_idx == 0 and shank.entry_section_idx == 1
+        assert (shank.tip_px.x_px, shank.tip_px.y_px) == pytest.approx((50.0, 90.0), abs=0.05)
+        # Section 1 starts at x = 160 in the slide; ML 1080 is its pixel 110.
+        assert (shank.entry_px.x_px, shank.entry_px.y_px) == pytest.approx((270.0, 30.0), abs=0.05)
     finally:
         viewer.close()
