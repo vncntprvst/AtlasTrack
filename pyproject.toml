@@ -11,7 +11,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "atlastrack"
-version = "0.10.10"
+version = "0.10.11"
 description = "Guided registration of histological brain sections to a reference atlas (Allen CCF), with probe trajectory mapping in 3D."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -166,3 +166,12 @@ markers = [
     "qt: marks tests that require a Qt display (deselect with -m 'not qt')",
     "slow: marks tests that read whole atlas volumes (deselect with -m 'not slow')",
 ]
+
+# --- uv -----------------------------------------------------------------------
+
+[tool.uv]
+# DeepSlice pins urllib3==1.26.6 exactly, which blocks every urllib3 security fix
+# (2.8.0 is the first release with all of them). DeepSlice only uses urllib3
+# through requests, so the newer release is safe. This affects uv.lock only; a plain
+# pip install of the deepslice extra still gets DeepSlice's own pin.
+override-dependencies = ["urllib3>=2.8.0"]
