@@ -2326,3 +2326,33 @@ def test_moving_a_dragged_landmark_without_warping_leaves_the_outline(qtbot, tmp
         assert np.abs(warp_of() - before).max() < 3.0
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_apply_rebuilds_only_the_transforms_it_needs(qtbot, tmp_path, monkeypatch) -> None:
+    """Apply re-mapped every shank, rebuilding and inverting every section's warp
+    (8 of LO_05's 10 s). Only shanks on the edited section move now."""
+    import atlastrack.registration.transforms as tr
+    from atlastrack.gui.widgets.register_panel import _LazyTransforms, _shank_touches
+    from atlastrack.project.schema import Point2D, Shank
+
+    built = []
+
+    class _Fake:
+        def apply_many(self, pts):
+            return np.zeros((len(pts), 3))
+
+    monkeypatch.setattr(tr, "build_registered_transform",
+                        lambda reg, atlas, **k: built.append(reg) or _Fake())
+    panel, state, viewer = _editing_section_0(qtbot, tmp_path)
+    try:
+        on_0 = Shank(index=0, tip_px=Point2D(x_px=1, y_px=1), tip_section_idx=0)
+        on_1 = Shank(index=1, tip_px=Point2D(x_px=1, y_px=1), tip_section_idx=1)
+        assert _shank_touches(on_0, 0) and not _shank_touches(on_1, 0)
+
+        lazy = _LazyTransforms(state.project, object(), tmp_path, {})
+        assert built == []                       # nothing built up front
+        lazy.get((0, 0)); lazy.get((0, 0))
+        assert len(built) == 1                   # built once, when first asked
+    finally:
+        viewer.close()

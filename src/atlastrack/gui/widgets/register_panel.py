@@ -82,6 +82,60 @@ _LANDMARK_CONTOUR_THICKNESS = 0
 _LANDMARK_CONTOUR_CLOSE_GAPS = 3
 
 
+def _shank_touches(shank, section_index: int) -> bool:
+    """Whether a shank has a marker (tip, entry or track pick) on that section."""
+    if section_index in (shank.tip_section_idx, shank.entry_section_idx):
+        return True
+    return any(getattr(p, "section_idx", None) == section_index
+               for p in (getattr(shank, "track_picks", None) or []))
+
+
+class _LazyTransforms(dict):
+    """Section transforms keyed ``(slide_idx, section.index)``, built when first asked.
+
+    Building one means reading its warp and, on first use, inverting it - about a
+    second each - so only the sections actually used are built. ``cache`` (kept by
+    the caller) holds them across calls, keyed so that a changed registration,
+    landmark set or box adjustment builds a fresh one.
+    """
+
+    def __init__(self, project, atlas, base_dir, cache: dict) -> None:
+        super().__init__()
+        self._project, self._atlas, self._base_dir, self._cache = project, atlas, base_dir, cache
+
+    def get(self, key, default=None):
+        if key not in self:
+            slide_idx, index = key
+            section = None
+            if 0 <= slide_idx < len(self._project.slides):
+                section = next((s for s in self._project.slides[slide_idx].sections
+                                if s.index == index), None)
+            built = None
+            if section is not None and section.registration is not None:
+                cache_key = (slide_idx, index, id(section.registration),
+                             id(section.manual_landmarks), str(section.manual_affine))
+                built = self._cache.get(cache_key)
+                if built is None:
+                    from atlastrack.registration.transforms import build_registered_transform
+
+                    built = build_registered_transform(
+                        section.registration, self._atlas, project_dir=self._base_dir,
+                        manual_affine=section.manual_affine,
+                        manual_landmarks=section.manual_landmarks,
+                    )
+                    # A section's older versions are no use any more: drop them - but
+                    # keep the registration warp's inverse, the slow part, when only the
+                    # landmarks or the box changed (the warp itself did not).
+                    for old in [k for k in self._cache if k[:2] == (slide_idx, index)]:
+                        previous = self._cache.pop(old)
+                        inverse = getattr(previous, "__dict__", {}).get("_inverse_warp")
+                        if inverse is not None and old[2] == cache_key[2]:
+                            built.__dict__["_inverse_warp"] = inverse
+                    self._cache[cache_key] = built
+            self[key] = built
+        return super().get(key, default)
+
+
 class RegisterPanelWidget(QWidget):
     """Register button, progress bar, residuals table, and section overlay."""
 
@@ -441,6 +495,9 @@ class RegisterPanelWidget(QWidget):
         # Active landmark-edit state. Source (atlas anchor) per point lives in the
         # Points layer `features` (travels through add/delete); `data` is the target.
         self._landmark_idx: int | None = None
+        # Section transforms built to re-map probes after an adjustment (see
+        # _LazyTransforms): kept so each section's warp is inverted once per session.
+        self._remap_transform_cache: dict = {}
         # Saving the project keeps landmark edits that are still only on screen.
         if hasattr(self._state, "before_save"):
             self._state.before_save.append(self._store_pending_before_save)
@@ -1967,17 +2024,18 @@ class RegisterPanelWidget(QWidget):
         remapped = False
         if atlas is not None:
             try:
-                from atlastrack.registration.pipeline import (
-                    _apply_to_shank_registered,
-                    reload_registered_transforms,
-                )
+                from atlastrack.registration.pipeline import _apply_to_shank_registered
 
-                transforms = reload_registered_transforms(
-                    self._state.project, atlas, project_dir=base_dir
-                )
+                # Only the shanks with a marker on this section can move, and only the
+                # transforms they use are built (and kept for the next Apply). Re-mapping
+                # every shank rebuilt and inverted every section's warp - 8 of the 10 s
+                # an Apply took on LO_05.
+                transforms = _LazyTransforms(self._state.project, atlas, base_dir,
+                                             self._remap_transform_cache)
                 for probe in self._state.project.probes:
                     for shank in probe.shanks:
-                        _apply_to_shank_registered(shank, self._state.project, transforms)
+                        if _shank_touches(shank, section.index):
+                            _apply_to_shank_registered(shank, self._state.project, transforms)
                 remapped = True
             except Exception as exc:  # noqa: BLE001
                 self._status.setText(f"Section {section.index}: probe re-map failed: {exc}")
