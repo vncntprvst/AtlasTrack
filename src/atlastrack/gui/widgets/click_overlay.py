@@ -14,8 +14,11 @@ colour, used by its markers, its line and its row in the list.
 The line runs from the tip through the entry and on to the edge of the section's
 box. When the tip and the entry are on different sections, each section gets its
 own part: on the tip's section the line starts at the tip and points where the
-entry would be if it sat at the same place in this section's box; on the entry's
-section it starts at the entry and runs away from the tip to the box edge.
+entry would be on this section; on the entry's section it starts at the entry and
+runs away from where the tip would be, to the box edge. "Where it would be" comes
+from the registration when both sections are registered (same atlas left-right
+and depth), else from the tissue (same distance from the midline and from the
+top, scaled to each section's tissue), else from the same spot in the box.
 """
 from __future__ import annotations
 
@@ -87,16 +90,20 @@ def _ray_to_box(start, direction, box) -> np.ndarray | None:
     return p + min(ts) * d
 
 
-def track_segments(tip, tip_box, entry, entry_box) -> list[tuple[np.ndarray, np.ndarray]]:
+def track_segments(
+    tip, tip_box, entry, entry_box, *, entry_here=None, tip_there=None,
+) -> list[tuple[np.ndarray, np.ndarray]]:
     """The line segments drawn for one track, as ((x, y), (x, y)) pairs.
 
     ``tip``/``entry`` are (x, y) slide pixels (or None); ``tip_box``/``entry_box``
     the (x0, y0, x1, y1) boxes of the sections they are on (or None).
 
     * Same section: tip -> entry -> on to the box edge.
-    * Different sections: on the tip's section, from the tip toward the entry as
-      placed at the same spot in this box, to the box edge; on the entry's section,
-      from the entry away from the tip (placed likewise) to the box edge.
+    * Different sections: on the tip's section, from the tip toward
+      ``entry_here`` (the entry carried over to this section) to the box edge; on
+      the entry's section, from the entry away from ``tip_there`` (the tip carried
+      over) to the box edge. Not given, each is carried over to the same spot in
+      the other box.
     """
     if tip is None or entry is None:
         return []
@@ -108,8 +115,8 @@ def track_segments(tip, tip_box, entry, entry_box) -> list[tuple[np.ndarray, np.
         return [(tip, end if end is not None else entry)]
     t0 = np.asarray(tip_box[:2], dtype=float)
     e0 = np.asarray(entry_box[:2], dtype=float)
-    entry_here = t0 + (entry - e0)        # the entry, same place in the tip's box
-    tip_there = e0 + (tip - t0)           # the tip, same place in the entry's box
+    entry_here = t0 + (entry - e0) if entry_here is None else np.asarray(entry_here, float)
+    tip_there = e0 + (tip - t0) if tip_there is None else np.asarray(tip_there, float)
     out = []
     end = _ray_to_box(tip, entry_here - tip, tip_box)
     if end is not None:
@@ -161,6 +168,21 @@ class ClickOverlayWidget(QWidget):
         self._adding: str | None = None
         self._pending_tip: tuple[float, float] | None = None   # (x, y)
         self._selected: tuple[int, int] | None = None          # (probe, shank)
+        # Carrying a marker over to another section (for the line's direction):
+        # tissue extents and section transforms are costly, so they are cached.
+        self._tissue_cache: dict = {}
+        self._transform_cache: dict = {}
+        self._carry_cache: dict = {}
+        # While a marker is dragged the quick (tissue) method is used; the atlas
+        # one runs when it is dropped.
+        self._quick_carry = False
+        # The atlas the lines were last drawn with: it often loads after the project,
+        # so the lines are redrawn (now through the atlas) when the tab is shown.
+        self._drawn_with_atlas = None
+        # Section transforms are built off the GUI thread (about a second each).
+        self._atlas_in_background = True
+        self._pending_transforms: set = set()
+        self._workers: list = []
         self._build_ui()
         # The marker layers are created on first use, not here: empty Points
         # layers at launch made vispy draw a Markers visual with no data, which
@@ -613,7 +635,12 @@ class ClickOverlayWidget(QWidget):
             shank.entry_px = pt
             if commit:
                 shank.entry_section_idx = self._find_section_for_point(x, y)
-        self._rebuild_markers()
+        # Quick (tissue) carry-over while dragging; the atlas one once dropped.
+        self._quick_carry = not commit
+        try:
+            self._rebuild_markers()
+        finally:
+            self._quick_carry = False
         if commit:
             self._refresh_table()
 
@@ -721,22 +748,229 @@ class ClickOverlayWidget(QWidget):
         shank = self._state.project.probes[p_idx].shanks[s_idx]
         if shank.tip_px is None or shank.entry_px is None:
             return []
-        tip_box = self._box_of(shank.tip_section_idx)
-        entry_box = self._box_of(shank.entry_section_idx)
-        return track_segments((shank.tip_px.x_px, shank.tip_px.y_px), tip_box,
-                              (shank.entry_px.x_px, shank.entry_px.y_px), entry_box)
+        tip = (shank.tip_px.x_px, shank.tip_px.y_px)
+        entry = (shank.entry_px.x_px, shank.entry_px.y_px)
+        t_sec, e_sec = shank.tip_section_idx, shank.entry_section_idx
+        tip_box, entry_box = self._box_of(t_sec), self._box_of(e_sec)
+        entry_here = tip_there = None
+        if tip_box is not None and entry_box is not None and t_sec != e_sec:
+            entry_here = self._carry_over(entry, e_sec, t_sec)
+            tip_there = self._carry_over(tip, t_sec, e_sec)
+        return track_segments(tip, tip_box, entry, entry_box,
+                              entry_here=entry_here, tip_there=tip_there)
+
+    # ------------------------------------------------------------------
+    # Carrying a marker over to another section
+    # ------------------------------------------------------------------
+
+    def _section(self, section_idx):
+        for slide_idx, slide in enumerate(self._state.project.slides):
+            for section in slide.sections:
+                if section.index == section_idx:
+                    return slide_idx, section
+        return None, None
+
+    def _carry_over(self, xy, from_idx, to_idx):
+        """Where point ``xy`` of section ``from_idx`` would be on section ``to_idx``.
+
+        Through the atlas when both sections are registered (and not while a
+        marker is being dragged): the same left-right and depth position, which
+        takes each section's rotation, size and placement into account. Otherwise
+        against the tissue: the same distance from the midline, in tissue
+        half-widths, and from the tissue's top, in tissue heights. None if neither
+        works - the line then uses the same spot in the box.
+        """
+        key = (round(float(xy[0]), 1), round(float(xy[1]), 1), from_idx, to_idx)
+        if not self._quick_carry and key + ("atlas",) in self._carry_cache:
+            return self._carry_cache[key + ("atlas",)]
+        if not self._quick_carry and self._transforms_ready((from_idx, to_idx)):
+            out = self._carry_through_atlas(xy, from_idx, to_idx)
+            if out is not None:
+                self._carry_cache[key + ("atlas",)] = out
+                return out
+        if key + ("tissue",) not in self._carry_cache:
+            self._carry_cache[key + ("tissue",)] = self._carry_by_tissue(xy, from_idx, to_idx)
+        return self._carry_cache[key + ("tissue",)]
+
+    def _tissue_extent(self, section_idx):
+        """(midline x, half-width, top y, height) of a section's tissue, in slide pixels."""
+        slide_idx, section = self._section(section_idx)
+        if section is None:
+            return None
+        img = self._state.slide_images.get(slide_idx)
+        if img is None:
+            return None
+        key = (section_idx, tuple(section.bbox_px), id(img))
+        if key in self._tissue_cache:
+            return self._tissue_cache[key]
+        x0, y0, x1, y1 = (int(v) for v in section.bbox_px)
+        crop = np.asarray(img[max(0, y0):y1, max(0, x0):x1])
+        out = None
+        if crop.size:
+            step = max(1, int(np.ceil(max(crop.shape[:2]) / 600)))   # quick, ~600 px
+            small = crop[::step, ::step]
+            try:
+                from atlastrack.registration.masks import section_tissue_mask
+
+                mask = section_tissue_mask(small)
+            except Exception:  # noqa: BLE001 - no usable tissue outline
+                mask = None
+            if mask is not None and mask.any():
+                ys, xs = np.nonzero(mask)
+                lo_x, hi_x = np.percentile(xs, [1, 99]) * step
+                lo_y, hi_y = np.percentile(ys, [1, 99]) * step
+                if hi_x > lo_x and hi_y > lo_y:
+                    out = (x0 + (lo_x + hi_x) / 2, (hi_x - lo_x) / 2, y0 + lo_y, hi_y - lo_y)
+        self._tissue_cache[key] = out
+        return out
+
+    def _carry_by_tissue(self, xy, from_idx, to_idx):
+        a, b = self._tissue_extent(from_idx), self._tissue_extent(to_idx)
+        if a is None or b is None:
+            return None
+        u = (float(xy[0]) - a[0]) / a[1]
+        v = (float(xy[1]) - a[2]) / a[3]
+        return np.array([b[0] + u * b[1], b[2] + v * b[3]])
+
+    def _transform_key(self, section_idx):
+        _, section = self._section(section_idx)
+        if section is None:
+            return None
+        return (section_idx, id(section.registration), id(section.manual_landmarks),
+                str(section.manual_affine))
+
+    def _transforms_ready(self, indices) -> bool:
+        """True when the sections' transforms can be used now without a wait.
+
+        Building one (reading its warp and inverting it) takes about a second, so
+        it is done in the background and the line redrawn when it is ready; until
+        then the tissue method is used.
+        """
+        atlas = getattr(self._state, "atlas", None)
+        if atlas is None:
+            return False
+        if not self._atlas_in_background:
+            return True
+        missing = []
+        for idx in indices:
+            _, section = self._section(idx)
+            if section is None or section.registration is None:
+                return False
+            if self._transform_key(idx) not in self._transform_cache:
+                missing.append(idx)
+        if missing:
+            self._build_transforms_in_background(missing)
+            return False
+        return True
+
+    def _build_transforms_in_background(self, indices) -> None:
+        todo = [i for i in indices if i not in self._pending_transforms]
+        if not todo:
+            return
+        self._pending_transforms.update(todo)
+        try:
+            from napari.qt.threading import thread_worker
+        except Exception:  # noqa: BLE001
+            return
+
+        @thread_worker
+        def _build():
+            for idx in todo:
+                tx = self._section_transform(idx)
+                if tx is not None:
+                    try:   # the first use inverts the warp: do that here too
+                        tx.apply_many(np.array([[1.0, 1.0]]))
+                    except Exception:  # noqa: BLE001
+                        pass
+            return todo
+
+        def _done(built) -> None:
+            self._pending_transforms.difference_update(built)
+            self._rebuild_markers()
+
+        worker = _build()
+        worker.returned.connect(_done)
+        worker.errored.connect(lambda _e: self._pending_transforms.difference_update(todo))
+        worker.start()
+        self._workers.append(worker)
+
+    def _section_transform(self, section_idx):
+        """The registered pixel -> atlas transform of a section, or None."""
+        slide_idx, section = self._section(section_idx)
+        atlas = getattr(self._state, "atlas", None)
+        if section is None or section.registration is None or atlas is None:
+            return None
+        lm = section.manual_landmarks
+        key = self._transform_key(section_idx)
+        if key not in self._transform_cache:
+            try:
+                from atlastrack.registration.transforms import build_registered_transform
+
+                path = self._state.project_path
+                self._transform_cache[key] = build_registered_transform(
+                    section.registration, atlas,
+                    project_dir=path.parent if path is not None else None,
+                    manual_affine=section.manual_affine, manual_landmarks=lm,
+                )
+            except Exception:  # noqa: BLE001 - fall back to the tissue method
+                self._transform_cache[key] = None
+        return self._transform_cache[key]
+
+    def _carry_through_atlas(self, xy, from_idx, to_idx):
+        """The pixel of section ``to_idx`` at the atlas left-right and depth of ``xy``."""
+        src, dst = self._section_transform(from_idx), self._section_transform(to_idx)
+        if src is None or dst is None:
+            return None
+        _, from_sec = self._section(from_idx)
+        _, to_sec = self._section(to_idx)
+        try:
+            fx0, fy0 = from_sec.bbox_px[:2]
+            target = src.apply_many(np.array([[xy[0] - fx0, xy[1] - fy0]], dtype=float))[0]
+            want = target[1:]                                  # (ML, DV) um
+            tx0, ty0, tx1, ty1 = to_sec.bbox_px
+            w, h = tx1 - tx0, ty1 - ty0
+            best = None
+            # Coarse grid, then two finer passes around the best point.
+            cx, cy, span = w / 2.0, h / 2.0, max(w, h) / 2.0
+            for _ in range(3):
+                g = np.linspace(-span, span, 25)
+                gx, gy = np.meshgrid(cx + g, cy + g)
+                px = np.stack([np.clip(gx.ravel(), 0, w - 1), np.clip(gy.ravel(), 0, h - 1)], 1)
+                ccf = dst.apply_many(px)
+                d = np.linalg.norm(ccf[:, 1:] - want[None, :], axis=1)
+                k = int(np.argmin(d))
+                best = (px[k], float(d[k]))
+                cx, cy = best[0]
+                span = span / 8.0
+            if best is None or best[1] > 200.0:               # um: no such point there
+                return None
+            return np.array([tx0 + best[0][0], ty0 + best[0][1]])
+        except Exception:  # noqa: BLE001
+            return None
 
     def refresh_after_load(self) -> None:
         """Redraw the tracks and the list from a freshly-loaded project."""
         self._stop_add()
         self._selected = None
+        self._tissue_cache.clear()
+        self._transform_cache.clear()
+        self._carry_cache.clear()
         self._drop_stale_layer_refs()
         self._refresh_probe_combo()
         self._rebuild_markers()
         self._refresh_table()
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt name
+        super().showEvent(event)
+        atlas = getattr(self._state, "atlas", None)
+        if atlas is not None and atlas is not self._drawn_with_atlas:
+            self._carry_cache.clear()
+            self._transform_cache.clear()
+            self._rebuild_markers()
+
     def _rebuild_markers(self) -> None:
         """Redraw markers and lines (colour per shank; the selected track larger)."""
+        self._drawn_with_atlas = getattr(self._state, "atlas", None)
         tips, tip_c, tip_sel = [], [], []
         entries, ent_c, ent_sel = [], [], []
         lines, line_c, line_w = [], [], []

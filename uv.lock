@@ -314,7 +314,7 @@ wheels = [
 
 [[package]]
 name = "atlastrack"
-version = "0.10.3"
+version = "0.10.4"
 source = { editable = "." }
 dependencies = [
     { name = "brainglobe-atlasapi" },

@@ -341,7 +341,12 @@ start for torn tissue or a missing piece, which you then fit with landmarks.
 3. Each shank has its own colour, used by its markers (tip = circle, entry =
    triangle), its line and its row in the list. The line runs from the tip
    through the entry to the edge of the section's box. If the tip and the entry
-   are on different sections, each section shows its own part of the line.
+   are on different sections, each section shows its own part of the line. To
+   draw it, the other marker is carried over to this section: through the atlas
+   when both sections are registered, otherwise to the same place relative to
+   the tissue (its midline, width, top and height). The atlas version is worked
+   out in the background, so the line may shift slightly a few seconds after
+   the tab opens.
 4. To change a track, click its marker or line (or its row in the list) to
    select it. Drag a marker to move it; press **Delete** to remove the track.
    **Clear all tracks** removes every track.

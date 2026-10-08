@@ -24,3 +24,99 @@ def test_tip_and_entry_on_different_sections() -> None:
 
 def test_no_line_until_both_markers_are_placed() -> None:
     assert track_segments((50, 80), (0, 0, 100, 100), None, None) == []
+
+
+def _two_section_widget(qtbot, tissue_boxes):
+    """A widget over a slide with two sections whose tissue sits at ``tissue_boxes``."""
+    import napari
+
+    from atlastrack.gui.widgets.click_overlay import ClickOverlayWidget
+    from atlastrack.gui.workflow import WorkflowState
+    from atlastrack.project.schema import Section
+
+    img = np.zeros((120, 320), dtype=np.uint8)
+    for x0, y0, x1, y1 in tissue_boxes:
+        img[y0:y1, x0:x1] = 200
+    state = WorkflowState()
+    state.add_slide("s.png", img)
+    state.active_slide_idx = 0
+    state.project.slides[0].sections += [
+        Section(index=0, slide_idx=0, bbox_px=(0, 0, 150, 120), ap_order=0),
+        Section(index=1, slide_idx=0, bbox_px=(160, 0, 320, 120), ap_order=1),
+    ]
+    viewer = napari.Viewer(show=False)
+    widget = ClickOverlayWidget(state, viewer)
+    qtbot.addWidget(widget)
+    return widget, viewer
+
+
+def test_carried_against_the_tissue_not_the_box(qtbot) -> None:
+    """Tissue placed differently in each box: the same spot relative to the tissue."""
+    # Section 0 tissue: x 20-120 (midline 70); section 1 tissue: x 200-280 (midline 240).
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        # 25 px left of section 1's midline (half-width 40) -> 31 px left of section
+        # 0's midline (half-width 50), at the same fraction of the tissue height.
+        out = widget._carry_by_tissue((215.0, 40.0), 1, 0)
+        assert out is not None
+        assert abs(out[0] - (70 - 25 * 50 / 40)) < 3
+        assert abs(out[1] - 40.0) < 3
+    finally:
+        viewer.close()
+
+
+def test_carried_through_the_atlas_when_both_sections_are_registered(qtbot) -> None:
+    """With registrations, the carried point has the same atlas left-right and depth."""
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+
+    class _Linear:
+        """Section pixel -> (AP, ML, DV): ML = a + x, DV = y (one um per pixel)."""
+
+        def __init__(self, ml0, ap):
+            self.ml0, self.ap = ml0, ap
+
+        def apply_many(self, px):
+            px = np.asarray(px, dtype=float).reshape(-1, 2)
+            return np.stack([np.full(len(px), self.ap), self.ml0 + px[:, 0], px[:, 1]], 1)
+
+    # Section 1's image is shifted 30 px relative to section 0 in ML.
+    transforms = {0: _Linear(1000.0, 9000.0), 1: _Linear(970.0, 9500.0)}
+    widget._section_transform = lambda idx: transforms.get(idx)
+    widget._state.atlas = object()          # any atlas: the transforms are faked
+    widget._atlas_in_background = False     # build them right away, not in a thread
+    try:
+        out = widget._carry_through_atlas((260.0, 50.0), 1, 0)   # ML 970+100, DV 50
+        assert out is not None
+        assert abs(out[0] - 70.0) < 2 and abs(out[1] - 50.0) < 2  # ML 1000+70, DV 50
+        # The line uses it rather than the tissue estimate.
+        assert np.allclose(widget._carry_over((260.0, 50.0), 1, 0), out)
+    finally:
+        viewer.close()
+
+
+def test_without_an_image_the_box_is_used(qtbot) -> None:
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        widget._state.slide_images.clear()
+        assert widget._carry_over((215.0, 40.0), 1, 0) is None   # -> same spot in the box
+    finally:
+        viewer.close()
+
+
+def test_atlas_transforms_are_built_off_the_gui_thread(qtbot) -> None:
+    """Until a section's transform is ready, the tissue estimate is used and the
+    transform is built in the background (opening the Probes tab froze for 9 s)."""
+    from atlastrack.project.schema import RegistrationResult
+
+    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
+    try:
+        for s in widget._state.project.slides[0].sections:
+            s.registration = RegistrationResult(anchoring=[0.0] * 9, output_size_px=(120, 150))
+        widget._state.atlas = object()
+        started = []
+        widget._build_transforms_in_background = lambda idx: started.append(list(idx))
+        out = widget._carry_over((215.0, 40.0), 1, 0)
+        assert started == [[1, 0]]
+        assert np.allclose(out, widget._carry_by_tissue((215.0, 40.0), 1, 0))
+    finally:
+        viewer.close()
