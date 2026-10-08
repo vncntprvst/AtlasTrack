@@ -74,6 +74,101 @@ def recorded_electrodes(probe) -> set[int] | None:
     return out or None
 
 
+def _full_name(atlas, acronym: str) -> str:
+    """A region's full atlas name, first letter capitalised; the acronym if none."""
+    try:
+        name = str(atlas.structures[acronym]["name"]).strip()
+    except Exception:  # noqa: BLE001
+        return acronym
+    return name[:1].upper() + name[1:] if name else acronym
+
+
+def _font(px: int):
+    from PIL import ImageFont
+
+    for name in ("arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf"):
+        try:
+            return ImageFont.truetype(name, px)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def place_labels(image, regions, electrodes_px, *, font_px: int):
+    """Write each region's name beside it, with a thin line to it. Returns the image.
+
+    ``regions`` is ``[(name, points (N, 2) in pixels)]``; ``electrodes_px`` is (M, 2).
+    A label goes just outside its region - on the side facing away from the
+    electrodes first - and is moved to another side, then further out, until it
+    covers no electrode, no other label and as little of the other regions as
+    possible. A region that cannot be labelled that way is left unlabelled rather
+    than labelled over the data.
+    """
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(image)
+    font = _font(font_px)
+    w_img, h_img = image.size
+    gap = font_px * 0.8
+    pad = font_px * 0.4
+    elec = np.asarray(electrodes_px, dtype=float).reshape(-1, 2)
+    elec_centre = elec.mean(axis=0) if len(elec) else None
+    boxes = [(n, pts.min(axis=0), pts.max(axis=0)) for n, pts in regions if len(pts)]
+    taken: list[tuple[float, float, float, float]] = []
+
+    def overlap(a, b):
+        return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+
+    for name, pts in regions:
+        if not len(pts):
+            continue
+        lo, hi = pts.min(axis=0), pts.max(axis=0)
+        centre = (lo + hi) / 2.0
+        x0, y0, x1, y1 = draw.textbbox((0, 0), name, font=font, stroke_width=3)
+        tw, th = x1 - x0, y1 - y0
+        sides = {
+            "right": lambda g: (hi[0] + g, centre[1] - th / 2),
+            "left": lambda g: (lo[0] - g - tw, centre[1] - th / 2),
+            "above": lambda g: (centre[0] - tw / 2, lo[1] - g - th),
+            "below": lambda g: (centre[0] - tw / 2, hi[1] + g),
+        }
+        order = list(sides)
+        if elec_centre is not None:
+            away = centre - elec_centre
+            horizontal = ["right", "left"] if away[0] >= 0 else ["left", "right"]
+            vertical = ["below", "above"] if away[1] >= 0 else ["above", "below"]
+            order = horizontal + vertical if abs(away[0]) >= abs(away[1]) else vertical + horizontal
+        best = None
+        for step, g in enumerate((gap, gap * 3, gap * 6)):
+            for rank, side in enumerate(order):
+                x, y = sides[side](g)
+                rect = (x - pad, y - pad, x + tw + pad, y + th + pad)
+                if rect[0] < 0 or rect[1] < 0 or rect[2] > w_img or rect[3] > h_img:
+                    continue
+                if len(elec) and np.any((elec[:, 0] > rect[0] - pad) & (elec[:, 0] < rect[2] + pad)
+                                        & (elec[:, 1] > rect[1] - pad) & (elec[:, 1] < rect[3] + pad)):
+                    continue
+                if any(overlap(rect, t) > 0 for t in taken):
+                    continue
+                covered = sum(overlap(rect, (b_lo[0], b_lo[1], b_hi[0], b_hi[1]))
+                              for n2, b_lo, b_hi in boxes if n2 != name)
+                score = covered + (step * 4 + rank) * tw * th * 0.05
+                if best is None or score < best[0]:
+                    best = (score, x, y, rect)
+        if best is None:
+            continue
+        _score, x, y, rect = best
+        taken.append(rect)
+        # Leader: from the label's nearest edge to the region's nearest point.
+        label_centre = np.array([(rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2])
+        target = pts[np.argmin(np.linalg.norm(pts - label_centre, axis=1))]
+        start = (min(max(target[0], rect[0]), rect[2]), min(max(target[1], rect[1]), rect[3]))
+        draw.line([start, tuple(target)], fill=(90, 90, 90), width=max(1, font_px // 14))
+        draw.text((x - x0, y - y0), name, font=font, fill=(45, 45, 45),
+                  stroke_width=3, stroke_fill=(255, 255, 255))
+    return image
+
+
 def scene_contents(project: "Project", atlas: "BrainGlobeAtlas | None", *,
                    extra_regions=()) -> dict:
     """Everything the views draw, in CCF µm: regions, tracks and electrodes."""
@@ -89,6 +184,9 @@ def scene_contents(project: "Project", atlas: "BrainGlobeAtlas | None", *,
             if mesh is not None:
                 rgb = tuple(c / 255.0 for c in hex_to_rgb(colour))
                 regions.append((acronym, mesh, (*rgb, max(0.25, float(opacity)))))
+        full_names = {a: _full_name(atlas, a) for a, _m, _c in regions}
+    else:
+        full_names = {}
     tracks, electrodes = [], []
     for probe in project.probes:
         layout = get_layout(probe.type.name)
@@ -107,9 +205,32 @@ def scene_contents(project: "Project", atlas: "BrainGlobeAtlas | None", *,
     return {
         "brain": _region_mesh(atlas, "root") if atlas is not None else None,
         "regions": regions,
+        "names": full_names,
         "tracks": tracks,
         "electrodes": np.concatenate(electrodes) if electrodes else np.empty((0, 3)),
     }
+
+
+def _projected(visual, points) -> np.ndarray:
+    """Display-frame points -> image pixels, through ``visual``'s current camera."""
+    mapped = visual.get_transform("visual", "canvas").map(np.asarray(points, dtype=float))
+    return mapped[:, :2] / mapped[:, 3:4]
+
+
+def _projected_regions(region_visuals, contents, view_name: str, atlas_name):
+    """(name, pixels) per region; one hemisphere's half where the two do not overlap."""
+    electrodes = _to_display(contents["electrodes"], atlas_name)
+    probe_side = np.sign(electrodes[:, 0].mean()) if len(electrodes) else 0.0
+    out = []
+    for acronym, mesh, visual in region_visuals:
+        pts = _to_display(mesh[0], atlas_name)
+        if view_name != "side" and probe_side != 0:
+            other = pts[np.sign(pts[:, 0]) == -probe_side]
+            if len(other) > 20:
+                pts = other
+        step = max(1, len(pts) // 4000)
+        out.append((contents["names"].get(acronym, acronym), _projected(visual, pts[::step])))
+    return out
 
 
 def render_three_views(
@@ -121,12 +242,17 @@ def render_three_views(
     extra_regions=(),
     size: tuple[int, int] = (2400, 1600),
     margin: float = 0.35,
+    labels: bool = False,
 ) -> list[Path]:
     """Write ``<stem> - back.png``, ``- top.png`` and ``- side.png``; return their paths.
 
     The views are framed on the regions and electrodes (plus ``margin`` of that
     extent all round), at one zoom for all three; the whole-brain outline and the
     upper part of the tracks are context and may run off the edges.
+
+    ``labels`` writes each region's full name beside it (see :func:`place_labels`).
+    A region on both sides of the brain is labelled once, on the side without the
+    probes, except in the side view where the two halves overlap.
     """
     from PIL import Image
     from vispy import scene
@@ -151,12 +277,13 @@ def render_three_views(
 
     if contents["brain"] is not None:
         add_mesh(contents["brain"], BRAIN_COLOUR)
-    for _name, mesh, colour in contents["regions"]:
-        add_mesh(mesh, colour)
+    region_visuals = [(name, mesh, add_mesh(mesh, colour))
+                      for name, mesh, colour in contents["regions"]]
     for track in contents["tracks"]:
         line = scene.visuals.Line(pos=_to_display(track, atlas_name), color=(0.2, 0.2, 0.2, 0.8),
                                   width=max(2.0, size[0] / 800), parent=view.scene)
         line.set_gl_state("translucent", depth_test=False)
+    dots = None
     if len(contents["electrodes"]):
         dots = scene.visuals.Markers(parent=view.scene)
         # Small: 384 electrodes per shank sit 7.5 µm apart, so larger dots merge
@@ -192,9 +319,15 @@ def render_three_views(
         # of all three axes and zoom out to the whole brain.
         view.camera.center = tuple(centre)
         view.camera.scale_factor = scale
-        image = canvas.render()[..., :3]
+        image = Image.fromarray(canvas.render()[..., :3])
+        if labels and region_visuals:
+            image = place_labels(image, _projected_regions(region_visuals, contents, suffix,
+                                                           atlas_name),
+                                 _projected(dots, _to_display(contents["electrodes"], atlas_name))
+                                 if dots is not None else np.empty((0, 2)),
+                                 font_px=max(12, size[1] // 45))
         path = out_dir / f"{stem} - {suffix}.png"
-        Image.fromarray(image).save(path)
+        image.save(path)
         written.append(path)
     canvas.close()
     return written

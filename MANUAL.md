@@ -392,6 +392,9 @@ folder as Export's.
 In the three views, a faint outline of the whole brain gives context. The
 pictures are framed on the regions and electrodes, all at the same scale. When a
 probe has recordings attached, only the electrodes those recordings used are drawn.
+**Region names** (on by default) writes each region's full name beside it, with a
+thin line to it, where it covers no electrode and no other name. A region on both
+sides of the brain is named once, on the side without the probes.
 
 The electrode CSV has columns `probe, shank, channel, ap_um, ml_um, dv_um,
 depth_source, region, region_id, region_color`. `depth_source` says whether that

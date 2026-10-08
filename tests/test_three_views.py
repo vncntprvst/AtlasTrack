@@ -47,3 +47,19 @@ def test_nothing_to_draw_says_so(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="nothing to draw"):
         render_three_views(Project(), None, tmp_path)
+
+
+def test_labels_go_beside_their_region_and_never_on_an_electrode() -> None:
+    from PIL import Image
+
+    from atlastrack.viz.views import place_labels
+
+    img = Image.new("RGB", (600, 400), "white")
+    region = np.array([[250.0, 150.0], [350.0, 150.0], [350.0, 250.0], [250.0, 250.0]])
+    # Electrodes fill the space to the region's left, so the name must go elsewhere.
+    elec = np.stack(np.meshgrid(np.arange(60, 245, 4.0), np.arange(100, 300, 4.0)), -1).reshape(-1, 2)
+    out = np.asarray(place_labels(img, [("Intermediate reticular nucleus", region)], elec,
+                                  font_px=16))
+    ink = np.argwhere(out.sum(-1) < 300)                     # dark text pixels (y, x)
+    assert len(ink), "no label was written"
+    assert ink[:, 1].min() > 245                              # not among the electrodes

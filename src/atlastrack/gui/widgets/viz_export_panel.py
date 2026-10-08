@@ -449,6 +449,18 @@ class VizExportPanelWidget(QWidget):
         self._figure_combo.currentIndexChanged.connect(self._on_figure_format_changed)
         fig_row.addWidget(self._figure_combo, 1)
         figures_layout.addLayout(fig_row)
+        self._view_labels = QCheckBox("Region names")
+        self._view_labels.setChecked(True)
+        self._view_labels.setToolTip(
+            "Write each region's full name beside it, with a thin line to it, placed "
+            "where it covers no electrode and no other name."
+        )
+        labels_row = QHBoxLayout()
+        labels_row.setContentsMargins(18, 0, 0, 0)   # indented: it qualifies the figure
+        labels_row.addWidget(self._view_labels)
+        self._view_labels_box = QWidget()
+        self._view_labels_box.setLayout(labels_row)
+        figures_layout.addWidget(self._view_labels_box)
         figures_layout.addWidget(self._series_box)
         create_btn = QPushButton("Create")
         create_btn.clicked.connect(self._create_figure)
@@ -741,8 +753,10 @@ class VizExportPanelWidget(QWidget):
         self._on_paxinos_toggled(self._paxinos_check.isChecked())
 
     def _on_figure_format_changed(self, _idx: int = 0) -> None:
-        """The section-series options are shown only for the section series."""
-        self._series_box.setVisible(self._figure_combo.currentData() == "series")
+        """Each figure's own options are shown only for that figure."""
+        kind = self._figure_combo.currentData()
+        self._series_box.setVisible(kind == "series")
+        self._view_labels_box.setVisible(kind == "views")
 
     def _on_paxinos_toggled(self, checked: bool) -> None:
         if self._paxinos_check.isEnabled():
@@ -820,6 +834,7 @@ class VizExportPanelWidget(QWidget):
             written = render_three_views(
                 self._state.project, self._display_atlas, directory,
                 stem=stem, extra_regions=self._extra_region_list(),
+                labels=self._view_labels.isChecked(),
             )
         except Exception as exc:  # noqa: BLE001
             _error_dialog(self, "Figures failed", str(exc))
