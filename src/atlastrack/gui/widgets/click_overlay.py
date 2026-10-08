@@ -240,16 +240,6 @@ class ClickOverlayWidget(QWidget):
         self._add_btn.toggled.connect(self._on_add_toggled)
         layout.addWidget(self._add_btn)
 
-        self._from_ccf_btn = QPushButton("Markers from coordinates")
-        self._from_ccf_btn.setToolTip(
-            "For the probe above: give every shank that has atlas coordinates but no "
-            "markers a tip and an entry marker, each on the section nearest it in AP, "
-            "so the track can be adjusted by hand. Needs the atlas and registered "
-            "sections. A marker takes the AP of the section it is placed on."
-        )
-        self._from_ccf_btn.clicked.connect(self._markers_from_coordinates)
-        layout.addWidget(self._from_ccf_btn)
-
         clear_btn = QPushButton("Clear all tracks")
         clear_btn.setToolTip("Remove every track of every probe.")
         clear_btn.clicked.connect(self._clear_tracks)
@@ -697,9 +687,7 @@ class ClickOverlayWidget(QWidget):
         probe = self._state.project.probes[p_idx]
         shank = probe.shanks[s_idx]
         if shank.tip_px is None and shank.entry_px is None:
-            hint = ("No markers yet: use Add track"
-                    + (", or Markers from coordinates." if shank.tip_ccf_um is not None
-                       else "."))
+            hint = "No markers yet: use Add track."
         else:
             hint = (f"Drag a marker to move it; the arrow keys nudge the "
                     f"{self._selected_marker} marker by 1 px (Shift: 0.1 px). Click the "
@@ -763,80 +751,6 @@ class ClickOverlayWidget(QWidget):
 
         self._key_filter = _Keys(self)
         widget.installEventFilter(self._key_filter)
-
-    def _markers_from_coordinates(self) -> None:
-        """Give the chosen probe's coordinate-only shanks a tip and an entry marker.
-
-        For a probe placed from coordinates (a script, or another tool) rather than by
-        clicking: without markers it cannot be dragged. Each point goes on the
-        registered section of the slide nearest to it in AP, at the pixel with its
-        atlas left-right and depth. Its AP becomes that section's AP.
-        """
-        p_idx = self._probe_combo.currentIndex()
-        probes = self._state.project.probes
-        slide_idx = self._state.active_slide_idx
-        if not 0 <= p_idx < len(probes) or slide_idx is None:
-            return
-        if getattr(self._state, "atlas", None) is None:
-            self._status.setText("Markers from coordinates needs the atlas: load it first.")
-            return
-        sections = [s for s in self._state.project.slides[slide_idx].sections
-                    if s.registration is not None]
-        if not sections:
-            self._status.setText("Markers from coordinates needs registered sections.")
-            return
-        self._status.setText("Placing markers from coordinates…")
-        self._status.repaint()   # not processEvents: no other events mid-change
-
-        def place(ccf):
-            best = None
-            for sec in sections:
-                tx = self._section_transform(sec.index)
-                if tx is None:
-                    continue
-                found = self._pixel_at(tx, np.asarray(ccf, dtype=float)[1:], sec.bbox_px)
-                if found is None or found[1] > 150.0:
-                    continue
-                x0, y0 = sec.bbox_px[:2]
-                ap = float(tx.apply_many(np.array([[found[0][0] - x0, found[0][1] - y0]]))[0][0])
-                gap = abs(ap - float(ccf[0]))
-                if best is None or gap < best[0]:
-                    best = (gap, sec.index, found[0])
-            return best
-
-        placed, missed, gaps = 0, 0, []
-        for shank in probes[p_idx].shanks:
-            if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
-                continue
-            for kind, ccf in (("tip", shank.tip_ccf_um), ("entry", shank.entry_ccf_um)):
-                if (shank.tip_px if kind == "tip" else shank.entry_px) is not None:
-                    continue
-                hit = place(ccf)
-                if hit is None:
-                    missed += 1
-                    continue
-                gap, sec_idx, px = hit
-                pt = Point2D(x_px=float(px[0]), y_px=float(px[1]))
-                if kind == "tip":
-                    shank.tip_px, shank.tip_section_idx = pt, sec_idx
-                else:
-                    shank.entry_px, shank.entry_section_idx = pt, sec_idx
-                placed += 1
-                gaps.append(gap)
-        self._segment_cache.clear()
-        self._rebuild_markers()
-        self._refresh_table()
-        label = probes[p_idx].label
-        if not placed:
-            self._status.setText(
-                f"{label}: no markers placed" + (f" ({missed} point(s) are on no section)."
-                                                 if missed else " - every shank already has them."))
-            return
-        self._status.setText(
-            f"{label}: placed {placed} marker(s); each is up to {max(gaps):.0f} µm from its "
-            "point in AP, the distance to the nearest section."
-            + (f" {missed} point(s) are on no section." if missed else "")
-            + " Update probe coordinates turns them back into coordinates.")
 
     def _nudge_selected(self, dx: float, dy: float) -> bool:
         """Move the selected track's chosen marker by (dx, dy) slide pixels.

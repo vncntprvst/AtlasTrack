@@ -353,9 +353,6 @@ start for torn tissue or a missing piece, which you then fit with landmarks.
    arrow keys for fine steps: 1 pixel, or 0.1 pixel with **Shift**. The keys move
    the marker you last clicked (the entry if you selected the track another way).
    Press **Delete** to remove the track. **Clear all tracks** removes every track.
-5. A probe that has coordinates but no markers (placed by a script or another
-   tool) can be given markers with **Markers from coordinates**. Each point goes on
-   the registered section nearest to it in AP, so it takes that section's AP.
 
 ### 5.9 Export
 

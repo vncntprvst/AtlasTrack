@@ -194,7 +194,7 @@ def test_the_list_shows_shanks_without_markers_and_the_dropdowns_select(qtbot) -
         widget._probe_combo.setCurrentIndex(1)
         assert widget._selected == (1, 0)
         assert widget._table.selectedItems()[0].row() == 1
-        assert "Markers from coordinates" in widget._status.text()
+        assert "No markers yet" in widget._status.text()
     finally:
         viewer.close()
 
@@ -238,28 +238,5 @@ def test_the_pixel_search_is_finer_than_a_pixel(qtbot) -> None:
         px, err = widget._pixel_at(_Linear(1000.0, 9000.0), (1033.37, 41.62), (0, 0, 150, 120))
         assert err < 0.01
         assert np.allclose(px, (33.37, 41.62), atol=0.01)
-    finally:
-        viewer.close()
-
-
-def test_markers_from_coordinates_go_on_the_nearest_section_in_ap(qtbot) -> None:
-    from atlastrack.project.schema import RegistrationResult
-
-    widget, viewer = _two_section_widget(qtbot, [(20, 20, 120, 100), (200, 20, 280, 100)])
-    try:
-        _two_probes(widget)
-        for sec in widget._state.project.slides[0].sections:
-            sec.registration = RegistrationResult(anchoring=[0.0] * 9, output_size_px=(120, 150))
-        widget._state.atlas = object()
-        transforms = {0: _Linear(1000.0, 9000.0), 1: _Linear(970.0, 9500.0)}
-        widget._section_transform = lambda idx: transforms.get(idx)
-        widget._atlas_in_background = False     # the transforms are faked: no thread
-        widget._probe_combo.setCurrentIndex(1)
-        widget._markers_from_coordinates()
-        shank = widget._state.project.probes[1].shanks[0]
-        assert shank.tip_section_idx == 0 and shank.entry_section_idx == 1
-        assert (shank.tip_px.x_px, shank.tip_px.y_px) == pytest.approx((50.0, 90.0), abs=0.05)
-        # Section 1 starts at x = 160 in the slide; ML 1080 is its pixel 110.
-        assert (shank.entry_px.x_px, shank.entry_px.y_px) == pytest.approx((270.0, 30.0), abs=0.05)
     finally:
         viewer.close()
