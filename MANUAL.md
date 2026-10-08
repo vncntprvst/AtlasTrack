@@ -365,16 +365,17 @@ opens the brain and probes in a 3-D window. **Update probe coordinates** redraws
 the probes in that window and keeps your view. Closing the main window closes the
 3-D window too.
 
-**Export** - pick a **Format**, then **Export…**:
+**Export** - pick a **Format**, then **Export**. The file dialog opens in the
+project's folder, or in the slide images' folder if the project was never saved.
 
 | Format | What you get |
 |---|---|
-| Per-channel coordinates (CSV) | One row per recording channel, with its atlas region |
+| Electrode coordinates (CSV) | One row per electrode (recording channel), with its atlas region |
 | Probe tracks for Python / HERBS (pkl) | The tracks, for HERBS or your own Python scripts |
 | 3D view as interactive HTML | A page you can send someone |
 | Registered section series (folder) | Your sections, in order, with region outlines |
 
-The per-channel CSV has columns `probe, shank, channel, ap_um, ml_um, dv_um,
+The electrode CSV has columns `probe, shank, channel, ap_um, ml_um, dv_um,
 depth_source, region, region_id, region_color`. `depth_source` says whether that
 shank's depths came from the ephys alignment or from probe geometry alone. The
 three region columns come from looking each channel up in the project's atlas:
@@ -408,7 +409,7 @@ Needs the `ephys` extra and a probe with tip and entry already registered.
 ```bash
 atlastrack split IMAGE                  # find sections
 atlastrack register PROJECT.json        # register a whole project
-atlastrack export PROJECT.json          # per-channel CCF and Paxinos CSVs
+atlastrack export PROJECT.json          # electrode CCF and Paxinos CSVs
 atlastrack import SOURCE                # convert a registration made by another tool
 atlastrack match PROJECT.json REF.json  # register sections from the same sections in REF
 atlastrack add-cells PROJECT.json DIR   # add slicereg's counted cells to its import

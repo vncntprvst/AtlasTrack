@@ -26,7 +26,7 @@ Given one or more slide images and a little guidance:
    corrected by hand, by moving the whole atlas outline or by dragging points.
 4. **Maps probe tracks** you click into atlas coordinates, per shank and per
    channel; optionally refined from recorded LFP depth features.
-5. **Exports** per-channel CSV (CCF µm or Paxinos stereotaxic mm), an interactive
+5. **Exports** electrode coordinates as CSV (CCF µm or Paxinos stereotaxic mm), an interactive
    3-D HTML page, a HERBS `.pkl`, or your section series with atlas outlines.
 
 ## How a section is fitted

@@ -385,3 +385,56 @@ def test_the_isotropic_v2_atlas_is_offered_with_its_offset_stated(qtbot):
         assert "102 µm posterior" in combo.toolTip()
     finally:
         viewer.close()
+
+
+def test_the_csv_is_called_electrode_coordinates_and_the_button_has_no_dots(qtbot):
+    """'Per-channel' read like the slide's colour channels."""
+    viz, viewer = _panel(qtbot)
+    try:
+        assert viz._format_combo.itemText(0) == "Electrode coordinates (CSV)"
+        assert "Export" in _button_texts(viz)
+        assert not any(t.startswith("Export") and t != "Export" for t in _button_texts(viz))
+    finally:
+        viewer.close()
+
+
+@pytest.mark.parametrize("fmt", ["csv", "pkl", "html", "series"])
+def test_export_dialogs_open_in_the_project_folder(qtbot, monkeypatch, tmp_path, fmt):
+    from qtpy.QtWidgets import QFileDialog
+
+    viz, viewer = _panel(qtbot)
+    try:
+        viz._state.atlas = _FAKE_ATLAS
+        viz._state.project_path = tmp_path / "proj" / "p.json"
+        opened_in = []
+        monkeypatch.setattr(
+            QFileDialog, "getSaveFileName",
+            staticmethod(lambda parent, title, folder, *a, **k: opened_in.append(folder) or ("", "")),
+        )
+        monkeypatch.setattr(
+            QFileDialog, "getExistingDirectory",
+            staticmethod(lambda parent, title, folder="", *a, **k: opened_in.append(folder) or ""),
+        )
+        monkeypatch.setattr(viz, "_ensure_display_atlas", lambda then: then())
+        viz._format_combo.setCurrentIndex(viz._format_combo.findData(fmt))
+        viz._export()
+
+        assert opened_in == [str(tmp_path / "proj")]
+    finally:
+        viewer.close()
+
+
+def test_unsaved_project_exports_next_to_the_slide_images(qtbot, tmp_path):
+    from atlastrack.project.schema import Slide
+
+    viz, viewer = _panel(qtbot)
+    try:
+        images = tmp_path / "histology"
+        images.mkdir()
+        assert viz._state.project_path is None
+        assert viz._export_dir() == ""  # nothing known: the dialog's own default
+        viz._state.project.slides.append(Slide(image_path=str(images / "slide1.tif")))
+
+        assert viz._export_dir() == str(images)
+    finally:
+        viewer.close()

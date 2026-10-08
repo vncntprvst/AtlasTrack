@@ -34,7 +34,7 @@ from atlastrack.gui.workflow import WorkflowState
 #: one button per file type - the old panel had two "export CSV" buttons that differed
 #: only by a coordinate frame.
 _EXPORT_FORMATS = [
-    ("Per-channel coordinates (CSV)", "csv"),
+    ("Electrode coordinates (CSV)", "csv"),
     ("Probe tracks for Python / HERBS (pkl)", "pkl"),
     ("3D view as interactive HTML", "html"),
     ("Registered section series (folder of images)", "series"),
@@ -239,7 +239,7 @@ class VizExportPanelWidget(QWidget):
         # Recompute probe/electrode CCF coordinates from the current registration.
         self._update_btn = QPushButton("Update probe coordinates")
         self._update_btn.setToolTip(
-            "Re-map every probe tip / entry (and per-channel) from its pixel "
+            "Re-map every probe tip / entry (and electrode) from its pixel "
             "position through the current registration - including manual atlas "
             "corrections and any tip/entry points you moved - into CCF µm, then "
             "save. Moving points or correcting a section does NOT update the CCF "
@@ -418,7 +418,7 @@ class VizExportPanelWidget(QWidget):
         self._series_overlays.setEnabled(True)
         export_layout.addWidget(self._series_box)
 
-        export_btn = QPushButton("Export\u2026")
+        export_btn = QPushButton("Export")
         export_btn.clicked.connect(self._export)
         export_layout.addWidget(export_btn)
         self._on_export_format_changed()
@@ -524,7 +524,7 @@ class VizExportPanelWidget(QWidget):
 
     def _export_plotly(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Plotly HTML", "", "HTML files (*.html);;All files (*)"
+            self, "Save Plotly HTML", self._export_dir(), "HTML files (*.html);;All files (*)"
         )
         if not path:
             return
@@ -722,6 +722,25 @@ class VizExportPanelWidget(QWidget):
         box.setText(_PAXINOS_HELP)
         box.exec_() if hasattr(box, "exec_") else box.exec()
 
+    def _export_dir(self) -> str:
+        """Folder the export dialogs open in: the project's, else the slide images'.
+
+        "" (the dialog's own default) when neither is known.
+        """
+        if self._state.project_path is not None:
+            return str(Path(self._state.project_path).parent)
+        slides = list(self._state.project.slides)
+        idx = self._state.active_slide_idx
+        if idx is not None and 0 <= idx < len(slides):
+            slides.insert(0, slides[idx])  # the slide on screen first
+        for slide in slides:
+            for p in list(slide.source_paths) or [slide.image_path]:
+                # An unsaved project stores absolute paths; a relative one has
+                # nothing to be relative to.
+                if p and Path(p).is_absolute() and Path(p).parent.is_dir():
+                    return str(Path(p).parent)
+        return ""
+
     def _export(self) -> None:
         """One button: pick a destination for the selected format, then write it."""
         fmt = self._format_combo.currentData()
@@ -733,15 +752,16 @@ class VizExportPanelWidget(QWidget):
             return
         if fmt == "pkl":
             path, _ = QFileDialog.getSaveFileName(
-                self, "Export coordinates to pkl", "", "Pickle files (*.pkl);;All files (*)"
+                self, "Export coordinates to pkl", self._export_dir(),
+                "Pickle files (*.pkl);;All files (*)",
             )
             if path:
                 self._write_herbs_pkl(path)
             return
         paxinos = self._paxinos_check.isChecked()
-        title = "Export Paxinos CSV" if paxinos else "Export per-channel CSV"
+        title = "Export Paxinos CSV" if paxinos else "Export electrode CSV"
         path, _ = QFileDialog.getSaveFileName(
-            self, title, "", "CSV files (*.csv);;All files (*)"
+            self, title, self._export_dir(), "CSV files (*.csv);;All files (*)"
         )
         if path:
             self._write_channel_csv(path, paxinos=paxinos)
@@ -753,7 +773,7 @@ class VizExportPanelWidget(QWidget):
         asking for one filename would only invite a name that is then decorated.
         """
         directory = QFileDialog.getExistingDirectory(
-            self, "Choose a folder for the section series"
+            self, "Choose a folder for the section series", self._export_dir()
         )
         if not directory:
             return
@@ -863,7 +883,7 @@ class VizExportPanelWidget(QWidget):
             else:
                 atlas = self._state.atlas
                 n = export_channel_csv(self._state.project, path, atlas=atlas)
-                what = "Per-channel CSV (CCF)"
+                what = "Electrode CSV (CCF)"
                 if atlas is None:
                     what += ", no atlas so no region columns"
             if n == 0:
