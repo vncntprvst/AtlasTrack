@@ -246,3 +246,17 @@ def test_spread_select_still_honours_the_minimum_distance() -> None:
     for i, (x1, y1) in enumerate(chosen):
         for x2, y2 in chosen[i + 1:]:
             assert (x1 - x2) ** 2 + (y1 - y2) ** 2 >= 50.0**2
+
+
+def test_region_junctions_are_the_centres_of_each_branch_point() -> None:
+    """Found in one pass (one full-image scan per junction took 3 s on LO_05)."""
+    import numpy as np
+
+    from atlastrack.registration.landmarks_warp import _region_junctions
+
+    lab = np.zeros((60, 60), dtype=np.int32)
+    lab[:30, :30], lab[:30, 30:], lab[30:, :] = 1, 2, 3     # a T where three meet
+    pts = _region_junctions(lab)
+    assert pts, "no junction found"
+    x, y = min(pts, key=lambda p: abs(p[0] - 30) + abs(p[1] - 30))
+    assert abs(x - 30) <= 2 and abs(y - 30) <= 2

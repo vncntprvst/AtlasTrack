@@ -87,11 +87,14 @@ def _region_junctions(labels: np.ndarray) -> list[tuple[float, float]]:
     if not branch.any():
         return []
     lab, n = cc_label(branch, structure=np.ones((3, 3)))
-    out: list[tuple[float, float]] = []
-    for i in range(1, n + 1):
-        ys, xs = np.nonzero(lab == i)
-        out.append((float(xs.mean()), float(ys.mean())))  # (x, y)
-    return out
+    if n == 0:
+        return []
+    # All centroids in one pass. One full-image scan per junction took 3 of the 5 s
+    # "Place landmarks" spent on a large section (536 junctions).
+    from scipy.ndimage import center_of_mass
+
+    centres = center_of_mass(branch, lab, range(1, n + 1))
+    return [(float(c[1]), float(c[0])) for c in centres]  # (x, y)
 
 
 def _silhouette_corners(extent: np.ndarray) -> list[tuple[float, float]]:
