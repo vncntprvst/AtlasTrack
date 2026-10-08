@@ -379,8 +379,19 @@ project's folder, or in the slide images' folder if the project was never saved.
 |---|---|
 | Electrode coordinates (CSV) | One row per electrode (recording channel), with its atlas region |
 | Probe tracks for Python / HERBS (pkl) | The tracks, for HERBS or your own Python scripts |
+
+**Create figures** - pick a **Figure**, then **Create**. The dialog opens in the same
+folder as Export's.
+
+| Figure | What you get |
+|---|---|
+| Back, top and side views (PNG) | Three pictures named after the project: the probes, the regions around their tips (plus any **Extra regions**), and the electrodes as red dots |
 | 3D view as interactive HTML | A page you can send someone |
 | Registered section series (folder) | Your sections, in order, with region outlines |
+
+In the three views, a faint outline of the whole brain gives context. The
+pictures are framed on the regions and electrodes, all at the same scale. When a
+probe has recordings attached, only the electrodes those recordings used are drawn.
 
 The electrode CSV has columns `probe, shank, channel, ap_um, ml_um, dv_um,
 depth_source, region, region_id, region_color`. `depth_source` says whether that

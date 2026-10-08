@@ -36,6 +36,11 @@ from atlastrack.gui.workflow import WorkflowState
 _EXPORT_FORMATS = [
     ("Electrode coordinates (CSV)", "csv"),
     ("Probe tracks for Python / HERBS (pkl)", "pkl"),
+]
+
+#: What the Create button makes (label, key): pictures, as opposed to coordinates.
+_FIGURE_FORMATS = [
+    ("Back, top and side views (PNG)", "views"),
     ("3D view as interactive HTML", "html"),
     ("Registered section series (folder of images)", "series"),
 ]
@@ -333,8 +338,8 @@ class VizExportPanelWidget(QWidget):
         export_layout = QVBoxLayout(export_box)
         export_layout.addWidget(
             _muted(
-                "Writes the registered result to a file - coordinates, or the 3D "
-                "view as a shareable page. Pick the format, then Export."
+                "Writes the registered coordinates to a file. Pick the format, then "
+                "Export."
             )
         )
 
@@ -417,13 +422,40 @@ class VizExportPanelWidget(QWidget):
             series_layout.addWidget(box)
         self._series_outlines.toggled.connect(self._series_overlays.setEnabled)
         self._series_overlays.setEnabled(True)
-        export_layout.addWidget(self._series_box)
 
         export_btn = QPushButton("Export")
         export_btn.clicked.connect(self._export)
         export_layout.addWidget(export_btn)
         self._on_export_format_changed()
         layout.addWidget(export_box)
+        layout.addSpacing(10)
+
+        figures_box = QGroupBox("Create figures")
+        figures_layout = QVBoxLayout(figures_box)
+        figures_layout.addWidget(
+            _muted("Makes pictures of the registered result. Pick one, then Create.")
+        )
+        fig_row = QHBoxLayout()
+        fig_row.addWidget(QLabel("Figure:"))
+        self._figure_combo = QComboBox()
+        for label, key in _FIGURE_FORMATS:
+            self._figure_combo.addItem(label, key)
+        self._figure_combo.setToolTip(
+            "Back, top and side views: three PNG images of the probes and the regions "
+            "around their tips (plus any extra regions above), with the electrodes as "
+            "red dots - the ones the attached recordings used, when they say.\n"
+            "3D view as interactive HTML: a page you can turn in any browser.\n"
+            "Registered section series: every section with its atlas outlines."
+        )
+        self._figure_combo.currentIndexChanged.connect(self._on_figure_format_changed)
+        fig_row.addWidget(self._figure_combo, 1)
+        figures_layout.addLayout(fig_row)
+        figures_layout.addWidget(self._series_box)
+        create_btn = QPushButton("Create")
+        create_btn.clicked.connect(self._create_figure)
+        figures_layout.addWidget(create_btn)
+        self._on_figure_format_changed()
+        layout.addWidget(figures_box)
 
         self._status = QLabel("")
         self._status.setWordWrap(True)
@@ -692,7 +724,6 @@ class VizExportPanelWidget(QWidget):
         worst of the options.
         """
         fmt = self._format_combo.currentData()
-        self._series_box.setVisible(fmt == "series")
         csv = fmt == "csv"
         self._paxinos_check.setEnabled(csv)
         self._paxinos_check.setToolTip(
@@ -709,6 +740,10 @@ class VizExportPanelWidget(QWidget):
             self._paxinos_wanted = self._paxinos_check.isChecked()
             self._paxinos_check.setChecked(False)
         self._on_paxinos_toggled(self._paxinos_check.isChecked())
+
+    def _on_figure_format_changed(self, _idx: int = 0) -> None:
+        """The section-series options are shown only for the section series."""
+        self._series_box.setVisible(self._figure_combo.currentData() == "series")
 
     def _on_paxinos_toggled(self, checked: bool) -> None:
         if self._paxinos_check.isEnabled():
@@ -745,12 +780,6 @@ class VizExportPanelWidget(QWidget):
     def _export(self) -> None:
         """One button: pick a destination for the selected format, then write it."""
         fmt = self._format_combo.currentData()
-        if fmt == "series":
-            self._ensure_display_atlas(self._export_series)
-            return
-        if fmt == "html":
-            self._export_plotly()
-            return
         if fmt == "pkl":
             path, _ = QFileDialog.getSaveFileName(
                 self, "Export coordinates to pkl", self._export_dir(),
@@ -766,6 +795,39 @@ class VizExportPanelWidget(QWidget):
         )
         if path:
             self._write_channel_csv(path, paxinos=paxinos)
+
+    def _create_figure(self) -> None:
+        """One button: make the selected kind of figure."""
+        kind = self._figure_combo.currentData()
+        if kind == "series":
+            self._ensure_display_atlas(self._export_series)
+        elif kind == "html":
+            self._export_plotly()
+        else:
+            self._ensure_display_atlas(self._export_views)
+
+    def _export_views(self) -> None:
+        """Write the back, top and side views as PNGs into a folder the user picks."""
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose a folder for the three views", self._export_dir()
+        )
+        if not directory:
+            return
+        path = self._state.project_path
+        stem = Path(path).stem if path is not None else "views"
+        try:
+            from atlastrack.viz.views import render_three_views
+
+            written = render_three_views(
+                self._state.project, self._display_atlas, directory,
+                stem=stem, extra_regions=self._extra_region_list(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "Figures failed", str(exc))
+            return
+        self._status.setText(
+            "Saved " + ", ".join(p.name for p in written) + f" \u2192 {Path(directory).name}"
+        )
 
     def _export_series(self) -> None:
         """Write the section series into a folder the user picks.

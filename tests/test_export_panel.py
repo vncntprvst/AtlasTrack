@@ -48,15 +48,17 @@ def test_there_is_no_longer_a_second_csv_button(qtbot):
         viewer.close()
 
 
-def test_the_format_selector_offers_every_output(qtbot):
-    """The 3D HTML is a file you share, so it belongs with the other exports; the
-    live napari window stays in the 3D group because it is not a file."""
+def test_export_writes_coordinates_and_create_figures_makes_pictures(qtbot):
+    """Coordinates in one group, pictures in another: the HTML page and the section
+    series are figures, next to the new back / top / side views."""
     viz, viewer = _panel(qtbot)
     try:
-        combo = viz._format_combo
-        keys = [combo.itemData(i) for i in range(combo.count())]
+        exports = [viz._format_combo.itemData(i) for i in range(viz._format_combo.count())]
+        figures = [viz._figure_combo.itemData(i) for i in range(viz._figure_combo.count())]
 
-        assert keys == ["csv", "pkl", "html", "series"]
+        assert exports == ["csv", "pkl"]
+        assert figures == ["views", "html", "series"]
+        assert "Create" in _button_texts(viz)
     finally:
         viewer.close()
 
@@ -258,11 +260,11 @@ def test_the_series_options_appear_only_for_the_series_format(qtbot):
     viz, viewer = _panel(qtbot)
     try:
         shown = {}
-        for i in range(viz._format_combo.count()):
-            viz._format_combo.setCurrentIndex(i)
-            shown[viz._format_combo.currentData()] = viz._series_box.isVisibleTo(viz)
+        for i in range(viz._figure_combo.count()):
+            viz._figure_combo.setCurrentIndex(i)
+            shown[viz._figure_combo.currentData()] = viz._series_box.isVisibleTo(viz)
 
-        assert shown == {"csv": False, "pkl": False, "html": False, "series": True}
+        assert shown == {"views": False, "html": False, "series": True}
     finally:
         viewer.close()
 
@@ -301,9 +303,9 @@ def test_the_series_export_passes_the_checkboxes_through(qtbot, monkeypatch, tmp
         # The real path resolves a region atlas first (outlines need one); that is
         # not what this test is about.
         monkeypatch.setattr(viz, "_ensure_display_atlas", lambda cb: cb())
-        viz._format_combo.setCurrentIndex(3)  # series
+        viz._figure_combo.setCurrentIndex(viz._figure_combo.findData("series"))
         viz._series_overlays.setChecked(True)
-        viz._export()
+        viz._create_figure()
 
         assert seen["write_outlines"] is True
         assert seen["write_overlays"] is True
@@ -333,8 +335,8 @@ def test_straightening_is_on_by_default_and_passed_through(qtbot, monkeypatch,
             return series_export.SeriesExportResult(out_dir=tmp_path, sections=1)
 
         monkeypatch.setattr(series_export, "export_section_series", _fake)
-        viz._format_combo.setCurrentIndex(3)
-        viz._export()
+        viz._figure_combo.setCurrentIndex(viz._figure_combo.findData("series"))
+        viz._create_figure()
 
         assert seen["straighten"] is True
     finally:
@@ -398,7 +400,7 @@ def test_the_csv_is_called_electrode_coordinates_and_the_button_has_no_dots(qtbo
         viewer.close()
 
 
-@pytest.mark.parametrize("fmt", ["csv", "pkl", "html", "series"])
+@pytest.mark.parametrize("fmt", ["csv", "pkl", "views", "html", "series"])
 def test_export_dialogs_open_in_the_project_folder(qtbot, monkeypatch, tmp_path, fmt):
     from qtpy.QtWidgets import QFileDialog
 
@@ -416,8 +418,12 @@ def test_export_dialogs_open_in_the_project_folder(qtbot, monkeypatch, tmp_path,
             staticmethod(lambda parent, title, folder="", *a, **k: opened_in.append(folder) or ""),
         )
         monkeypatch.setattr(viz, "_ensure_display_atlas", lambda then: then())
-        viz._format_combo.setCurrentIndex(viz._format_combo.findData(fmt))
-        viz._export()
+        if fmt in ("csv", "pkl"):
+            viz._format_combo.setCurrentIndex(viz._format_combo.findData(fmt))
+            viz._export()
+        else:
+            viz._figure_combo.setCurrentIndex(viz._figure_combo.findData(fmt))
+            viz._create_figure()
 
         assert opened_in == [str(tmp_path / "proj")]
     finally:
@@ -436,5 +442,32 @@ def test_unsaved_project_exports_next_to_the_slide_images(qtbot, tmp_path):
         viz._state.project.slides.append(Slide(image_path=str(images / "slide1.tif")))
 
         assert viz._export_dir() == str(images)
+    finally:
+        viewer.close()
+
+
+def test_the_three_views_are_written_with_the_project_name(qtbot, monkeypatch, tmp_path):
+    from qtpy.QtWidgets import QFileDialog
+
+    from atlastrack.viz import views
+
+    viz, viewer = _panel(qtbot)
+    try:
+        viz._state.project_path = tmp_path / "LO_test.json"
+        monkeypatch.setattr(QFileDialog, "getExistingDirectory",
+                            staticmethod(lambda *a, **k: str(tmp_path)))
+        monkeypatch.setattr(viz, "_ensure_display_atlas", lambda cb: cb())
+        seen = {}
+
+        def _fake(project, atlas, out_dir, **kw):
+            seen.update(kw, out_dir=out_dir)
+            return [tmp_path / f"{kw['stem']} - {v}.png" for v in ("back", "top", "side")]
+
+        monkeypatch.setattr(views, "render_three_views", _fake)
+        viz._figure_combo.setCurrentIndex(viz._figure_combo.findData("views"))
+        viz._create_figure()
+
+        assert seen["stem"] == "LO_test" and seen["out_dir"] == str(tmp_path)
+        assert "LO_test - back.png" in viz._status.text()
     finally:
         viewer.close()
