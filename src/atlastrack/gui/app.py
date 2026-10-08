@@ -1241,6 +1241,9 @@ def _update_section_numbers(
         texts.append(str(sec.index))
 
     name = f"Section numbers {slide_idx}"
+    # Adding a layer makes it the active one; give that back afterwards, or a
+    # redraw in the middle of editing (a box being dragged) takes the edit away.
+    active = viewer.layers.selection.active
     if name in viewer.layers:
         viewer.layers.remove(name)
     if not centroids:
@@ -1280,6 +1283,8 @@ def _update_section_numbers(
         viewer.layers.move(viewer.layers.index(lyr), len(viewer.layers) - 1)
     except Exception:
         pass
+    if active is not None and active in viewer.layers:
+        viewer.layers.selection.active = active
 
 
 def _reload_project_display(viewer: "napari.Viewer", state: "WorkflowState") -> None:

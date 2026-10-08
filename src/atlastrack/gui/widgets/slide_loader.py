@@ -858,6 +858,12 @@ class SlideLoaderWidget(QWidget):
         """Write edited rectangles back to the project sections."""
         if self._syncing_boxes or self._box_layer is None:
             return
+        # A drag reports every step ("changing") and then the result ("changed"):
+        # sync once, at the end. Syncing every step redrew the section numbers,
+        # which took the active layer away from the boxes and stopped the drag
+        # after its first step.
+        if getattr(event, "action", None) == "changing":
+            return
         slide_idx = self._state.active_slide_idx
         if slide_idx is None:
             return

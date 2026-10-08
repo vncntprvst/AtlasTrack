@@ -2356,3 +2356,52 @@ def test_apply_rebuilds_only_the_transforms_it_needs(qtbot, tmp_path, monkeypatc
         assert len(built) == 1                   # built once, when first asked
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_redrawing_section_numbers_keeps_the_active_layer(qtbot) -> None:
+    """Dragging a box redrew the numbers, which made them the active layer and
+    stopped the drag after its first step (LO_05 section 8)."""
+    import napari
+
+    from atlastrack.gui.app import _update_section_numbers
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _populated_state()
+        boxes = viewer.add_shapes([np.array([[0, 0], [0, 80], [80, 80], [80, 0]], float)],
+                                  shape_type="rectangle", name="Edit boxes 0")
+        viewer.layers.selection.active = boxes
+        _update_section_numbers(viewer, state, 0)
+        assert "Section numbers 0" in viewer.layers
+        assert viewer.layers.selection.active is boxes
+    finally:
+        viewer.close()
+
+
+@pytest.mark.qt
+def test_box_edits_sync_when_the_drag_ends_not_at_every_step(qtbot) -> None:
+    from types import SimpleNamespace
+
+    import napari
+
+    from atlastrack.gui.widgets.slide_loader import SlideLoaderWidget
+
+    viewer = napari.Viewer(show=False)
+    try:
+        state = _populated_state()
+        loader = SlideLoaderWidget(state, viewer)
+        qtbot.addWidget(loader)
+        assert loader._edit_boxes()
+        layer = loader._box_layer
+        moved = [np.asarray(d) + (0.0, 5.0) for d in layer.data]
+        with layer.events.data.blocker():
+            layer.data = moved
+        sec = state.project.slides[0].sections[0]
+        before = sec.bbox_px
+        loader._sync_boxes_from_shapes(SimpleNamespace(action="changing"))
+        assert sec.bbox_px == before                      # mid-drag: nothing yet
+        loader._sync_boxes_from_shapes(SimpleNamespace(action="changed"))
+        assert sec.bbox_px != before                      # at the end: synced
+    finally:
+        viewer.close()
