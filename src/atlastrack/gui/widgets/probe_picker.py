@@ -91,7 +91,6 @@ class ProbePickerWidget(QWidget):
 
         self._status = QLabel("")
         layout.addWidget(self._status)
-        layout.addStretch()
         self._refresh_rename_combo()
 
     def _on_type_changed(self, name: str) -> None:

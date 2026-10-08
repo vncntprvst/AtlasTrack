@@ -503,8 +503,10 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # After adding a probe, immediately arm tip-marker mode so the user can
     # click a tip point without first toggling the Tip/Entry selector.
     probe_picker.on_probe_added = click_overlay.arm_tip
+    # The probe list takes its own height; the track panel below gets the rest,
+    # so the track list can grow into it instead of a gap opening above it.
     ann_layout.addWidget(probe_picker)
-    ann_layout.addWidget(click_overlay)
+    ann_layout.addWidget(click_overlay, 1)
 
     # -- Register + Results -------------------------------------------------
     tab_register = QWidget()
