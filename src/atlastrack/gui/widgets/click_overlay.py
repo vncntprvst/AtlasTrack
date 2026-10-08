@@ -31,6 +31,7 @@ from qtpy.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -251,7 +252,9 @@ class ClickOverlayWidget(QWidget):
 
         self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels(["Probe", "Shank", "Tip (px)", "Entry (px)"])
-        self._table.setMaximumHeight(200)
+        # As tall as its rows (see _fit_table_height): it takes the free space below
+        # before the stretch does, and only scrolls once the panel runs out of room.
+        self._table.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         header = self._table.horizontalHeader()
         for col in range(2):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
@@ -263,8 +266,8 @@ class ClickOverlayWidget(QWidget):
         self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.cellClicked.connect(self._on_row_clicked)
-        layout.addWidget(self._table)
-        layout.addStretch()
+        layout.addWidget(self._table, 100)
+        layout.addStretch(1)
 
     # ------------------------------------------------------------------
     # Colour / identity helpers
@@ -1199,3 +1202,14 @@ class ClickOverlayWidget(QWidget):
                 self._table.setItem(i, col, item)
             if self._selected == (p_idx, s_idx):
                 self._table.selectRow(i)
+        self._fit_table_height()
+
+    def _fit_table_height(self) -> None:
+        """Cap the list at the height of its rows, so it shows them all when the panel
+        has room and leaves the rest of the space empty."""
+        rows = self._table.rowCount()
+        height = (self._table.horizontalHeader().sizeHint().height()
+                  + rows * self._table.verticalHeader().defaultSectionSize()
+                  + 2 * self._table.frameWidth() + 2)
+        self._table.setMaximumHeight(height)
+        self._table.setMinimumHeight(min(height, 80))

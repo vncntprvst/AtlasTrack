@@ -242,7 +242,7 @@ class VizExportPanelWidget(QWidget):
         probe_layout = QVBoxLayout(probe_box)
 
         # Recompute probe/electrode CCF coordinates from the current registration.
-        self._update_btn = QPushButton("Update probe coordinates")
+        self._update_btn = QPushButton("Update electrode coordinates")
         self._update_btn.setToolTip(
             "Re-map every probe tip / entry (and electrode) from its pixel "
             "position through the current registration - including manual atlas "
@@ -256,7 +256,7 @@ class VizExportPanelWidget(QWidget):
 
         # Enforce a rigid multi-shank array when re-mapping (physically, a
         # Neuropixels shank set is parallel + evenly spaced; independent per-section
-        # picks are noisy). Applied on every "Update coordinates" / "View 3D" so it
+        # picks are noisy). Applied on every "Update electrode coordinates" / "3D view" so it
         # survives re-mapping. Tolerance leaves a little slack for real deviations.
         rigid_row = QHBoxLayout()
         self._rigid_check = QCheckBox("Enforce rigid array")
@@ -266,7 +266,7 @@ class VizExportPanelWidget(QWidget):
             "shank pitch apart (250 µm on a Neuropixels 2.0). Each track moves as a "
             "whole, keeping its direction, so tips that spread apart as the shanks "
             "bent still do. The tolerance keeps a little slack. Re-applied on every "
-            "Update coordinates / View 3D."
+            "Update electrode coordinates / 3D view."
         )
         rigid_row.addWidget(self._rigid_check)
         # Without the stretch the checkbox label and "tolerance" run together and
@@ -429,7 +429,7 @@ class VizExportPanelWidget(QWidget):
         layout.addWidget(export_box)
         layout.addSpacing(10)
 
-        figures_box = QGroupBox("Create figures")
+        figures_box = QGroupBox("Figures")
         figures_layout = QVBoxLayout(figures_box)
         figures_layout.addWidget(
             _muted("Create figures of the registered result.")

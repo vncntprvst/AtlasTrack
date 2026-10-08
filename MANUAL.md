@@ -358,7 +358,7 @@ start for torn tissue or a missing piece, which you then fit with landmarks.
 
 Everything is in the right-hand **3D & Export** panel.
 
-**Update probe coordinates** first if you have moved a marker or corrected a
+**Update electrode coordinates** first if you have moved a marker or corrected a
 section - exports use the last computed coordinates. **Enforce rigid array**
 moves a multi-shank probe's tracks so that their entries form the probe's own row:
 in line, one shank pitch apart (250 µm on a Neuropixels 2.0). Each track moves as a
@@ -368,7 +368,7 @@ they are.
 
 **3D Visualization** - **Region atlas** names regions from a different atlas
 without re-registering (this is how you get Franklin-Paxinos names). **3D view**
-opens the brain and probes in a 3-D window. **Update probe coordinates** redraws
+opens the brain and probes in a 3-D window. **Update electrode coordinates** redraws
 the probes in that window and keeps your view. Closing the main window closes the
 3-D window too.
 
@@ -380,7 +380,7 @@ project's folder, or in the slide images' folder if the project was never saved.
 | Electrode coordinates (CSV) | One row per electrode (recording channel), with its atlas region |
 | Probe tracks for Python / HERBS (pkl) | The tracks, for HERBS or your own Python scripts |
 
-**Create figures** - pick a **Figure**, then **Create**. The dialog opens in the same
+**Figures** - pick a **Figure**, then **Create**. The dialog opens in the same
 folder as Export's.
 
 | Figure | What you get |
