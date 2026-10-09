@@ -80,10 +80,18 @@ def disagreeing_sections(project: Project) -> list[int]:
 def set_view(project: Project, view: View, *, mirror_planes: bool) -> tuple[list[int], list[int]]:
     """Set the project's view; with ``mirror_planes``, mirror the planes placed for the other.
 
-    Returns ``(mirrored, skipped)`` section indices. A section matched to another
-    project is skipped: its plane is fixed by its counterpart, not by a view, and
-    matching again (which flips the section as the view asks) is what turns it.
-    Warps and landmarks stay as they are - they live in image pixels.
+    Returns ``(mirrored, skipped)`` section indices (``skipped`` is kept for callers;
+    nothing is skipped any more). Warps, landmarks and track markers stay as they
+    are - they live in image pixels.
+
+    A section matched to another project is mirrored too, and its match record says
+    so (``reference.mirrored`` flips). It used to be skipped, on the idea that its
+    plane is fixed by its counterpart - but which face a matched section shows is
+    decided by the view at matching time, not by the tissue, so the view decides it
+    here as well. Skipping silently left TJO_optotag_16 seen "from the front" with
+    all 16 of its planes still placed for the back, every probe in the wrong
+    hemisphere. Matching again would turn them, but flips the images, which leaves
+    the track markers on the wrong side of the tissue.
     """
     project.seen_from = view
     mirrored, skipped = [], []
@@ -95,8 +103,7 @@ def set_view(project: Project, view: View, *, mirror_planes: bool) -> tuple[list
         if plane is None or anchoring_view(plane) == view:
             continue
         if s.reference is not None:
-            skipped.append(s.index)
-            continue
+            s.reference.mirrored = not s.reference.mirrored
         if s.registration is not None:
             s.registration.anchoring = mirror_anchoring(s.registration.anchoring, size)
         if s.deepslice_anchoring is not None:

@@ -66,3 +66,19 @@ def test_mirroring_keeps_ap_and_dv_and_mirrors_ml() -> None:
         q = [m[k] + su * m[3 + k] + sv * m[6 + k] for k in range(3)]
         assert q[0] == pytest.approx(p[0]) and q[1] == pytest.approx(p[1])
         assert q[2] == pytest.approx(456.0 - p[2])
+
+
+def test_set_view_mirrors_sections_matched_to_another_project_too() -> None:
+    """TJO_optotag_16: all 16 sections were matched to another project, and "Yes" to
+    mirroring silently mirrored none of them - every probe stayed in the wrong
+    hemisphere while the project said it was seen from the front."""
+    from atlastrack.project.schema import ReferenceMatch
+
+    project = _project(-456.0, -456.0)
+    for s in project.slides[0].sections:
+        s.reference = ReferenceMatch(project_path="ref.json", section_index=s.index,
+                                     matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1]], mirrored=False)
+    mirrored, skipped = set_view(project, "front", mirror_planes=True)
+    assert mirrored == [0, 1] and skipped == []
+    assert mirrored_sections(project) == []
+    assert all(s.reference.mirrored for s in project.slides[0].sections)

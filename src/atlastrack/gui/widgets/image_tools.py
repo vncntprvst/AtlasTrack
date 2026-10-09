@@ -329,8 +329,8 @@ class ImageToolsWidget(QWidget):
                 f"{'front' if view == 'back' else 'back'}. Mirror them to match?\n\n"
                 "Mirroring keeps each section's fit, warp and landmarks; every point "
                 "keeps its AP and DV and its ML is mirrored about the midline, so "
-                "the hemispheres swap. Re-export coordinates afterwards. (Sections "
-                "matched to another project are left; match again to turn them.)\n\n"
+                "the hemispheres swap. The probe coordinates are then updated "
+                "(and the project saved); re-export them afterwards.\n\n"
                 "No: change the setting only - for planes placed later.",
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel,
             )

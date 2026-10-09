@@ -602,6 +602,10 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
         if any(layer.name.startswith("Atlas overlay ") for layer in viewer.layers):
             register_panel._show_overlay()
         register_panel._refresh_residuals()
+        # The stored probe coordinates are now on the wrong side: exports use them,
+        # so recompute them from the markers (as "Update electrode coordinates").
+        if any(s.tip_px is not None for p in state.project.probes for s in p.shanks):
+            viz_panel._update_coordinates()
 
     image_tools.on_planes_mirrored = _after_planes_mirrored
 
