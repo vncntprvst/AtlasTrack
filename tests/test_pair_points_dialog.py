@@ -393,3 +393,54 @@ def test_the_hint_always_states_the_controls(qtbot) -> None:
         text = dialog._hint.text().lower()
         assert "add" in text and "drag" in text and "delete" in text, text
         dialog._auto_place()
+
+
+# --------------------------------------------------------------- the outlines
+
+
+def test_contours_run_along_pixel_edges_at_full_size() -> None:
+    from atlastrack.registration.transforms import annotation_contours
+
+    labels = np.zeros((40, 60), dtype=np.int32)
+    labels[10:20, 5:25] = 7
+    (region, pts), = annotation_contours(labels)
+    assert region == 7
+    # Within half a pixel: marching squares cuts each square corner by that much.
+    assert pts[:, 0].min() == pytest.approx(5.0, abs=0.6)
+    assert pts[:, 0].max() == pytest.approx(25.0, abs=0.6)
+    assert pts[:, 1].min() == pytest.approx(10.0, abs=0.6)
+    assert pts[:, 1].max() == pytest.approx(20.0, abs=0.6)
+
+    # Traced at half size, the outline is still placed in the full-size frame.
+    big = np.kron(labels, np.ones((4, 4), dtype=np.int32))
+    (_r, pts), = annotation_contours(big, max_side=120)
+    assert pts[:, 0].min() == pytest.approx(20.0, abs=2)
+    assert pts[:, 0].max() == pytest.approx(100.0, abs=2)
+
+
+def test_outlines_are_drawn_as_lines_in_each_colour_mode(qtbot) -> None:
+    from atlastrack.gui.widgets import pair_points_dialog as ppd
+
+    dialog, _s, _c = _dialog(qtbot, _state())
+    # One colour: one path holding every region's outline.
+    assert len(dialog._atlas_pane._outline_items) == 1
+    assert all(item.pen().isCosmetic() for item in dialog._atlas_pane._outline_items)
+
+    dialog._colour_combo.setCurrentIndex(dialog._colour_combo.findData("regions"))
+    assert len(dialog._atlas_pane._outline_items) == 2  # one per region
+    assert ppd._last_colour_mode == "regions"  # the next window opens with it
+
+    dialog._colour_combo.setCurrentIndex(dialog._colour_combo.findData("filled"))
+    fill = dialog._atlas_rgba(_labels())
+    assert fill[0, 0, 3] == 0  # outside the atlas stays clear
+    assert tuple(fill[60, 50, :3]) == dialog._region_rgb(1)
+    assert tuple(fill[75, 100, :3]) == dialog._region_rgb(2)
+    dialog._colour_combo.setCurrentIndex(dialog._colour_combo.findData("plain"))
+
+
+def test_the_registered_atlas_is_warped_once_not_on_every_redraw(qtbot) -> None:
+    dialog, _s, calls = _dialog(qtbot, _state())
+    before = len(calls)
+    dialog._add_pair_at(50.0, 50.0)
+    dialog._add_pair_at(80.0, 60.0)
+    assert len(calls) == before

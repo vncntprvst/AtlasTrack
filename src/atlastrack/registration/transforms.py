@@ -572,6 +572,75 @@ def annotation_boundaries(labels: np.ndarray) -> np.ndarray:
     return edges
 
 
+#: Longest side, in pixels, that :func:`annotation_contours` traces at. A section
+#: crop can be 3000 px wide but is seldom shown above this, and tracing time grows
+#: with area: about 0.5 s here against 2 s at full size.
+CONTOUR_MAX_SIDE = 1600
+
+#: Smoothing along each outline, in traced pixels. Atlas voxels are larger than
+#: section pixels, so a traced outline steps in blocks a few pixels wide; this
+#: rounds the steps off without moving the line by more than about a pixel.
+_CONTOUR_SMOOTH_PX = 2.0
+
+
+def _smooth_closed(points: np.ndarray, sigma: float) -> np.ndarray:
+    """Gaussian-smooth a closed (first == last) outline along its length."""
+    from scipy.ndimage import gaussian_filter1d
+
+    if sigma <= 0 or len(points) < 8 or not np.allclose(points[0], points[-1]):
+        return points
+    ring = points[:-1]
+    smooth = gaussian_filter1d(ring, sigma, axis=0, mode="wrap")
+    return np.vstack([smooth, smooth[:1]])
+
+
+def annotation_contours(
+    labels: np.ndarray, max_side: int = CONTOUR_MAX_SIDE
+) -> list[tuple[int, np.ndarray]]:
+    """Each region's outline as ``(region id, N x 2 array of x, y)``.
+
+    Coordinates are in ``labels``' own pixel frame, with pixel ``(r, c)`` covering
+    ``[c, c+1) x [r, r+1)``, so an outline lies on the edges between pixels. Unlike
+    :func:`annotation_boundaries` these are lines rather than pixels: drawn with a
+    fixed-width pen they stay whole at any zoom, where a 1-pixel edge image shrunk
+    to fit a window breaks into dashes. Images larger than ``max_side`` are
+    sampled down first; a region can have several outlines (islands, holes).
+    """
+    from scipy import ndimage
+    from skimage import measure
+
+    labels = np.asarray(labels)
+    if labels.ndim != 2 or labels.size == 0:
+        return []
+    step = max(1.0, max(labels.shape) / float(max_side))
+    if step > 1.0:
+        rows = (np.arange(int(labels.shape[0] / step)) * step).astype(int)
+        cols = (np.arange(int(labels.shape[1] / step)) * step).astype(int)
+        labels = labels[np.ix_(rows, cols)]
+    ids, inverse = np.unique(labels, return_inverse=True)
+    # Index k in ``compact`` is region ids[k - 1]; 0 stays background.
+    compact = inverse.reshape(labels.shape).astype(np.int32) + 1
+    compact[labels == 0] = 0
+
+    out: list[tuple[int, np.ndarray]] = []
+    for k, found in enumerate(ndimage.find_objects(compact), start=1):
+        region = int(ids[k - 1])
+        if found is None or region == 0:
+            continue
+        ys, xs = found
+        y0, x0 = max(ys.start - 1, 0), max(xs.start - 1, 0)
+        # Padded so a region touching the crop edge still closes its outline.
+        mask = np.pad(compact[y0:ys.stop + 1, x0:xs.stop + 1] == k, 1)
+        for contour in measure.find_contours(mask.astype(np.uint8), 0.5):
+            contour = _smooth_closed(contour, _CONTOUR_SMOOTH_PX)
+            contour = measure.approximate_polygon(contour, 0.3)
+            # (row, col) in the padded mask -> x, y on pixel edges, full size.
+            x = (contour[:, 1] - 1 + x0 + 0.5) * step
+            y = (contour[:, 0] - 1 + y0 + 0.5) * step
+            out.append((region, np.column_stack([x, y])))
+    return out
+
+
 def inverse_warp_path(path: str | Path) -> Path:
     """Where an exact inverse of the warp file ``path`` is kept, if there is one."""
     path = Path(path)

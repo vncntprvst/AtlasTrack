@@ -35,6 +35,7 @@ from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QBrush, QColor, QFont, QPen
 from qtpy.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -91,8 +92,26 @@ _NUMBER_PT = 11
 
 #: Atlas outline colour, and the dim fill under it so the pane has a silhouette to
 #: orient by rather than lines floating on black.
-_EDGE_RGB = (90, 230, 120)
+_EDGE_RGB = (235, 235, 235)
 _EXTENT_GREY = 48
+
+#: Outline width on screen, in pixels. The outlines are drawn as lines with a pen
+#: that keeps this width at any zoom. They used to be a 1-pixel edge image, which
+#: broke into faint dashes once a large section was shrunk to fit the pane.
+_OUTLINE_PX = 1.3
+
+#: Ways to colour the atlas: one colour for every outline, each region's outline in
+#: its atlas colour, or each region filled with its atlas colour.
+_COLOUR_MODES = (
+    ("plain", "Outlines"),
+    ("regions", "Region-coloured outlines"),
+    ("filled", "Filled regions"),
+)
+_FILL_ALPHA = 200
+_FILLED_EDGE_RGBA = (255, 255, 255, 150)
+
+#: The colour mode last picked, so the next window opens with it.
+_last_colour_mode = "plain"
 
 #: At least this many pairs before a thin-plate spline is worth solving.
 _MIN_PAIRS = 4
@@ -163,7 +182,37 @@ class _PickPane(_ImagePane):
         self._handles: list[tuple[int, float, float]] = []
         self._drag_index: int | None = None
         self._drag_moved = False
+        self._outline_items: list = []
         self.setFocusPolicy(Qt.StrongFocus)  # so Delete reaches keyPressEvent
+
+    # -- atlas outlines ------------------------------------------------
+
+    def set_outlines(
+        self, groups: list[tuple[tuple[int, ...], list[np.ndarray]]], opacity: float = 1.0
+    ) -> None:
+        """Draw outlines as lines: one ``(rgba, [N x 2 x, y arrays])`` per colour.
+
+        Above the image and its overlay, below the markers.
+        """
+        from qtpy.QtCore import QPointF
+        from qtpy.QtGui import QPainterPath, QPolygonF
+
+        for item in self._outline_items:
+            self.scene().removeItem(item)
+        self._outline_items.clear()
+        for rgba, polygons in groups:
+            path = QPainterPath()
+            for pts in polygons:
+                if len(pts) < 2:
+                    continue
+                path.addPolygon(QPolygonF([QPointF(float(x), float(y)) for x, y in pts]))
+            pen = QPen(QColor(*rgba))
+            pen.setWidthF(_OUTLINE_PX)
+            pen.setCosmetic(True)
+            item = self.scene().addPath(path, pen)
+            item.setZValue(3)
+            item.setOpacity(opacity)
+            self._outline_items.append(item)
 
     # -- geometry ------------------------------------------------------
 
@@ -349,6 +398,9 @@ class PairPointsDialog(QDialog):
 
         self._crop: np.ndarray | None = None
         self._base_labels: np.ndarray | None = None
+        self._labels_cache = None  # ((registration, atlas), labels)
+        self._contour_cache: list = []  # [(labels, contours)], newest first
+        self._rgb_cache: dict[int, tuple[int, int, int]] = {}
         self._selected: int | None = None
         self._dragging = False
         self._updating = False
@@ -434,6 +486,21 @@ class PairPointsDialog(QDialog):
         )
         self._preview_check.toggled.connect(lambda _: self._refresh_images())
         row.addWidget(self._preview_check)
+
+        row.addWidget(QLabel("Atlas colours:"))
+        self._colour_combo = QComboBox()
+        for key, text in _COLOUR_MODES:
+            self._colour_combo.addItem(text, key)
+        self._colour_combo.setCurrentIndex(
+            max(0, self._colour_combo.findData(_last_colour_mode))
+        )
+        self._colour_combo.setToolTip(
+            "Outlines: every region boundary in one colour.\n"
+            "Region-coloured outlines: each boundary in its region's atlas colour.\n"
+            "Filled regions: each region filled with its atlas colour."
+        )
+        self._colour_combo.currentIndexChanged.connect(self._on_colour_mode_changed)
+        row.addWidget(self._colour_combo)
         row.addStretch()
         return box
 
@@ -551,10 +618,58 @@ class PairPointsDialog(QDialog):
         """
         if self._warp_labels is None:
             return None
+        # Kept while the section's registration and the atlas are the same objects:
+        # every click and drag end redraws, and re-warping the atlas each time was
+        # most of the wait.
+        key = (self._section.registration, self._state.atlas)
+        cached = self._labels_cache
+        if cached is not None and all(a is b for a, b in zip(cached[0], key, strict=True)):
+            return cached[1]
         try:
-            return self._warp_labels(self._section, apply_landmarks=False)
+            labels = self._warp_labels(self._section, apply_landmarks=False)
         except Exception:
             return None
+        if labels is not None:
+            self._labels_cache = (key, labels)
+        return labels
+
+    def _region_rgb(self, region: int) -> tuple[int, int, int]:
+        """The atlas's own colour for a region, or a steady made-up one."""
+        if region not in self._rgb_cache:
+            try:
+                rgb = self._state.atlas.structures[region]["rgb_triplet"]
+                self._rgb_cache[region] = tuple(int(c) for c in rgb[:3])
+            except Exception:  # noqa: BLE001 - no atlas or unknown id
+                rng = np.random.default_rng(region)
+                self._rgb_cache[region] = tuple(int(c) for c in rng.integers(80, 256, 3))
+        return self._rgb_cache[region]
+
+    def _colour_mode(self) -> str:
+        return self._colour_combo.currentData() or "plain"
+
+    def _contours(self, labels: np.ndarray) -> list:
+        """Region outlines of ``labels``, traced once per label image."""
+        for cached_labels, contours in self._contour_cache:
+            if cached_labels is labels:
+                return contours
+        from atlastrack.registration.transforms import annotation_contours
+
+        contours = annotation_contours(labels)
+        # Two slots: the registered atlas, and the warp preview drawn over the tissue.
+        self._contour_cache = [(labels, contours), *self._contour_cache][:2]
+        return contours
+
+    def _outline_groups(self, labels: np.ndarray) -> list:
+        """``labels``' outlines grouped by drawing colour, for ``set_outlines``."""
+        contours = self._contours(labels)
+        mode = self._colour_mode()
+        if mode == "regions":
+            by_region: dict[int, list[np.ndarray]] = {}
+            for region, pts in contours:
+                by_region.setdefault(region, []).append(pts)
+            return [((*self._region_rgb(r), 255), polys) for r, polys in by_region.items()]
+        rgba = _FILLED_EDGE_RGBA if mode == "filled" else (*_EDGE_RGB, 255)
+        return [(rgba, [pts for _r, pts in contours])]
 
     def _moved(self, pair) -> bool:
         (sx, sy), (tx, ty) = pair
@@ -564,15 +679,22 @@ class PairPointsDialog(QDialog):
         return sum(1 for p in self._pairs if self._moved(p))
 
     def _atlas_rgba(self, labels: np.ndarray) -> np.ndarray:
-        """Outlines over a dim silhouette, as an RGBA image."""
-        from atlastrack.registration.transforms import annotation_boundaries
+        """What sits under the outlines, as an RGBA image.
 
-        extent = np.asarray(labels) > 0
-        edges = annotation_boundaries(labels)
-        h, w = extent.shape
-        rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        rgba[extent] = (_EXTENT_GREY, _EXTENT_GREY, _EXTENT_GREY, 255)
-        rgba[edges] = (*_EDGE_RGB, 255)
+        A dim silhouette, or with "Filled regions" each region in its atlas colour.
+        The outlines themselves are drawn as lines by ``set_outlines``.
+        """
+        labels = np.asarray(labels)
+        if self._colour_mode() == "filled":
+            ids, inverse = np.unique(labels, return_inverse=True)
+            lut = np.array(
+                [(*self._region_rgb(int(r)), _FILL_ALPHA) if r else (0, 0, 0, 0)
+                 for r in ids],
+                dtype=np.uint8,
+            )
+            return lut[inverse.reshape(labels.shape)]
+        rgba = np.zeros((*labels.shape, 4), dtype=np.uint8)
+        rgba[labels > 0] = (_EXTENT_GREY, _EXTENT_GREY, _EXTENT_GREY, 255)
         return rgba
 
     def _preview_labels(self, base: np.ndarray) -> np.ndarray:
@@ -609,7 +731,9 @@ class PairPointsDialog(QDialog):
         if labels is None:
             self._base_labels = None
             self._atlas_pane.set_base(_to_pixmap(np.zeros(crop.shape[:2], np.uint8)), fit=fit)
+            self._atlas_pane.set_outlines([])
             self._hist_pane.set_overlay(None)
+            self._hist_pane.set_outlines([])
             self._status.setText(
                 "No registered atlas for this section yet - run 'Register all "
                 "sections' first, so there is an overlay to correct."
@@ -618,14 +742,16 @@ class PairPointsDialog(QDialog):
 
         self._base_labels = labels
         self._atlas_pane.set_base(_to_pixmap(self._atlas_rgba(labels)), fit=fit)
+        self._atlas_pane.set_outlines(self._outline_groups(labels))
 
         if self._overlay_check.isChecked():
             shown = self._preview_labels(labels)
-            self._hist_pane.set_overlay(
-                _to_pixmap(self._atlas_rgba(shown)), self._opacity.value() / 100.0
-            )
+            opacity = self._opacity.value() / 100.0
+            self._hist_pane.set_overlay(_to_pixmap(self._atlas_rgba(shown)), opacity)
+            self._hist_pane.set_outlines(self._outline_groups(shown), opacity)
         else:
             self._hist_pane.set_overlay(None)
+            self._hist_pane.set_outlines([])
 
         moved = self._moved_count()
         previewing = (
@@ -909,6 +1035,11 @@ class PairPointsDialog(QDialog):
             self, title, text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         return reply == QMessageBox.Yes
+
+    def _on_colour_mode_changed(self, _index: int) -> None:
+        global _last_colour_mode
+        _last_colour_mode = self._colour_mode()
+        self._refresh_images()
 
     def _on_overlay_toggled(self, on: bool) -> None:
         self._opacity.setEnabled(on)
