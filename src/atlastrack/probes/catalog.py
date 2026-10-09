@@ -85,6 +85,7 @@ class ProbeLayout:
 # ---------------------------------------------------------------------------
 
 NEURONEXUS_A1X32_POLY3 = "NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP"
+NEURONEXUS_A1X32_POLY2 = "NeuroNexus A1x32-Poly2-10mm-50s-177-OA32LP"
 
 #: From the top of a Neuropixels shank's taper to the centre of its lowest electrode.
 #: ProbeTable does not give it; probeinterface uses this value to draw the probe.
@@ -184,6 +185,46 @@ def _neuronexus_a1x32_poly3() -> ProbeLayout:
     )
 
 
+#: A1x32-Poly2-10mm-50s-177 sites by probe electrode number (1-32), as (x, height
+#: above the shank tip) in µm - the "Poly2 and Poly3 Intan Channel mapping" sheet,
+#: itself from the NeuroNexus dimensioned drawing. Kept by electrode number because
+#: that is also how the A32 adapter wiring is given (see ephys.probemap).
+POLY2_SITES_BY_ELECTRODE: dict[int, tuple[float, float]] = {
+    **{e: (21.5, y) for e, y in zip(
+        (23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 22, 21, 20, 19, 18, 17),
+        range(850, 99, -50))},                         # right column, top -> tip
+    **{e: (-21.5, y) for e, y in zip(
+        (10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 11, 12, 13, 14, 15, 16),
+        range(825, 74, -50))},                         # left column, top -> tip
+}
+
+
+def _neuronexus_a1x32_poly2() -> ProbeLayout:
+    """The NeuroNexus A1x32-Poly2-10mm-50s-177(-OA32LP) site layout.
+
+    From the NeuroNexus dimensioned drawing (catalog p. 115), as tabulated in the
+    lab's "Poly2 and Poly3 Intan Channel mapping" sheet:
+
+      * two columns 43 µm apart (x = -21.5 / +21.5 µm), 16 sites each
+      * 50 µm between sites in a column; the right column sits 25 µm higher
+      * the lowest site (left column) is 75 µm above the shank tip; the sites span
+        775 µm, so the top one is 850 µm above the tip
+
+    The OA32LP optical assembly carries its fibre 100 µm above the top-most site
+    (sales order #28748). Sites are ordered tip -> base, as elsewhere in the catalog.
+    Used by TJO_optotag_11 and later; 06 and 07 used the Poly3.
+    """
+    sites = sorted((y, x) for x, y in POLY2_SITES_BY_ELECTRODE.values())
+    return ProbeLayout(
+        name=NEURONEXUS_A1X32_POLY2,
+        n_channels=32,
+        tip_to_first_site_um=75.0,
+        explicit_depths_um=tuple(float(y) for y, _ in sites),
+        explicit_offsets_um=tuple(float(x) for _, x in sites),
+        fiber_offset_above_top_site_um=100.0,
+    )
+
+
 CATALOG: dict[str, ProbeLayout] = {
     # ProbeTable NP1000.
     "Neuropixels 1.0": _neuropixels(
@@ -198,6 +239,7 @@ CATALOG: dict[str, ProbeLayout] = {
         row_pitch_um=15.0, even_row_x_um=27.0, odd_row_x_um=27.0,
     ),
     NEURONEXUS_A1X32_POLY3: _neuronexus_a1x32_poly3(),
+    NEURONEXUS_A1X32_POLY2: _neuronexus_a1x32_poly2(),
 }
 
 

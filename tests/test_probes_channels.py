@@ -428,3 +428,20 @@ def test_export_paxinos_csv(tmp_path: Path) -> None:
     assert float(rows[0]["ap_mm"]) == pytest.approx(float(ap), abs=1e-3)
     assert float(rows[0]["ml_mm"]) == pytest.approx(float(ml), abs=1e-3)
     assert float(rows[0]["dv_mm"]) == pytest.approx(float(dv), abs=1e-3)
+
+
+def test_neuronexus_poly2_layout_matches_the_drawing() -> None:
+    """A1x32-Poly2-10mm-50s-177 (TJO_optotag_11 and later): two columns 43 µm apart,
+    50 µm pitch, right column 25 µm higher, lowest site 75 µm above the tip."""
+    from atlastrack.probes.catalog import NEURONEXUS_A1X32_POLY2
+
+    layout = get_layout(NEURONEXUS_A1X32_POLY2)
+    depths = layout.site_depths_from_tip_um()
+    offsets = layout.site_lateral_offsets_um()
+    assert len(depths) == 32
+    assert depths.min() == pytest.approx(75.0) and depths.max() == pytest.approx(850.0)
+    assert sorted(set(offsets)) == [-21.5, 21.5]
+    left = np.sort(depths[offsets < 0]); right = np.sort(depths[offsets > 0])
+    assert np.allclose(np.diff(left), 50.0) and np.allclose(np.diff(right), 50.0)
+    assert np.allclose(right - left, 25.0)
+    assert layout.fiber_offset_above_top_site_um == pytest.approx(100.0)

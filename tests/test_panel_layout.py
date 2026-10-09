@@ -193,3 +193,13 @@ def test_long_probe_names_do_not_widen_the_panel(qtbot) -> None:
     picker._refresh_rename_combo()
     picker._status.setText("3 probe(s) in project: " + ", ".join(p.label for p in state.project.probes))
     assert picker.minimumSizeHint().width() < 400
+
+
+def test_the_probe_type_list_offers_the_poly2(qtbot) -> None:
+    from atlastrack.gui.widgets.probe_picker import ProbePickerWidget
+    from atlastrack.gui.workflow import WorkflowState
+
+    picker = ProbePickerWidget(WorkflowState())
+    qtbot.addWidget(picker)
+    names = [picker._type_combo.itemText(i) for i in range(picker._type_combo.count())]
+    assert "NeuroNexus A1x32-Poly2-10mm-50s-177-OA32LP" in names

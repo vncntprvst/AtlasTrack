@@ -405,9 +405,31 @@ def _poly3_a32_rhd2132() -> ProbeMap:
     return ProbeMap(depth_um=depth, x_um=x, name=NEURONEXUS_POLY3_A32_RHD2132)
 
 
+NEURONEXUS_POLY2_A32_RHD2132 = "NeuroNexus A1x32-Poly2 + A32>RHD2132"
+
+
+def _poly2_a32_rhd2132() -> ProbeMap:
+    """The same Intan rig with the Poly2: Poly2 -> A32-OM32 adapter -> RHD2132.
+
+    Sites by electrode number from the catalog; the adapter wiring is the same
+    A32 -> RHD2132 table as the Poly3's (the mapping sheet agrees, e.g. site 23 ->
+    Intan 7, site 16 -> Intan 16, site 17 -> Intan 0).
+    """
+    from atlastrack.probes.catalog import POLY2_SITES_BY_ELECTRODE
+
+    depth = np.zeros(len(A32_TO_RHD2132), dtype=float)
+    x = np.zeros_like(depth)
+    for pin, channel in enumerate(A32_TO_RHD2132):
+        site_x, height = POLY2_SITES_BY_ELECTRODE[pin + 1]
+        x[channel] = site_x
+        depth[channel] = height
+    return ProbeMap(depth_um=depth, x_um=x, name=NEURONEXUS_POLY2_A32_RHD2132)
+
+
 #: Named maps that already include the adapter wiring, unlike :func:`map_from_catalog`.
 BUILTIN_MAPS: dict[str, Callable[[], ProbeMap]] = {
     NEURONEXUS_POLY3_A32_RHD2132: _poly3_a32_rhd2132,
+    NEURONEXUS_POLY2_A32_RHD2132: _poly2_a32_rhd2132,
 }
 
 

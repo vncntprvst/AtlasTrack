@@ -21,6 +21,7 @@ _PRESETS: dict[str, dict] = {
     "Neuropixels 1.0": {"n_shanks": 1, "shank_pitch_um": 250.0},
     "Neuropixels 2.0 (4-shank)": {"n_shanks": 4, "shank_pitch_um": 250.0},
     "NeuroNexus A1x32-Poly3-10mm-25s-177-OA32LP": {"n_shanks": 1, "shank_pitch_um": 250.0},
+    "NeuroNexus A1x32-Poly2-10mm-50s-177-OA32LP": {"n_shanks": 1, "shank_pitch_um": 250.0},
     "Custom": {"n_shanks": 1, "shank_pitch_um": 250.0},
 }
 

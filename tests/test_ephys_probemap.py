@@ -446,3 +446,14 @@ def test_the_wired_builtin_is_reported_as_a_real_map_not_a_bare_catalog_layout()
 def test_an_unknown_name_lists_both_the_catalog_and_the_wired_maps():
     with pytest.raises(KeyError, match="A32>RHD2132"):
         resolve_probe_map("not a probe")
+
+
+def test_poly2_wired_map_matches_the_mapping_sheet() -> None:
+    """Rows of "Poly2 and Poly3 Intan Channel mapping.xlsx": (Intan ch, height, x)."""
+    from atlastrack.ephys.probemap import NEURONEXUS_POLY2_A32_RHD2132, resolve_probe_map
+
+    m = resolve_probe_map(NEURONEXUS_POLY2_A32_RHD2132)
+    for channel, height, x in ((7, 850, 21.5), (23, 825, -21.5), (16, 75, -21.5),
+                               (0, 100, 21.5), (25, 725, -21.5), (2, 200, 21.5)):
+        assert m.depth_um[channel] == height and m.x_um[channel] == x
+    assert sorted(m.depth_um) == sorted(range(75, 851, 25))   # every site once
