@@ -88,7 +88,7 @@ registration your corrections also shift the sections between them.
 **Register ▸ Register all sections**.
 
 A few seconds per section. When it finishes, the table fills in: the
-**Residual** column is how much mismatch the fit left, lower is better. Tick **Show atlas overlay on sections** to see the
+**Residual** column is how much mismatch the fit left, lower is better. Click **Show atlas overlays on sections** to see the
 region outlines warped onto your tissue. This is the moment to judge the result:
 the outlines should follow the anatomy, not only the outer edge.
 

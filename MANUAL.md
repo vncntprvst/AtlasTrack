@@ -272,8 +272,8 @@ name the channel when you can.
 
 Then **Register ▸ Register all sections**. Watch the progress, then check the
 **Residual** column - how much mismatch the fit left, lower is better - and
-switch on **Show atlas overlay on
-sections** to see the outlines on your tissue.
+click **Show atlas overlays on sections** to see the outlines on your tissue.
+While they are shown the button is blue and reads **Hide atlas overlays**.
 
 **Check series (AP and tilt)** plots every section's AP, pitch and yaw in series
 order. Sections cut from one block should step evenly front to back at one angle,
@@ -302,8 +302,12 @@ drag them, or click them in pairs.
 
 Drag the auto-placed points:
 
-1. **Place landmarks** drops points on recognisable features - outline tips,
-   junctions, corners.
+1. **Place landmarks** drops points on recognisable features: the top and bottom
+   of the midline, the outline's tips, where the midline crosses from one region
+   into the next, junctions and corners. If another section already has
+   landmarks, the nearest one in the series is used instead: its points are
+   copied and each snaps onto the same boundary in this section's atlas, so the
+   same features are not placed again by hand on every section.
 2. Drag each onto the matching spot on your tissue. The outline follows as you
    drag. **Ctrl+drag** (or **Move without warping**) moves a point to a better
    spot without changing the outline. **Add points** adds one where you click; it
@@ -315,14 +319,18 @@ Drag the auto-placed points:
 Or work side by side, the way HERBS does: **Open split panel window** shows the
 section on the left and the atlas, as currently registered, on the right.
 
-1. **Auto-place points** puts numbered dots on both. Dots you have not moved yet
-   are amber and hold the atlas still where they are.
+1. The window starts from the nearest section's points, as **Place landmarks**
+   does (**Copy from nearest section** does it again). **Auto-place points** puts
+   numbered dots on distinctive features instead. Dots you have not moved yet are
+   amber and hold the atlas still where they are.
 2. Drag each dot on the section onto the feature it marks on the atlas. Click
    empty space to add a pair; right-click a dot, or click it and press
    **Delete**, to remove it. **Undo** steps back one change.
 3. **Preview warp** shows the result, **Apply landmark warp** keeps it.
 
-The window can also lay the atlas over the tissue at any opacity, and nudge the
+**Atlas colours** draws the atlas as plain outlines, outlines in each region's
+atlas colour, or regions filled with their atlas colour. The window can also lay
+the atlas over the tissue at any opacity, and nudge the
 atlas plane (AP, ML tilt, DV tilt). **Apply plane** saves the new plane; register
 the section again for the overlay to follow it.
 
@@ -370,18 +378,26 @@ whole and keeps its direction, so tips that spread apart as the shanks bent stil
 do. **Tolerance** 0 puts the entries exactly on the row; 1 leaves your markers as
 they are.
 
+**Probe colours...** sets each probe's colour. Each shank has one colour
+everywhere: its markers in the Probes tab, its track in the 3D window, the HTML
+page and the figures. By default each shank takes the next colour of the palette;
+a colour you choose is used for all of a probe's shanks.
+
 **3D Visualization** - **Region atlas** names regions from a different atlas
 without re-registering (this is how you get Franklin-Paxinos names). **3D view**
-opens the brain and probes in a 3-D window. **Update electrode coordinates** redraws
-the probes in that window and keeps your view. Closing the main window closes the
-3-D window too.
+opens the brain and probes in a 3-D window, with the layer list on the right and
+the scene seen from the top, the bottom and the side along the bottom. **Update
+electrode coordinates** redraws the probes in that window and keeps your view.
+Closing the main window closes the 3-D window too.
 
 **Export** - pick a **Format**, then **Export**. The file dialog opens in the
-project's folder, or in the slide images' folder if the project was never saved.
+project's folder, or in the slide images' folder if the project was never saved,
+with a file name made from the probes and the project.
 
 | Format | What you get |
 |---|---|
 | Electrode coordinates (CSV) | One row per electrode (recording channel), with its atlas region |
+| All electrode coordinate files (CSV) | In one go: CCF with regions, Paxinos (with the chosen alignment), and CCF with the **Region atlas**'s names when it differs |
 | Probe tracks for Python / HERBS (pkl) | The tracks, for HERBS or your own Python scripts |
 
 **Figures** - pick a **Figure**, then **Create**. The dialog opens in the same
@@ -389,7 +405,7 @@ folder as Export's.
 
 | Figure | What you get |
 |---|---|
-| Back, top and side views (PNG) | Three pictures named after the project: the probes, the regions around their tips (plus any **Extra regions**), and the electrodes as red dots |
+| Back, top and side views (PNG) | Three pictures named after the project: the probes, the regions around their tips (plus any **Extra regions**), and the electrodes as dots in their shank's colour |
 | 3D view as interactive HTML | A page you can send someone |
 | Registered section series (folder) | Your sections, in order, with region outlines |
 
