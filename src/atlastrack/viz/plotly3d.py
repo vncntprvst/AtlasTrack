@@ -80,11 +80,6 @@ def styled_regions(regions: list[str]) -> list[tuple[str, str, float]]:
         out.append((acr, color, op))
     return out
 
-# Probe trajectory colours (cycling).
-_PROBE_COLORS = [
-    "#e6194B", "#3cb44b", "#4363d8", "#f58231",
-    "#911eb4", "#42d4f4", "#f032e6", "#bfef45",
-]
 
 
 # ---------------------------------------------------------------------------
@@ -189,14 +184,14 @@ def add_probe_traces(
     import plotly.graph_objects as go
     from atlastrack.probes.geometry import probe_prism_mesh
 
-    probe_count = 0
-    for probe in project.probes:
-        color = _PROBE_COLORS[probe_count % len(_PROBE_COLORS)]
-        probe_count += 1
+    from atlastrack.probes.colours import shank_colour
 
-        for shank in probe.shanks:
+    for p_idx, probe in enumerate(project.probes):
+        for s_idx, shank in enumerate(probe.shanks):
             if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
                 continue
+            # The shank's colour in every other view too (see probes.colours).
+            color = shank_colour(project, p_idx, s_idx)
             # Use the placed + registered tip/entry directly - each shank carries
             # its own correct ML, so adding a geometric shank offset here would
             # double-count and shove outer shanks across the midline.

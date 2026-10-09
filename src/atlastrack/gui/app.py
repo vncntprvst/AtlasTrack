@@ -558,6 +558,8 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     # not inside the Register tab.
     viz_panel = VizExportPanelWidget(state, viewer)
     viz_panel.apply_settings(settings)
+    # A probe's colour is shown in the Probes tab too.
+    viz_panel.on_probe_colours_changed = click_overlay.refresh_colours
     # Its atlas and alignment lists would otherwise make it about 500 px wide.
     _narrow_combo_boxes(viz_panel)
 

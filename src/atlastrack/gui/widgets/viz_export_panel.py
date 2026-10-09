@@ -230,6 +230,10 @@ class VizExportPanelWidget(QWidget):
         # without re-registering). None until resolved by _ensure_display_atlas.
         self._display_atlas = None
         self._display_atlas_id: str | None = None
+        self._fixed_views = None  # the 3D window's strip of top / bottom / side views
+        self._colours_dialog = None
+        #: Called after a probe's colour changed (the app redraws the Probes tab).
+        self.on_probe_colours_changed = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -283,6 +287,15 @@ class VizExportPanelWidget(QWidget):
         self._rigid_tol.setToolTip("0 = entries exactly on the row; 1 = keep picks unchanged.")
         rigid_row.addWidget(self._rigid_tol)
         probe_layout.addLayout(rigid_row)
+
+        colours_btn = QPushButton("Probe colours...")
+        colours_btn.setToolTip(
+            "Choose each probe's colour. It is used for the probe's tracks and "
+            "electrodes everywhere: the Probes tab, the 3D window, the interactive "
+            "HTML and the figures."
+        )
+        colours_btn.clicked.connect(self._open_probe_colours)
+        probe_layout.addWidget(colours_btn)
         layout.addWidget(probe_box)
         layout.addSpacing(10)
 
@@ -442,7 +455,8 @@ class VizExportPanelWidget(QWidget):
         self._figure_combo.setToolTip(
             "Back, top and side views: three PNG images of the probes and the regions "
             "around their tips (plus any extra regions above), with the electrodes as "
-            "red dots - the ones the attached recordings used, when they say.\n"
+            "dots in their shank's colour - the ones the attached recordings used, "
+            "when they say.\n"
             "3D view as interactive HTML: a page you can turn in any browser.\n"
             "Registered section series: every section with its atlas outlines."
         )
@@ -662,6 +676,21 @@ class VizExportPanelWidget(QWidget):
             self._render_napari3d()
         self._status.setText(msg)
 
+    def _open_probe_colours(self) -> None:
+        from atlastrack.gui.widgets.probe_colours_dialog import ProbeColoursDialog
+
+        # Non-modal and kept, so colours can be tried against the open 3D window.
+        self._colours_dialog = ProbeColoursDialog(
+            self._state.project, on_changed=self._after_colour_change, parent=self
+        )
+        self._colours_dialog.show()
+
+    def _after_colour_change(self) -> None:
+        if callable(self.on_probe_colours_changed):
+            self.on_probe_colours_changed()
+        if self._viewer3d is not None and _viewer_alive(self._viewer3d):
+            self._render_napari3d()
+
     def _watch_windows(self, viewer3d) -> None:
         """Hide the 3D window when it is closed; close it with the main window."""
         win3d = viewer3d.window._qt_window
@@ -690,15 +719,21 @@ class VizExportPanelWidget(QWidget):
         self._render_napari3d()
 
     def _render_napari3d(self) -> None:
+        from atlastrack.gui import crashlog
+
         try:
             import napari
 
+            from atlastrack.gui.widgets.fixed_views import arrange_3d_window
             from atlastrack.viz.napari3d import show_3d_scene
 
             new_window = self._viewer3d is None or not _window_exists(self._viewer3d)
+            # Noted so a crash in the 3D window can be tied to what was being done.
+            crashlog.note(f"3D view: {'open' if new_window else 'update'} scene")
             if new_window:
                 self._viewer3d = napari.Viewer(title="Registered histology and probe tracks - 3D view")
                 self._watch_windows(self._viewer3d)
+                self._fixed_views = arrange_3d_window(self._viewer3d)
             else:
                 self._viewer3d.window._qt_window.show()
 
@@ -711,9 +746,12 @@ class VizExportPanelWidget(QWidget):
                 extra_regions=self._extra_region_list(),
                 reset_camera=new_window,
             )
+            crashlog.note(f"3D view: scene has {len(added)} layer(s)")
             # Bring the 3D window to the front: a second napari window otherwise
             # opens behind the main one, which keeps the focus.
             _bring_to_front(self._viewer3d)
+            if self._fixed_views is not None:
+                self._fixed_views.refresh_soon(600 if new_window else 200)
             if self._display_atlas is None:
                 self._status.setText(
                     "Opened 3D window: probe tracks only. Load an atlas to see the brain."

@@ -41,13 +41,11 @@ def _put_layer(viewer: "napari.Viewer", key: str, make, update=None):
     return layer
 
 
-_PROBE_COLORS = [
-    (1.0, 0.1, 0.1, 1.0),
-    (0.1, 0.8, 0.2, 1.0),
-    (0.2, 0.4, 1.0, 1.0),
-    (1.0, 0.5, 0.1, 1.0),
-    (0.7, 0.2, 0.9, 1.0),
-]
+def _shank_rgba(project, p_idx: int, s_idx: int) -> tuple[float, float, float, float]:
+    """A shank's colour, the same as in the Probes tab and the figures."""
+    from atlastrack.probes.colours import hex_to_rgba, shank_colour
+
+    return hex_to_rgba(shank_colour(project, p_idx, s_idx))
 
 
 def add_probe_layers(
@@ -62,9 +60,8 @@ def add_probe_layers(
     """
     added = []
     for p_idx, probe in enumerate(project.probes):
-        color = _PROBE_COLORS[p_idx % len(_PROBE_COLORS)]
-        lines = []
-        for shank in probe.shanks:
+        lines, colors = [], []
+        for s_idx, shank in enumerate(probe.shanks):
             if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
                 continue
             # Each shank's tip/entry was placed + registered individually, so its
@@ -75,23 +72,24 @@ def add_probe_layers(
             tip = np.array(shank.tip_ccf_um, dtype=float)
             entry = np.array(shank.entry_ccf_um, dtype=float)
             lines.append(np.array([tip, entry]))
+            colors.append(_shank_rgba(project, p_idx, s_idx))
 
         if not lines:
             continue
 
-        def _update(layer, lines=lines, color=color):
+        def _update(layer, lines=lines, colors=colors):
             # Type given with the data: the shape_type setter fails on 3D shapes.
             layer.data = [(line, "line") for line in lines]
-            layer.edge_color = [color] * len(lines)
+            layer.edge_color = colors
             layer.edge_width = line_width
 
         layer = _put_layer(
             viewer, f"probe:{probe.label}",
-            lambda lines=lines, color=color, label=probe.label: viewer.add_shapes(
+            lambda lines=lines, colors=colors, label=probe.label: viewer.add_shapes(
                 lines,
                 name=f"Probe {label}",
                 shape_type="line",
-                edge_color=[color] * len(lines),
+                edge_color=colors,
                 edge_width=line_width,
                 ndim=3,
             ),
@@ -116,27 +114,27 @@ def add_ephys_channel_layers(
     """
     added = []
     for p_idx, probe in enumerate(project.probes):
-        color = _PROBE_COLORS[p_idx % len(_PROBE_COLORS)]
-        pts = []
-        for shank in probe.shanks:
+        pts, colors = [], []
+        for s_idx, shank in enumerate(probe.shanks):
             if shank.ephys is None:
                 continue
             pts.extend([tuple(float(v) for v in c) for c in shank.ephys.channel_ccf_um])
+            colors += [_shank_rgba(project, p_idx, s_idx)] * len(shank.ephys.channel_ccf_um)
         if not pts:
             continue
         pts = np.array(pts, dtype=float)  # (AP, ML, DV)
 
-        def _update(layer, pts=pts, color=color):
+        def _update(layer, pts=pts, colors=colors):
             layer.data = pts
-            layer.face_color = [color] * len(pts)
+            layer.face_color = colors
             layer.size = size
 
         layer = _put_layer(
             viewer, f"ephys:{probe.label}",
-            lambda pts=pts, color=color, label=probe.label: viewer.add_points(
+            lambda pts=pts, colors=colors, label=probe.label: viewer.add_points(
                 pts,
                 name=f"Ephys channels {label}",
-                face_color=[color] * len(pts),
+                face_color=colors,
                 size=size,
                 ndim=3,
             ),
@@ -296,6 +294,50 @@ def show_3d_scene(
     Internal regions shown are only those containing a shank tip, plus any
     ``extra_regions`` the user searched for.
     """
+    with _own_gl_context(viewer):
+        return _build_scene(
+            viewer, project, atlas, extra_regions=extra_regions,
+            show_tip_regions=show_tip_regions, line_width=line_width,
+            reset_camera=reset_camera,
+        )
+
+
+class _own_gl_context:  # noqa: N801 - used as a with-statement, like a function
+    """Make the viewer's own canvas vispy's current one; put the previous one back.
+
+    vispy sends the work for new or changed OpenGL objects to the current canvas.
+    The scene is updated from the main window's buttons, when the main window's
+    canvas is usually the current one, and a 3D layer whose data lands in the
+    main window's OpenGL context crashes the next 3D redraw with an access
+    violation. Removing layers crashed that way until the 3D canvas was made
+    current for it (0.10.21); this does the same for every change to the scene.
+    """
+
+    def __init__(self, viewer) -> None:
+        self._viewer = viewer
+        self._previous = None
+
+    def __enter__(self):
+        try:
+            from vispy.gloo.context import get_current_canvas
+
+            self._previous = get_current_canvas()
+            self._viewer.window._qt_viewer.canvas._scene_canvas.set_current()
+        except Exception:  # noqa: BLE001 - no window (headless): nothing to make current
+            self._previous = None
+        return self
+
+    def __exit__(self, *_exc) -> bool:
+        try:
+            if self._previous is not None:
+                self._previous.set_current()
+        except Exception:  # noqa: BLE001 - that canvas has gone; its next draw sets it
+            pass
+        return False
+
+
+def _build_scene(viewer, project, atlas, *, extra_regions, show_tip_regions,
+                 line_width, reset_camera) -> list:
     from atlastrack.viz.plotly3d import (
         CONTEXT_REGIONS,
         hex_to_rgb,
@@ -396,6 +438,43 @@ def _apply_bregma_display(layers: list, atlas_name: str | None = None) -> None:
             layer.affine = affine
         except Exception:  # noqa: BLE001 - affine is best-effort per layer
             pass
+
+
+#: The fixed views, as (name, view direction, up direction) in the displayed frame:
+#: anterior +AP, the animal's right +ML, ventral +DV. Seen from the top and from the
+#: bottom, anterior is up; from the side (the animal's left), dorsal is up.
+FIXED_VIEWS = (
+    ("Top", (0.0, 0.0, 1.0), (1.0, 0.0, 0.0)),
+    ("Bottom", (0.0, 0.0, -1.0), (1.0, 0.0, 0.0)),
+    ("Side", (0.0, 1.0, 0.0), (0.0, 0.0, -1.0)),
+)
+
+
+def fixed_view_images(viewer: "napari.Viewer") -> dict:
+    """Screenshots of the scene from the top, the bottom and the side.
+
+    Taken with the window's own canvas and camera, so they show exactly what the
+    3D view shows, in the same colours, with no second OpenGL canvas. The camera
+    the user had is put back afterwards.
+    """
+    camera = viewer.camera
+    saved = (camera.center, camera.zoom, camera.angles, camera.perspective)
+    images = {}
+    with _own_gl_context(viewer):
+        _capture(viewer, camera, saved, images)
+    return images
+
+
+def _capture(viewer, camera, saved, images) -> None:
+    try:
+        camera.perspective = 0.0
+        for name, view_direction, up_direction in FIXED_VIEWS:
+            viewer.reset_view()
+            camera.set_view_direction(view_direction=view_direction,
+                                      up_direction=up_direction)
+            images[name] = viewer.screenshot(canvas_only=True)
+    finally:
+        camera.center, camera.zoom, camera.angles, camera.perspective = saved
 
 
 def _set_default_camera(viewer: "napari.Viewer") -> None:

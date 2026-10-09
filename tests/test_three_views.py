@@ -21,14 +21,20 @@ def test_three_pngs_are_written_and_show_the_probe(qtbot, tmp_path) -> None:
 
     from atlastrack.viz.views import render_three_views
 
-    written = render_three_views(_project(), None, tmp_path, stem="S", size=(300, 200))
+    from atlastrack.probes.colours import shank_colour
+
+    project = _project()
+    written = render_three_views(project, None, tmp_path, stem="S", size=(300, 200))
 
     assert [p.name for p in written] == ["S - back.png", "S - top.png", "S - side.png"]
+    # Electrodes take their shank's colour; in the side view one shank hides the other.
+    colours = [np.array([int(c[i:i + 2], 16) for i in (1, 3, 5)])
+               for c in (shank_colour(project, 0, s) for s in range(2))]
     for p in written:
-        img = np.asarray(Image.open(p))
+        img = np.asarray(Image.open(p)).astype(int)
         assert img.shape == (200, 300, 3)
-        red = (img[..., 0] > 150) & (img[..., 1] < 90) & (img[..., 2] < 90)
-        assert red.any(), f"no electrode drawn in {p.name}"
+        drawn = any((np.abs(img - c).max(axis=-1) < 40).any() for c in colours)
+        assert drawn, f"no electrode drawn in {p.name}"
 
 
 def test_only_the_recorded_electrodes_are_drawn() -> None:

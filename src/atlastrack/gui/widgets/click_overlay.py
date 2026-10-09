@@ -55,14 +55,6 @@ _LAYER_PREVIEW = "Track preview"
 _TIP_PROMPT = "Place track end marker (shank tip)"
 _ENTRY_PROMPT = "Place track origin marker (shank entrypoint)"
 
-# Distinct, colour-blind-friendlier cycle; a shank's global ordinal indexes it so
-# a shank keeps one colour on its markers, its line and its row in the list.
-_SHANK_COLORS = [
-    "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
-    "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990", "#9a6324",
-    "#800000", "#808000", "#000075", "#a9a9a9",
-]
-
 # A press that moves less than this (screen pixels) before release is a click,
 # not a pan.
 _CLICK_SLOP_PX = 5
@@ -273,19 +265,14 @@ class ClickOverlayWidget(QWidget):
     # Colour / identity helpers
     # ------------------------------------------------------------------
 
-    def _shank_ordinals(self) -> dict[tuple[int, int], int]:
-        """Map ``(probe_pos, shank_pos)`` to a global ordinal for colour cycling."""
-        out: dict[tuple[int, int], int] = {}
-        k = 0
-        for p_idx, probe in enumerate(self._state.project.probes):
-            for s_idx in range(len(probe.shanks)):
-                out[(p_idx, s_idx)] = k
-                k += 1
-        return out
-
     def _color_for(self, p_idx: int, s_idx: int) -> str:
-        ordinal = self._shank_ordinals().get((p_idx, s_idx), 0)
-        return _SHANK_COLORS[ordinal % len(_SHANK_COLORS)]
+        """The shank's colour on its markers, its line and its row in the list.
+
+        The same colour the 3D window and the figures use (see probes.colours).
+        """
+        from atlastrack.probes.colours import shank_colour
+
+        return shank_colour(self._state.project, p_idx, s_idx)
 
     def _current_ps(self) -> tuple[int, int]:
         return self._probe_combo.currentIndex(), self._shank_combo.currentIndex()
@@ -1093,6 +1080,11 @@ class ClickOverlayWidget(QWidget):
         self._segment_cache.clear()
         self._drop_stale_layer_refs()
         self._refresh_probe_combo()
+        self._rebuild_markers()
+        self._refresh_table()
+
+    def refresh_colours(self) -> None:
+        """Redraw the tracks and the list after a probe's colour changed."""
         self._rebuild_markers()
         self._refresh_table()
 

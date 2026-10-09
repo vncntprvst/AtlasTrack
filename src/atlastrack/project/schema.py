@@ -204,6 +204,9 @@ class ProbeSpec(BaseModel):
     label: str
     type: ProbeType
     shanks: list[Shank]
+    # A colour chosen for this probe (#rrggbb), used for all its shanks in every
+    # view. None: each shank takes the next palette colour (see probes.colours).
+    color: str | None = None
 
     # Recordings contributing ephys features to this penetration (see
     # EphysRecordingRef - a bank covers only ~720 µm, so several are needed).

@@ -2,8 +2,9 @@
 
 The scene is the 3D view's, drawn for a figure: a faint outline of the whole brain,
 the regions the shank tips are in (plus any extra regions asked for), each probe's
-tracks, and the electrodes as red dots - only those the attached recordings used,
-when the recordings say which. Each view uses an orthographic camera, so
+tracks, and the electrodes as dots - only those the attached recordings used, when
+the recordings say which. Tracks and electrodes take their shank's colour, the same
+as in the Probes tab and the 3D window (see probes.colours). Each view uses an orthographic camera, so
 distances read the same everywhere in the picture.
 
 Rendering is off-screen with vispy (napari's drawing library), so no window opens
@@ -29,12 +30,15 @@ if TYPE_CHECKING:
 #: Measured, not assumed: azimuth 0 looks from behind toward anterior with the
 #: animal's right on the image's right; elevation 90 looks down with anterior up;
 #: azimuth -90 looks from the animal's left side with anterior on the image's left.
+#: Elevation -90 looks up from below, anterior up, so the animal's right is on the
+#: image's left (the 3D window's view from below).
 VIEWS = (("back", 0.0, 0.0), ("top", 0.0, 90.0), ("side", -90.0, 0.0))
+_CAMERAS = {name: (azimuth, elevation) for name, azimuth, elevation in VIEWS}
+_CAMERAS["bottom"] = (0.0, -90.0)
 
 #: Which display axes run across and up the picture in each view.
-_SCREEN_AXES = {"back": (0, 2), "top": (0, 1), "side": (1, 2)}
+_SCREEN_AXES = {"back": (0, 2), "top": (0, 1), "side": (1, 2), "bottom": (0, 1)}
 
-ELECTRODE_COLOUR = (0.86, 0.12, 0.12, 1.0)
 BRAIN_COLOUR = (0.55, 0.55, 0.55, 0.07)
 
 
@@ -174,6 +178,7 @@ def scene_contents(project: "Project", atlas: "BrainGlobeAtlas | None", *,
     """Everything the views draw, in CCF µm: regions, tracks and electrodes."""
     from atlastrack.probes.catalog import get_layout
     from atlastrack.probes.channels import shank_channel_coords
+    from atlastrack.probes.colours import hex_to_rgba, shank_colour
     from atlastrack.viz.plotly3d import hex_to_rgb, resolve_regions, styled_regions
 
     regions = []
@@ -187,14 +192,16 @@ def scene_contents(project: "Project", atlas: "BrainGlobeAtlas | None", *,
         full_names = {a: _full_name(atlas, a) for a, _m, _c in regions}
     else:
         full_names = {}
-    tracks, electrodes = [], []
-    for probe in project.probes:
+    tracks, track_colours, electrodes, electrode_colours = [], [], [], []
+    for p_idx, probe in enumerate(project.probes):
         layout = get_layout(probe.type.name)
         recorded = recorded_electrodes(probe)
-        for shank in probe.shanks:
+        for s_idx, shank in enumerate(probe.shanks):
             if shank.tip_ccf_um is None or shank.entry_ccf_um is None:
                 continue
+            colour = hex_to_rgba(shank_colour(project, p_idx, s_idx))
             tracks.append(np.array([shank.tip_ccf_um, shank.entry_ccf_um], dtype=float))
+            track_colours.append(colour)
             coords = shank_channel_coords(shank, layout)
             if coords is None or not len(coords):
                 continue
@@ -202,12 +209,15 @@ def scene_contents(project: "Project", atlas: "BrainGlobeAtlas | None", *,
             if recorded is not None:
                 coords = coords[[k for k in sorted(recorded) if k < len(coords)]]
             electrodes.append(coords)
+            electrode_colours += [colour] * len(coords)
     return {
         "brain": _region_mesh(atlas, "root") if atlas is not None else None,
         "regions": regions,
         "names": full_names,
         "tracks": tracks,
+        "track_colours": track_colours,
         "electrodes": np.concatenate(electrodes) if electrodes else np.empty((0, 3)),
+        "electrode_colours": np.array(electrode_colours).reshape(-1, 4),
     }
 
 
@@ -246,8 +256,37 @@ def render_three_views(
 ) -> list[Path]:
     """Write ``<stem> - back.png``, ``- top.png`` and ``- side.png``; return their paths.
 
+    Any earlier files of the same names are replaced. See :func:`render_views` for
+    what is drawn and how it is framed.
+    """
+    images = render_views(project, atlas, [name for name, _a, _e in VIEWS],
+                          extra_regions=extra_regions, size=size, margin=margin,
+                          labels=labels)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, image in images.items():
+        path = out_dir / f"{stem} - {name}.png"
+        image.save(path)
+        written.append(path)
+    return written
+
+
+def render_views(
+    project: "Project",
+    atlas: "BrainGlobeAtlas | None",
+    names=("back", "top", "side"),
+    *,
+    extra_regions=(),
+    size: tuple[int, int] = (2400, 1600),
+    margin: float = 0.35,
+    labels: bool = False,
+    background: str = "white",
+) -> dict:
+    """The named views (back, top, side, bottom) as PIL images, in that order.
+
     The views are framed on the regions and electrodes (plus ``margin`` of that
-    extent all round), at one zoom for all three; the whole-brain outline and the
+    extent all round), at one zoom for all of them; the whole-brain outline and the
     upper part of the tracks are context and may run off the edges.
 
     ``labels`` writes each region's full name beside it (see :func:`place_labels`).
@@ -262,7 +301,7 @@ def render_three_views(
     if not contents["tracks"]:
         raise ValueError("No probe has tip and entry coordinates yet: nothing to draw.")
 
-    canvas = scene.SceneCanvas(show=False, size=size, bgcolor="white")
+    canvas = scene.SceneCanvas(show=False, size=size, bgcolor=background)
     view = canvas.central_widget.add_view()
     # Translucent surfaces must not hide each other, the tracks or the dots, so none
     # of them writes depth: everything stays visible through everything else.
@@ -279,8 +318,8 @@ def render_three_views(
         add_mesh(contents["brain"], BRAIN_COLOUR)
     region_visuals = [(name, mesh, add_mesh(mesh, colour))
                       for name, mesh, colour in contents["regions"]]
-    for track in contents["tracks"]:
-        line = scene.visuals.Line(pos=_to_display(track, atlas_name), color=(0.2, 0.2, 0.2, 0.8),
+    for track, colour in zip(contents["tracks"], contents["track_colours"], strict=True):
+        line = scene.visuals.Line(pos=_to_display(track, atlas_name), color=colour,
                                   width=max(2.0, size[0] / 800), parent=view.scene)
         line.set_gl_state("translucent", depth_test=False)
     dots = None
@@ -288,7 +327,7 @@ def render_three_views(
         dots = scene.visuals.Markers(parent=view.scene)
         # Small: 384 electrodes per shank sit 7.5 µm apart, so larger dots merge
         # into a solid bar that hides the regions they are in.
-        dots.set_data(_to_display(contents["electrodes"], atlas_name), face_color=ELECTRODE_COLOUR,
+        dots.set_data(_to_display(contents["electrodes"], atlas_name), face_color=contents["electrode_colours"],
                       edge_width=0.0, size=max(3.0, size[0] / 600))
         dots.set_gl_state("translucent", depth_test=False)
 
@@ -304,15 +343,14 @@ def render_three_views(
     centre = (lo + hi) / 2.0
     extent = np.maximum(hi - lo, 1.0) * (1.0 + 2.0 * margin)
     aspect = size[0] / size[1]
-    # One zoom for all three, so the views compare at a glance: the one that fits
+    # One zoom for all of them, so the views compare at a glance: the one that fits
     # the widest of them.
     scale = max(float(max(extent[up], extent[across] / aspect))
-                for across, up in _SCREEN_AXES.values())
+                for across, up in (_SCREEN_AXES[n] for n in names))
 
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    written = []
-    for suffix, azimuth, elevation in VIEWS:
+    images = {}
+    for suffix in names:
+        azimuth, elevation = _CAMERAS[suffix]
         view.camera = scene.TurntableCamera(fov=0.0, azimuth=azimuth, elevation=elevation,
                                             up="+z")
         # Fit what this view shows across and up; set_range would fit the largest
@@ -326,8 +364,6 @@ def render_three_views(
                                  _projected(dots, _to_display(contents["electrodes"], atlas_name))
                                  if dots is not None else np.empty((0, 2)),
                                  font_px=max(12, size[1] // 45))
-        path = out_dir / f"{stem} - {suffix}.png"
-        image.save(path)
-        written.append(path)
+        images[suffix] = image
     canvas.close()
-    return written
+    return images
