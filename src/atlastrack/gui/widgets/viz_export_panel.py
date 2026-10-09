@@ -35,6 +35,7 @@ from atlastrack.gui.workflow import WorkflowState
 #: only by a coordinate frame.
 _EXPORT_FORMATS = [
     ("Electrode coordinates (CSV)", "csv"),
+    ("All electrode coordinate files (CSV)", "csv_all"),
     ("Probe tracks for Python / HERBS (pkl)", "pkl"),
 ]
 
@@ -582,7 +583,8 @@ class VizExportPanelWidget(QWidget):
 
     def _export_plotly(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Plotly HTML", self._export_dir(), "HTML files (*.html);;All files (*)"
+            self, "Save Plotly HTML", self._suggested_name("3D view", ".html"),
+            "HTML files (*.html);;All files (*)",
         )
         if not path:
             return
@@ -775,6 +777,9 @@ class VizExportPanelWidget(QWidget):
         fmt = self._format_combo.currentData()
         csv = fmt == "csv"
         self._paxinos_check.setEnabled(csv)
+        # "All" writes the CCF and the Paxinos files both; only the alignment is a
+        # choice there.
+        self._paxinos_check.setVisible(fmt != "csv_all")
         self._paxinos_check.setToolTip(
             ""
             if csv
@@ -799,8 +804,9 @@ class VizExportPanelWidget(QWidget):
     def _on_paxinos_toggled(self, checked: bool) -> None:
         if self._paxinos_check.isEnabled():
             self._paxinos_wanted = checked
-        self._paxinos_label.setEnabled(checked)
-        self._paxinos_combo.setEnabled(checked)
+        on = checked or self._format_combo.currentData() == "csv_all"
+        self._paxinos_label.setEnabled(on)
+        self._paxinos_combo.setEnabled(on)
 
     def _show_paxinos_help(self) -> None:
         box = QMessageBox(self)
@@ -828,24 +834,95 @@ class VizExportPanelWidget(QWidget):
                     return str(Path(p).parent)
         return ""
 
+    def _suggested_name(self, what: str, suffix: str) -> str:
+        """A file name to start the save dialog with, in the export folder.
+
+        Names the probes and the project, e.g. "ProbeA ProbeB electrode coordinates
+        - LO_07_red_whole.csv", so exports of several projects or dyes do not all
+        default to the same name.
+        """
+        labels = " ".join(p.label for p in self._state.project.probes) or "Probes"
+        name = f"{labels} {what}"
+        if self._state.project_path is not None:
+            name += f" - {Path(self._state.project_path).stem}"
+        name = "".join("_" if c in '<>:"/\\|?*' else c for c in name)
+        folder = self._export_dir()
+        return str(Path(folder) / f"{name}{suffix}") if folder else f"{name}{suffix}"
+
     def _export(self) -> None:
         """One button: pick a destination for the selected format, then write it."""
         fmt = self._format_combo.currentData()
         if fmt == "pkl":
             path, _ = QFileDialog.getSaveFileName(
-                self, "Export coordinates to pkl", self._export_dir(),
+                self, "Export coordinates to pkl",
+                self._suggested_name("probe tracks", ".pkl"),
                 "Pickle files (*.pkl);;All files (*)",
             )
             if path:
                 self._write_herbs_pkl(path)
             return
+        if fmt == "csv_all":
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export all electrode coordinate files",
+                self._suggested_name("electrode coordinates", ".csv"),
+                "CSV files (*.csv);;All files (*)",
+            )
+            if path:
+                self._ensure_display_atlas(lambda: self._write_all_csv(path))
+            return
         paxinos = self._paxinos_check.isChecked()
         title = "Export Paxinos CSV" if paxinos else "Export electrode CSV"
+        what = "electrode coordinates" + (" (Paxinos)" if paxinos else "")
         path, _ = QFileDialog.getSaveFileName(
-            self, title, self._export_dir(), "CSV files (*.csv);;All files (*)"
+            self, title, self._suggested_name(what, ".csv"),
+            "CSV files (*.csv);;All files (*)",
         )
         if path:
             self._write_channel_csv(path, paxinos=paxinos)
+
+    def _write_all_csv(self, path: str) -> None:
+        """Every coordinate CSV in one go, named from ``path``.
+
+        ``<name> - CCF.csv`` with the registration atlas's regions, ``<name> -
+        Paxinos <alignment>.csv``, and, when a different region atlas is chosen,
+        ``<name> - CCF, <atlas> regions.csv`` with that atlas's region names.
+        """
+        from atlastrack.probes.channels import export_channel_csv, export_paxinos_csv
+
+        base = Path(path)
+        stem = base.stem
+        if stem.endswith(" - CCF"):
+            stem = stem[: -len(" - CCF")]
+        folder = base.parent
+        align = self._paxinos_combo.currentData()
+        written, notes = [], []
+        try:
+            ccf = folder / f"{stem} - CCF.csv"
+            if export_channel_csv(self._state.project, ccf, atlas=self._state.atlas) == 0:
+                _error_dialog(self, "Nothing to export", "No registered shank coordinates found.")
+                return
+            written.append(ccf)
+            if self._state.atlas is None:
+                notes.append("no atlas, so no region columns")
+            pax = folder / f"{stem} - Paxinos {align}.csv"
+            try:
+                export_paxinos_csv(self._state.project, pax, alignment=align)
+                written.append(pax)
+            except Exception as exc:  # noqa: BLE001 - the others are still worth having
+                notes.append(f"no Paxinos file: {exc}")
+            region_id = self._display_atlas_id
+            if (self._display_atlas is not None and self._display_atlas is not self._state.atlas
+                    and region_id):
+                regions = folder / f"{stem} - CCF, {region_id} regions.csv"
+                export_channel_csv(self._state.project, regions, atlas=self._display_atlas)
+                written.append(regions)
+        except Exception as exc:  # noqa: BLE001
+            _error_dialog(self, "CSV export failed", str(exc))
+            return
+        message = f"{len(written)} CSV files ({stem} - ...) → {folder.name}"
+        if notes:
+            message += "  ·  " + "; ".join(notes)
+        self._status.setText(message)
 
     def _create_figure(self) -> None:
         """One button: make the selected kind of figure."""

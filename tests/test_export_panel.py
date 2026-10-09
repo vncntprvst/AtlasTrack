@@ -7,6 +7,8 @@ permanently in the panel and a preset list labelled by citation ("Pinpoint / Qiu
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from atlastrack.io.ccf_coords import PAXINOS_ALIGNMENTS
@@ -56,7 +58,7 @@ def test_export_writes_coordinates_and_create_figures_makes_pictures(qtbot):
         exports = [viz._format_combo.itemData(i) for i in range(viz._format_combo.count())]
         figures = [viz._figure_combo.itemData(i) for i in range(viz._figure_combo.count())]
 
-        assert exports == ["csv", "pkl"]
+        assert exports == ["csv", "csv_all", "pkl"]
         assert figures == ["views", "html", "series"]
         assert "Create" in _button_texts(viz)
     finally:
@@ -400,7 +402,7 @@ def test_the_csv_is_called_electrode_coordinates_and_the_button_has_no_dots(qtbo
         viewer.close()
 
 
-@pytest.mark.parametrize("fmt", ["csv", "pkl", "views", "html", "series"])
+@pytest.mark.parametrize("fmt", ["csv", "csv_all", "pkl", "views", "html", "series"])
 def test_export_dialogs_open_in_the_project_folder(qtbot, monkeypatch, tmp_path, fmt):
     from qtpy.QtWidgets import QFileDialog
 
@@ -418,14 +420,52 @@ def test_export_dialogs_open_in_the_project_folder(qtbot, monkeypatch, tmp_path,
             staticmethod(lambda parent, title, folder="", *a, **k: opened_in.append(folder) or ""),
         )
         monkeypatch.setattr(viz, "_ensure_display_atlas", lambda then: then())
-        if fmt in ("csv", "pkl"):
+        if fmt in ("csv", "csv_all", "pkl"):
             viz._format_combo.setCurrentIndex(viz._format_combo.findData(fmt))
             viz._export()
         else:
             viz._figure_combo.setCurrentIndex(viz._figure_combo.findData(fmt))
             viz._create_figure()
 
-        assert opened_in == [str(tmp_path / "proj")]
+        # A save dialog starts on a suggested file in that folder; a folder dialog on it.
+        assert len(opened_in) == 1
+        opened = Path(opened_in[0])
+        assert str(tmp_path / "proj") in (str(opened), str(opened.parent))
+    finally:
+        viewer.close()
+
+
+def test_save_dialogs_suggest_a_name_from_the_probes_and_the_project(qtbot, tmp_path):
+    from atlastrack.project.schema import ProbeSpec, ProbeType
+
+    viz, viewer = _panel(qtbot)
+    try:
+        viz._state.project_path = tmp_path / "LO_07_red_whole.json"
+        viz._state.project.probes = [
+            ProbeSpec(label=label, type=ProbeType(name="x", n_shanks=1), shanks=[])
+            for label in ("ProbeA", "ProbeB")
+        ]
+        name = Path(viz._suggested_name("electrode coordinates", ".csv")).name
+        assert name == "ProbeA ProbeB electrode coordinates - LO_07_red_whole.csv"
+    finally:
+        viewer.close()
+
+
+def test_all_coordinate_files_are_written_at_once(qtbot, monkeypatch, tmp_path):
+    from atlastrack.probes import channels
+
+    viz, viewer = _panel(qtbot)
+    try:
+        written = []
+        monkeypatch.setattr(channels, "export_channel_csv",
+                            lambda project, path, atlas=None: written.append(Path(path).name) or 3)
+        monkeypatch.setattr(channels, "export_paxinos_csv",
+                            lambda project, path, alignment=None: written.append(Path(path).name) or 3)
+        viz._write_all_csv(str(tmp_path / "P electrode coordinates.csv"))
+        align = viz._paxinos_combo.currentData()
+        assert written == ["P electrode coordinates - CCF.csv",
+                           f"P electrode coordinates - Paxinos {align}.csv"]
+        assert "2 CSV files" in viz._status.text()
     finally:
         viewer.close()
 
