@@ -53,6 +53,14 @@ BOX_TRANSFORM_ACTIVE_TEXT = "Apply box transform"
 REGISTER_ALL_TEXT = "Register all sections"
 REGISTER_SELECTED_TEXT = "Register selected sections ({n})"
 
+#: The overlay button's two states: it shows the overlays, and while any is shown
+#: it hides them, coloured so it is plain which one a click will do.
+OVERLAY_SHOW_TEXT = "Show atlas overlays on sections"
+OVERLAY_HIDE_TEXT = "Hide atlas overlays"
+OVERLAY_SHOWN_STYLE = (
+    "QPushButton { background-color: #2f6f8f; color: white; font-weight: bold; }"
+)
+
 
 def style_overlay_layer(layer) -> None:
     """Give an atlas-overlay Labels layer its fixed look: white contours, no depth test.
@@ -357,13 +365,17 @@ class RegisterPanelWidget(QWidget):
         clear.activated.connect(self.clear_section_selection)
         layout.addWidget(self._residuals_table)
 
-        self._overlay_btn = QPushButton("Show atlas overlay on sections")
+        self._overlay_btn = QPushButton(OVERLAY_SHOW_TEXT)
         self._overlay_btn.setToolTip(
             "Warp the registered atlas region boundaries back onto each section "
-            "image so you can see how well the fit matches the histology."
+            "image so you can see how well the fit matches the histology. "
+            "Click again to hide them."
         )
-        self._overlay_btn.clicked.connect(self._show_overlay)
+        self._overlay_btn.clicked.connect(self._toggle_overlay)
         layout.addWidget(self._overlay_btn)
+        # The button follows the overlay layers, however they were shown or hidden
+        # (this button, the layer list's eye, a manual adjustment redrawing one).
+        self._watch_overlay_layers()
 
         self._series_btn = QPushButton("Check series (AP and tilt)")
         self._series_btn.setToolTip(
@@ -389,13 +401,23 @@ class RegisterPanelWidget(QWidget):
         layout.addSpacing(18)
         adjust_box = QGroupBox("Manual atlas adjustment")
         av = QVBoxLayout(adjust_box)
-        sec_row = QHBoxLayout()
-        sec_row.addWidget(QLabel("Section:"))
-        self._adjust_combo = QComboBox()
-        self._adjust_combo.setToolTip("Pick a registered section to nudge its atlas overlay.")
-        self._adjust_combo.currentIndexChanged.connect(self._on_adjust_section_changed)
-        sec_row.addWidget(self._adjust_combo, 1)
-        av.addLayout(sec_row)
+        # The side-by-side window does every job below (landmarks, reset, plane
+        # nudges) in one place, so it heads the group, set off by a divider.
+        self._pair_btn = QPushButton("Open split panel window")
+        self._pair_btn.setToolTip(
+            "Open a window with the section on the left and the atlas on the right.\n"
+            "Place, move and delete landmark points in either pane, with the atlas\n"
+            "shown as it is currently registered. Existing landmarks are loaded and\n"
+            "can be cleared, the manual transform can be reset, the atlas can be\n"
+            "overlaid on the tissue at any opacity, and the atlas plane\n"
+            "(AP / ML / DV tilt) can be nudged against the tissue."
+        )
+        self._pair_btn.clicked.connect(self._open_pair_points)
+        av.addWidget(self._pair_btn)
+        top_divider = QFrame()
+        top_divider.setFrameShape(QFrame.HLine)
+        top_divider.setFrameShadow(QFrame.Sunken)
+        av.addWidget(top_divider)
 
         # Tool 1 - box transform, in its own outlined group.
         box_group = QGroupBox("Box transform")
@@ -466,20 +488,6 @@ class RegisterPanelWidget(QWidget):
         self._apply_lm_btn.setToolTip("Warp the atlas through the dragged landmarks, re-map probes, save.")
         self._apply_lm_btn.clicked.connect(self._apply_landmarks)
         lg.addWidget(self._apply_lm_btn)
-        # Same job as the buttons above - landmark correspondences - just done in a
-        # window where the atlas and the tissue sit side by side instead of stacked
-        # in one canvas. So it belongs at the end of this group, not in one of its own.
-        self._pair_btn = QPushButton("Open split panel window")
-        self._pair_btn.setToolTip(
-            "Open a window with the section on the left and the atlas on the right.\n"
-            "Place, move and delete landmark points in either pane, with the atlas\n"
-            "shown as it is currently registered. Existing landmarks are loaded and\n"
-            "can be cleared, the manual transform can be reset, the atlas can be\n"
-            "overlaid on the tissue at any opacity, and the atlas plane\n"
-            "(AP / ML / DV tilt) can be nudged against the tissue."
-        )
-        self._pair_btn.clicked.connect(self._open_pair_points)
-        lg.addWidget(self._pair_btn)
         av.addWidget(lm_group)
 
         # Reset applies to either tool - set it apart below a divider.
@@ -491,6 +499,14 @@ class RegisterPanelWidget(QWidget):
         self._adjust_reset_btn.setToolTip("Clear the manual correction (box or landmarks) for this section.")
         self._adjust_reset_btn.clicked.connect(self._reset_adjustment)
         av.addWidget(self._adjust_reset_btn)
+        # Which section the tools act on; clicking a section in the canvas sets it too.
+        sec_row = QHBoxLayout()
+        sec_row.addWidget(QLabel("Section:"))
+        self._adjust_combo = QComboBox()
+        self._adjust_combo.setToolTip("Pick a registered section to nudge its atlas overlay.")
+        self._adjust_combo.currentIndexChanged.connect(self._on_adjust_section_changed)
+        sec_row.addWidget(self._adjust_combo, 1)
+        av.addLayout(sec_row)
         layout.addWidget(adjust_box)
         # Active landmark-edit state. Source (atlas anchor) per point lives in the
         # Points layer `features` (travels through add/delete); `data` is the target.
@@ -1148,6 +1164,42 @@ class RegisterPanelWidget(QWidget):
         """Overlay registered atlas boundaries on each section in the viewer."""
         self._ensure_atlas(self._render_overlay)
 
+    def _overlay_layers(self) -> list:
+        return [
+            layer for layer in self._viewer.layers
+            if layer.name.startswith("Atlas overlay ")
+        ]
+
+    def overlays_shown(self) -> bool:
+        """True while any atlas overlay is on screen."""
+        return any(layer.visible for layer in self._overlay_layers())
+
+    def _toggle_overlay(self) -> None:
+        """Hide the overlays if any is shown, else draw (or redraw) them all."""
+        if self.overlays_shown():
+            for layer in self._overlay_layers():
+                layer.visible = False
+            self._sync_overlay_btn()
+        else:
+            self._show_overlay()
+
+    def _sync_overlay_btn(self, *_args) -> None:
+        shown = self.overlays_shown()
+        self._overlay_btn.setText(OVERLAY_HIDE_TEXT if shown else OVERLAY_SHOW_TEXT)
+        self._overlay_btn.setStyleSheet(OVERLAY_SHOWN_STYLE if shown else "")
+
+    def _watch_overlay_layers(self) -> None:
+        layers = self._viewer.layers
+
+        def _on_inserted(event) -> None:
+            layer = event.value
+            if layer.name.startswith("Atlas overlay "):
+                layer.events.visible.connect(self._sync_overlay_btn)
+            self._sync_overlay_btn()
+
+        layers.events.inserted.connect(_on_inserted)
+        layers.events.removed.connect(self._sync_overlay_btn)
+
     def _render_overlay(self) -> None:
         atlas = self._state.atlas
         if atlas is None:
@@ -1227,6 +1279,7 @@ class RegisterPanelWidget(QWidget):
                     blending=OVERLAY_BLENDING,
                 )
             style_overlay_layer(layer)
+            layer.visible = True  # hidden with the button, redrawn shown
             # Stash the full region-id image (the displayed layer is only edges) so a
             # hover callback can name the region under the cursor.
             layer.metadata["region_ids"] = labels

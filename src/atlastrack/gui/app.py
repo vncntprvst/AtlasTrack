@@ -478,6 +478,9 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
     )
     load_layout.addWidget(slide_loader)
     load_layout.addWidget(image_tools)
+    # Spare height goes below both; split between them, it opened a gap above
+    # Adjustments.
+    load_layout.addStretch(1)
 
     # -- Atlas: choose atlas + assign AP + section ordering ------------------
     tab_atlas = QWidget()
@@ -599,7 +602,8 @@ def _build_panel(viewer: "napari.Viewer") -> "QWidget":
 
     def _after_planes_mirrored() -> None:
         # Overlays drawn for the old planes are out of date: redraw those shown.
-        if any(layer.name.startswith("Atlas overlay ") for layer in viewer.layers):
+        # Hidden ones are redrawn when next shown.
+        if register_panel.overlays_shown():
             register_panel._show_overlay()
         register_panel._refresh_residuals()
         # The stored probe coordinates are now on the wrong side: exports use them,

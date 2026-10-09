@@ -2404,3 +2404,44 @@ def test_box_edits_sync_when_the_drag_ends_not_at_every_step(qtbot) -> None:
         assert sec.bbox_px != before                      # at the end: synced
     finally:
         viewer.close()
+
+
+@pytest.mark.qt
+def test_overlay_button_shows_and_hides(qtbot, monkeypatch) -> None:
+    """The overlay button says Hide, coloured, while any overlay is shown."""
+    import napari
+    import numpy as np
+
+    from atlastrack.gui.widgets import register_panel as rp
+
+    viewer = napari.Viewer(show=False)
+    try:
+        panel = rp.RegisterPanelWidget(_populated_state(), viewer)
+        qtbot.addWidget(panel)
+        assert panel._overlay_btn.text() == rp.OVERLAY_SHOW_TEXT
+
+        # Stand in for drawing: the real one warps the atlas.
+        def _draw() -> None:
+            name = "Atlas overlay 0"
+            if name in viewer.layers:
+                viewer.layers[name].visible = True
+            else:
+                viewer.add_labels(np.zeros((8, 8), dtype=np.uint8), name=name)
+
+        monkeypatch.setattr(panel, "_show_overlay", _draw)
+        panel._overlay_btn.click()
+        assert panel._overlay_btn.text() == rp.OVERLAY_HIDE_TEXT
+        assert panel._overlay_btn.styleSheet() == rp.OVERLAY_SHOWN_STYLE
+
+        panel._overlay_btn.click()
+        assert not viewer.layers["Atlas overlay 0"].visible
+        assert panel._overlay_btn.text() == rp.OVERLAY_SHOW_TEXT
+        assert panel._overlay_btn.styleSheet() == ""
+
+        # The layer list's eye counts too.
+        viewer.layers["Atlas overlay 0"].visible = True
+        assert panel._overlay_btn.text() == rp.OVERLAY_HIDE_TEXT
+        viewer.layers.clear()
+        assert panel._overlay_btn.text() == rp.OVERLAY_SHOW_TEXT
+    finally:
+        viewer.close()
