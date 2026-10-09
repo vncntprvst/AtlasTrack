@@ -125,3 +125,36 @@ def test_the_io_buttons_exist_and_are_plainly_named(qtbot) -> None:
         assert widget._align_btn.text() == "Open alignment"
     finally:
         viewer.close()
+
+
+def test_clear_alignment_returns_the_probe_to_geometry(qtbot, tmp_path) -> None:
+    """LO_07: the green probes carried an old alignment into a new export, and the
+    alignment window's Reset + Apply cannot remove one."""
+    from atlastrack.probes.catalog import get_layout
+    from atlastrack.probes.channels import shank_channel_coords_with_source
+    from atlastrack.project.io import load_project
+    from atlastrack.project.schema import EphysAlignment, EphysRecordingRef
+
+    widget, viewer = _panel(qtbot)
+    try:
+        probe = widget._state.project.probes[0]
+        probe.recordings = [EphysRecordingRef(path="rec", insertion_depth_um=4800.0)]
+        for shank in probe.shanks:
+            shank.ephys = EphysAlignment(feature_um=[0.0, 1000.0, 4000.0],
+                                         track_um=[0.0, 1200.0, 4000.0],
+                                         insertion_depth_um=4800.0)
+        layout = get_layout(probe.type.name)
+        assert all(shank_channel_coords_with_source(s, layout)[1] for s in probe.shanks)
+        widget._state.project_path = tmp_path / "p.json"
+        widget.refresh_probes()
+
+        widget._clear_alignment()
+
+        assert all(s.ephys is None for s in probe.shanks)
+        assert not any(shank_channel_coords_with_source(s, layout)[1] for s in probe.shanks)
+        assert len(probe.recordings) == 1                       # recordings are kept
+        saved = load_project(tmp_path / "p.json").probes[0]
+        assert all(s.ephys is None for s in saved.shanks)       # and it was saved
+        assert "cleared" in widget._status.text()
+    finally:
+        viewer.close()

@@ -200,6 +200,17 @@ class EphysPanelWidget(QWidget):
         self._align_btn.clicked.connect(self._open_alignment)
         layout.addWidget(self._align_btn)
 
+        self._clear_align_btn = QPushButton("Clear alignment")
+        self._clear_align_btn.setToolTip(
+            "Remove this probe's ephys alignment from every shank, so its electrodes "
+            "are placed from the probe's own geometry again (depth_source = geometry "
+            "in the exports). The attached recordings are kept.\n\n"
+            "'Reset' in the alignment window does not do this: applying a reset still "
+            "stores an alignment, referenced to the recording's insertion depth."
+        )
+        self._clear_align_btn.clicked.connect(self._clear_alignment)
+        layout.addWidget(self._clear_align_btn)
+
         self._fit_btn = QPushButton("Fit probe trajectory to ephys…")
         self._fit_btn.setFixedHeight(32)
         self._fit_btn.setToolTip(
@@ -864,6 +875,42 @@ class EphysPanelWidget(QWidget):
             )
             return None
         return probe_idx
+
+    def _clear_alignment(self) -> None:
+        """Drop the chosen probe's ephys alignment from all its shanks, then save."""
+        idx = self._probe_combo.currentIndex()
+        probes = self._state.project.probes
+        if not 0 <= idx < len(probes):
+            self._status.setText("No probe to clear.")
+            return
+        probe = probes[idx]
+        aligned = [s for s in probe.shanks if s.ephys is not None]
+        if not aligned:
+            self._status.setText(f"'{probe.label}' has no ephys alignment to clear.")
+            return
+        if self.isVisible():
+            answer = QMessageBox.question(
+                self, "Clear alignment",
+                f"Remove the ephys alignment from {len(aligned)} shank(s) of "
+                f"'{probe.label}'? Its electrodes go back to the probe's geometry.",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        for shank in aligned:
+            shank.ephys = None
+        msg = f"Alignment cleared for '{probe.label}' ({len(aligned)} shank(s))."
+        path = self._state.project_path
+        if path is not None:
+            try:
+                from atlastrack.project.io import save_project
+
+                save_project(self._state.project, path, slide_images=self._state.slide_images)
+                msg += f"  ·  saved → {path.name}"
+            except Exception as exc:  # noqa: BLE001
+                msg += f"  ·  save failed: {exc}"
+        else:
+            msg += "  ·  use Project ▸ Save Project to persist."
+        self._status.setText(msg)
 
     def _on_alignment_applied(self, probe_idx: int, rec_path: str | None) -> None:
         probe = self._state.project.probes[probe_idx]

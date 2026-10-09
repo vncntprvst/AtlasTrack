@@ -435,6 +435,12 @@ Needs the `ephys` extra and a probe with tip and entry already registered.
 4. Drag the anchor lines so features in the recording line up with region
    boundaries, then **Apply** to store per-channel coordinates.
 
+**Clear alignment** removes the chosen probe's alignment from all its shanks, so
+its electrodes are placed from the probe's geometry again (`depth_source` reads
+`geometry` in the exports). The attached recordings are kept. **Reset** in the
+alignment window followed by **Apply** does not do this: it still stores an
+alignment.
+
 ### 5.11 Without the GUI
 
 ```bash
