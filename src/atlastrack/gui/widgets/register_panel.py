@@ -457,9 +457,11 @@ class RegisterPanelWidget(QWidget):
         lg = QVBoxLayout(lm_group)
         self._place_lm_btn = QPushButton("Place landmarks")
         self._place_lm_btn.setToolTip(
-            "Drop draggable correspondence points on the atlas overlay (6 around the "
-            "border + 3 inside). Drag each onto the matching tissue feature for a "
-            "thin-plate-spline warp that fixes LOCAL distortions a box transform can't.\n"
+            "Drop draggable correspondence points on the atlas overlay: copied from "
+            "the nearest section that has landmarks (snapped onto this outline), or "
+            "else placed on distinctive features. Drag each onto the matching tissue "
+            "feature for a thin-plate-spline warp that fixes LOCAL distortions a box "
+            "transform can't.\n"
             "• drag = warp (pull the atlas to the tissue)\n"
             "• Ctrl+drag (or 'Move without warping' on) = move the landmark, outline stays\n"
             "• 'Add points' on, then click = add; select a point + Delete = remove"
@@ -1728,12 +1730,23 @@ class RegisterPanelWidget(QWidget):
         self._lm_origin_xy = (int(section.bbox_px[0]), int(section.bbox_px[1]))
         # Ensure the overlay layer exists so the live drag preview has a target.
         self._rerender_section_overlay(section)
-        # Continue from stored landmarks if present, else auto-place fresh ones.
+        # Continue from stored landmarks if present; else start from the nearest
+        # section's (snapped onto this atlas), else auto-place fresh ones.
+        carried_from = None
         if section.manual_landmarks is not None:
             source = np.asarray(section.manual_landmarks.source, dtype=float)
             targets = np.asarray(section.manual_landmarks.target, dtype=float)
         else:
-            source = salient_landmarks(labels)
+            from atlastrack.gui.widgets.pair_points_dialog import carried_source
+
+            carried = carried_source(
+                self._state.project, section, labels, self._warp_labels_for
+            )
+            if carried is not None:
+                source, other = carried
+                carried_from = other.index
+            else:
+                source = salient_landmarks(labels)
             targets = source.copy()
         self._landmark_idx = section.index
 
@@ -1765,8 +1778,12 @@ class RegisterPanelWidget(QWidget):
             f"stack {list(self._viewer.layers).index(layer)}/{len(self._viewer.layers)}, "
             f"visible={layer.visible}"
         )
+        copied = (
+            f"Points copied from section {carried_from}, snapped onto this outline. "
+            if carried_from is not None else ""
+        )
         self._status.setText(
-            f"Section {section.index}: drag landmarks onto the tissue (warp); Ctrl+drag "
+            f"{copied}Section {section.index}: drag landmarks onto the tissue (warp); Ctrl+drag "
             f"or 'Move without warping' to move a point; 'Add points' + click to add, Delete to remove. "
             f"Then 'Apply landmark warp'."
         )

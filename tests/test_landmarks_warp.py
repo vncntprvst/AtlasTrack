@@ -306,3 +306,19 @@ def test_auto_placement_puts_points_at_the_top_and_bottom_of_the_midline() -> No
     for y_end in (ys.min(), ys.max()):
         d = np.hypot(pts[:, 0] - 150, pts[:, 1] - y_end)
         assert d.min() < 6, (y_end, pts)
+
+
+def test_carried_landmarks_land_on_the_same_boundary() -> None:
+    from scipy import ndimage
+
+    from atlastrack.registration.landmarks_warp import _boundary_pair, carry_landmarks
+
+    here = _symmetric_section()
+    there = ndimage.zoom(here, (1.15, 0.9), order=0)  # the next, differently sized one
+    # The ventricle's top end, a nucleus' edge and the brain's ventral edge.
+    pts = np.array([[150.0, 70.0], [185.0, 100.0], [150.0, 214.0]])
+    pairs = [set(_boundary_pair(here, x, y, 2)) for x, y in pts]
+    moved = carry_landmarks(here, pts, there)
+    for (x, y), pair in zip(moved, pairs, strict=True):
+        assert set(_boundary_pair(there, x, y, 2)) == pair
+    assert moved[0][0] == pytest.approx(150 * 0.9, abs=4)  # still on the midline

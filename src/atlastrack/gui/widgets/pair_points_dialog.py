@@ -159,6 +159,46 @@ def spatial_order(points: np.ndarray) -> list[int]:
     return ring(outer) + ring(~outer)
 
 
+def nearest_with_landmarks(project, section) -> Section | None:
+    """The registered section nearest ``section`` in the series that has landmarks.
+
+    Ties go to the one before it, the way a series is usually worked through.
+    """
+    best = None
+    for slide in project.slides:
+        for other in slide.sections:
+            if other is section or other.manual_landmarks is None:
+                continue
+            if other.registration is None or not other.manual_landmarks.source:
+                continue
+            gap = other.ap_order - section.ap_order
+            key = (abs(gap), gap > 0)
+            if best is None or key < best[0]:
+                best = (key, other)
+    return None if best is None else best[1]
+
+
+def carried_source(project, section, labels, warp_labels) -> tuple[np.ndarray, Section] | None:
+    """The nearest section's landmarks moved onto ``labels`` (this section's atlas).
+
+    ``warp_labels`` is the Register panel's ``_warp_labels_for``. None when no other
+    section has landmarks, or its atlas cannot be drawn.
+    """
+    from atlastrack.registration.landmarks_warp import carry_landmarks
+
+    other = nearest_with_landmarks(project, section)
+    if other is None or warp_labels is None:
+        return None
+    try:
+        other_labels = warp_labels(other, apply_landmarks=False)
+    except Exception:  # noqa: BLE001 - fall back to auto-placement
+        return None
+    if other_labels is None:
+        return None
+    source = np.asarray(other.manual_landmarks.source, dtype=float).reshape(-1, 2)
+    return carry_landmarks(other_labels, source, labels), other
+
+
 class _PickPane(_ImagePane):
     """An image pane whose markers can be grabbed and dragged.
 
@@ -412,6 +452,13 @@ class PairPointsDialog(QDialog):
         self._load_existing()
         self._refresh_images(fit=True)
         self._refresh_markers()
+        has_neighbour = nearest_with_landmarks(state.project, section) is not None
+        self._carry_btn.setEnabled(has_neighbour)
+        # A section with no landmarks of its own starts from its neighbour's, so
+        # the same features are not placed again by hand on every section. Nothing
+        # is stored until Apply, and Undo takes them away.
+        if has_neighbour and not self._pairs:
+            self._carry_from_nearest()
 
     # ------------------------------------------------------------------ UI
 
@@ -568,6 +615,16 @@ class PairPointsDialog(QDialog):
         )
         auto.clicked.connect(self._auto_place)
         row.addWidget(auto)
+
+        self._carry_btn = QPushButton("Copy from nearest section")
+        self._carry_btn.setToolTip(
+            "Copy the points of the nearest section in the series that has "
+            "landmarks, each snapped onto the same boundary in this section's "
+            "atlas.\nThe tissue dots start on their atlas twins: drag them onto "
+            "the features as usual."
+        )
+        self._carry_btn.clicked.connect(lambda: self._carry_from_nearest())
+        row.addWidget(self._carry_btn)
 
         self._undo_btn = QPushButton("Undo")
         self._undo_btn.setToolTip("Step back one change, including a drag.")
@@ -902,6 +959,33 @@ class PairPointsDialog(QDialog):
         )
         self._refresh_markers()
         self._refresh_images()
+
+    def _carry_from_nearest(self, *, replace: bool = True) -> bool:
+        """Start from the nearest section's points; True if there were any."""
+        if self._base_labels is None:
+            self._status.setText("No registered atlas to place points on.")
+            return False
+        carried = carried_source(
+            self._state.project, self._section, self._base_labels, self._warp_labels
+        )
+        if carried is None:
+            self._status.setText("No other registered section has landmarks yet.")
+            return False
+        points, other = carried
+        self._snapshot()
+        if replace:
+            self._pairs.clear()
+            self._selected = None
+        for x, y in points:
+            self._pairs.append([(float(x), float(y)), (float(x), float(y))])
+        self._reorder_pairs()
+        self._refresh_markers()
+        self._refresh_images()
+        self._status.setText(
+            f"Copied {len(points)} points from section {other.index}, snapped onto "
+            f"this section's outlines. Drag the tissue dots onto their features."
+        )
+        return True
 
     def _undo(self) -> None:
         if not self._history:

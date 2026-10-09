@@ -414,6 +414,117 @@ def salient_landmarks(
     return _snap_into_extent(np.array(chosen, dtype=float), extent)
 
 
+#: How far a carried landmark may move to find its outline again, as a share of
+#: the section's longer side.
+_CARRY_SNAP_FRAC = 0.06
+
+
+def _boundary_pair(labels: np.ndarray, x: float, y: float, radius: int) -> tuple[int, ...]:
+    """The two commonest labels around ``(x, y)``: the boundary a point sits on.
+
+    One label when the point is inside a region rather than on an edge. Label 0
+    (outside the atlas) counts, so a point on the brain's outer edge keeps to it.
+    """
+    h, w = labels.shape
+    ix, iy = int(round(x)), int(round(y))
+    patch = labels[max(iy - radius, 0):iy + radius + 1, max(ix - radius, 0):ix + radius + 1]
+    if patch.size == 0:
+        return ()
+    values, counts = np.unique(patch, return_counts=True)
+    order = np.argsort(-counts)
+    return tuple(int(v) for v in values[order[:2]])
+
+
+def _snap_to_boundary(
+    labels: np.ndarray, x: float, y: float, pair: tuple[int, ...], reach: int
+) -> tuple[float, float]:
+    """The nearest pixel within ``reach`` lying on the boundary ``pair`` names.
+
+    For a one-label ``pair``, the nearest pixel of that region instead. Falls back
+    to the nearest boundary of any kind that touches one of the labels, then to
+    ``(x, y)`` unchanged.
+    """
+    h, w = labels.shape
+    ix, iy = int(round(min(max(x, 0), w - 1))), int(round(min(max(y, 0), h - 1)))
+    y0, x0 = max(iy - reach, 0), max(ix - reach, 0)
+    win = labels[y0:iy + reach + 1, x0:ix + reach + 1]
+    yy, xx = np.mgrid[0:win.shape[0], 0:win.shape[1]]
+    dist = (yy + y0 - y) ** 2 + (xx + x0 - x) ** 2
+    dist = np.where(dist <= reach * reach, dist, np.inf)
+
+    def _nearest(mask: np.ndarray) -> tuple[float, float] | None:
+        if not mask.any():
+            return None
+        d = np.where(mask, dist, np.inf)
+        k = int(np.argmin(d))
+        if not np.isfinite(d.flat[k]):
+            return None
+        r, c = divmod(k, win.shape[1])
+        return float(c + x0), float(r + y0)
+
+    if len(pair) == 1:
+        found = _nearest(win == pair[0])
+        return found if found is not None else (x, y)
+
+    # Each pixel's 4-neighbours, edge-padded so the border compares with itself.
+    pad = np.pad(win, 1, mode="edge")
+    neighbours = (pad[:-2, 1:-1], pad[2:, 1:-1], pad[1:-1, :-2], pad[1:-1, 2:])
+    a, b = pair
+    touches_b = np.zeros(win.shape, dtype=bool)
+    touches_a = np.zeros(win.shape, dtype=bool)
+    on_edge = np.zeros(win.shape, dtype=bool)
+    for n in neighbours:
+        touches_b |= n == b
+        touches_a |= n == a
+        on_edge |= n != win
+    exact = ((win == a) & touches_b) | ((win == b) & touches_a)
+    for mask in (exact, on_edge & ((win == a) | (win == b))):
+        found = _nearest(mask)
+        if found is not None:
+            return found
+    return (x, y)
+
+
+def carry_landmarks(
+    from_labels: np.ndarray, from_source: np.ndarray, to_labels: np.ndarray
+) -> np.ndarray:
+    """Landmarks placed on one section's atlas, moved onto another section's atlas.
+
+    Each point is first placed at the same position relative to the atlas
+    outline's bounding box, then snapped to the nearest stretch of the same
+    boundary it sat on (the same two regions, or the brain's edge), so it lands on
+    the same feature rather than merely the same spot. Points that find no such
+    boundary within reach stay where the bounding box put them. Returns ``(N, 2)``
+    ``(x, y)`` in ``to_labels``' frame.
+    """
+    from_labels = np.asarray(from_labels)
+    to_labels = np.asarray(to_labels)
+    pts = np.asarray(from_source, dtype=float).reshape(-1, 2)
+    if len(pts) == 0:
+        return pts.copy()
+
+    def _box(labels):
+        ys, xs = np.nonzero(labels > 0)
+        if ys.size == 0:
+            h, w = labels.shape
+            return 0.0, 0.0, float(w - 1), float(h - 1)
+        return float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())
+
+    fx0, fy0, fx1, fy1 = _box(from_labels)
+    tx0, ty0, tx1, ty1 = _box(to_labels)
+    sx = (tx1 - tx0) / max(fx1 - fx0, 1.0)
+    sy = (ty1 - ty0) / max(fy1 - fy0, 1.0)
+
+    radius_from = max(2, int(round(0.006 * max(from_labels.shape))))
+    reach = max(10, int(round(_CARRY_SNAP_FRAC * max(to_labels.shape))))
+    out = np.empty_like(pts)
+    for k, (x, y) in enumerate(pts):
+        pair = _boundary_pair(from_labels, x, y, radius_from)
+        mx, my = tx0 + (x - fx0) * sx, ty0 + (y - fy0) * sy
+        out[k] = _snap_to_boundary(to_labels, mx, my, pair, reach) if pair else (mx, my)
+    return out
+
+
 def _snap_into_extent(pts: np.ndarray, extent: np.ndarray) -> np.ndarray:
     """Move any point that landed off the silhouette onto the nearest overlay pixel.
 

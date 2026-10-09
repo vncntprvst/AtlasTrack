@@ -444,3 +444,50 @@ def test_the_registered_atlas_is_warped_once_not_on_every_redraw(qtbot) -> None:
     dialog._add_pair_at(50.0, 50.0)
     dialog._add_pair_at(80.0, 60.0)
     assert len(calls) == before
+
+
+# --------------------------------------------------------------- carrying over
+
+
+def _two_section_state() -> WorkflowState:
+    from atlastrack.project.schema import RegistrationResult
+
+    state = _state()
+    reg = RegistrationResult(anchoring=[0.0] * 9, output_size_px=(150, 200))
+    first = state.project.slides[0].sections[0]
+    first.registration = reg
+    first.manual_landmarks = ManualLandmarks(
+        source=[[100.0, 50.0], [40.0, 75.0], [160.0, 75.0], [100.0, 119.0]],
+        target=[[102.0, 52.0], [41.0, 75.0], [160.0, 77.0], [100.0, 119.0]],
+    )
+    second = Section(index=4, slide_idx=0, bbox_px=(0, 0, 200, 150), ap_order=4,
+                     registration=reg)
+    state.project.slides[0].sections.append(second)
+    return state
+
+
+def test_a_section_without_landmarks_starts_from_its_neighbours(qtbot) -> None:
+    from atlastrack.gui.widgets.pair_points_dialog import PairPointsDialog
+
+    state = _two_section_state()
+    second = state.project.slides[0].sections[1]
+    dialog = PairPointsDialog(state, second, warp_labels=lambda s, apply_landmarks: _labels())
+    qtbot.addWidget(dialog)
+    assert len(dialog._pairs) == 4
+    assert "section 3" in dialog._status.text()
+    assert dialog._moved_count() == 0  # tissue dots start on their atlas twins
+    assert second.manual_landmarks is None  # nothing stored until Apply
+    dialog._undo()
+    assert dialog._pairs == []
+
+
+def test_a_section_with_its_own_landmarks_keeps_them(qtbot) -> None:
+    from atlastrack.gui.widgets.pair_points_dialog import nearest_with_landmarks
+
+    state = _two_section_state()
+    first, second = state.project.slides[0].sections
+    assert nearest_with_landmarks(state.project, second) is first
+    assert nearest_with_landmarks(state.project, first) is None
+    dialog, _s, _c = _dialog(qtbot, state)  # opens the first section
+    assert len(dialog._pairs) == 4
+    assert not dialog._carry_btn.isEnabled()
