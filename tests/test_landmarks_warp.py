@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from atlastrack.atlas.planes import Anchoring
 from atlastrack.registration.landmarks_warp import (
@@ -260,3 +261,48 @@ def test_region_junctions_are_the_centres_of_each_branch_point() -> None:
     assert pts, "no junction found"
     x, y = min(pts, key=lambda p: abs(p[0] - 30) + abs(p[1] - 30))
     assert abs(x - 30) <= 2 and abs(y - 30) <= 2
+
+
+def _symmetric_section() -> np.ndarray:
+    """A mirror-symmetric 'brain' about x = 150, with paired regions either side."""
+    yy, xx = np.mgrid[0:240, 0:300]
+    lbl = np.zeros((240, 300), dtype=np.int32)
+    r = np.hypot((xx - 150) / 120.0, (yy - 120) / 95.0)
+    lbl[r <= 1] = 1
+    lbl[(r > 0.8) & (r <= 0.9)] = 5  # cortex-like layers along the surface
+    lbl[(r > 0.9) & (r <= 1)] = 6
+    for dx in (-60, 60):  # a pair of nuclei
+        lbl[((xx - 150 - dx) / 25.0) ** 2 + ((yy - 100) / 18.0) ** 2 <= 1] = 2
+    lbl[(np.abs(xx - 150) <= 6) & (yy >= 70) & (yy <= 150)] = 3  # a midline ventricle
+    lbl[(yy > 150) & (lbl == 1)] = 4  # a ventral region
+    return lbl
+
+
+def test_the_midline_is_found_upright_and_tilted() -> None:
+    from scipy import ndimage
+
+    from atlastrack.registration.landmarks_warp import find_midline
+
+    a, b = find_midline(_symmetric_section())
+    assert a == pytest.approx(150, abs=3) and b == pytest.approx(0, abs=0.03)
+
+    turned = ndimage.rotate(_symmetric_section(), 10, order=0, reshape=False)
+    a, b = find_midline(turned)
+    # rotate() turns the content anticlockwise on screen, so the top leans left.
+    assert b == pytest.approx(np.tan(np.deg2rad(10)), abs=0.05)
+    assert a + b * 120 == pytest.approx(150, abs=4)  # through the centre
+
+
+def test_one_hemisphere_has_no_midline() -> None:
+    from atlastrack.registration.landmarks_warp import find_midline
+
+    assert find_midline(_symmetric_section()[:, :150]) is None
+
+
+def test_auto_placement_puts_points_at_the_top_and_bottom_of_the_midline() -> None:
+    lbl = _symmetric_section()
+    pts = salient_landmarks(lbl)
+    (ys,) = np.nonzero(lbl[:, 150])
+    for y_end in (ys.min(), ys.max()):
+        d = np.hypot(pts[:, 0] - 150, pts[:, 1] - y_end)
+        assert d.min() < 6, (y_end, pts)

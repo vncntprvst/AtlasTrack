@@ -123,6 +123,189 @@ def _silhouette_extremes(extent: np.ndarray) -> list[tuple[float, float]]:
     return out
 
 
+#: Longest side the midline search works at. It only needs the line's position to
+#: a few pixels, and the search grows with the square of the width.
+_MIDLINE_SIDE = 192
+
+#: A row counts toward the midline only if this share of the label pairs either
+#: side of its best column match. Below it the row is not mirror-symmetric (a
+#: torn edge, a single hemisphere) and says nothing about where the midline is.
+_MIDLINE_MIN_AGREEMENT = 0.7
+
+
+#: Tilts of the midline tried, in degrees from vertical. A row-by-row mirror only
+#: works when the midline is close to vertical, so the image is turned by each of
+#: these first and the best-matching turn kept, then refined by the finer steps
+#: either side of it.
+_MIDLINE_ANGLES = np.arange(-24.0, 24.1, 6.0)
+_MIDLINE_REFINE = (-3.0, -1.5, 1.5, 3.0)
+
+
+def _mirror_rows(small: np.ndarray) -> tuple[list[float], list[float], list[float]]:
+    """Each symmetric row's mirror column: (rows, columns, matching pairs)."""
+    sh, sw = small.shape
+    fg = small > 0
+    widths = fg.sum(axis=1)
+    if widths.max() < 8:
+        return [], [], []
+    # Tissue to the left of (and including) each column, for the both-sides check.
+    left_fg = np.cumsum(fg, axis=1)
+
+    centres = np.arange(sw)
+    reach = np.arange(1, sw // 2)
+    left = centres[:, None] - reach[None, :]
+    right = centres[:, None] + reach[None, :]
+    inside = (left >= 0) & (right < sw)
+    left, right = np.clip(left, 0, sw - 1), np.clip(right, 0, sw - 1)
+
+    ys, xs, weights = [], [], []
+    for r in range(sh):
+        if widths[r] < 0.25 * widths.max():
+            continue
+        row = small[r]
+        a, b = row[left], row[right]
+        tissue = inside & ((a > 0) | (b > 0))
+        match = (tissue & (a == b)).sum(axis=1)
+        total = tissue.sum(axis=1)
+        # A midline has tissue on both sides: a single hemisphere's edge does not.
+        on_left = left_fg[r]
+        both = np.minimum(on_left, widths[r] - on_left) >= 0.3 * widths[r]
+        score = np.where(both, match - (total - match), np.iinfo(np.int64).min)
+        best = int(np.argmax(score))
+        if not both[best] or total[best] == 0:
+            continue
+        if match[best] / total[best] < _MIDLINE_MIN_AGREEMENT:
+            continue
+        ys.append(float(r))
+        xs.append(float(best))
+        weights.append(float(match[best]))
+    return ys, xs, weights
+
+
+def _fit_line(ys, xs, weights, tol: float) -> tuple[float, float] | None:
+    """``x = a + b * y`` through the points, dropping outliers; None if too few."""
+    ys_a, xs_a, wt = np.array(ys, float), np.array(xs, float), np.array(weights)
+    if len(ys_a) < 5:
+        return None
+    keep = np.ones(len(ys_a), dtype=bool)
+    for _ in range(3):
+        b, a = np.polyfit(ys_a[keep], xs_a[keep], 1, w=wt[keep])
+        resid = np.abs(xs_a - (a + b * ys_a))
+        keep = resid <= max(tol, 3.0 * float(np.median(resid[keep])))
+        if keep.sum() < 5:
+            return None
+    b, a = np.polyfit(ys_a[keep], xs_a[keep], 1, w=wt[keep])
+    return float(a), float(b)
+
+
+def find_midline(labels: np.ndarray) -> tuple[float, float] | None:
+    """The atlas midline in a label image, as ``x = a + b * y``; None if there is none.
+
+    Atlas labels are the same in both hemispheres, so along each row they read the
+    same outward from the midline in both directions. Each row's best mirror
+    column is found, rows that are not symmetric are dropped, and a line is fitted
+    through the rest, ignoring outliers. That only works for a near-vertical
+    midline, so it is done with the image turned through a range of angles and the
+    turn with the most matching labels is kept. A section holding one hemisphere
+    only has no symmetric rows, and gets None.
+    """
+    from scipy import ndimage
+
+    labels = np.asarray(labels)
+    h, w = labels.shape
+    step = max(1.0, max(h, w) / float(_MIDLINE_SIDE))
+    rows = (np.arange(int(h / step)) * step).astype(int)
+    cols = (np.arange(int(w / step)) * step).astype(int)
+    small = labels[np.ix_(rows, cols)]
+    sh, sw = small.shape
+    if min(sh, sw) < 8:
+        return None
+    # Padded to a square that holds the image at any turn, turned about its centre.
+    side = int(np.ceil(np.hypot(sh, sw))) + 2
+    py, px = (side - sh) // 2, (side - sw) // 2
+    square = np.zeros((side, side), dtype=small.dtype)
+    square[py:py + sh, px:px + sw] = small
+    centre = np.array([(side - 1) / 2.0, (side - 1) / 2.0])
+
+    def _try(angle: float):
+        t = np.deg2rad(angle)
+        # Output (row, col) o samples the input at m @ (o - centre) + centre.
+        m = np.array([[np.cos(t), -np.sin(t)], [np.sin(t), np.cos(t)]])
+        turned = ndimage.affine_transform(
+            square, m, offset=centre - m @ centre, order=0, mode="constant", cval=0
+        )
+        ys, xs, weights = _mirror_rows(turned)
+        return (sum(weights), angle, m, ys, xs, weights)
+
+    best = max((_try(a) for a in _MIDLINE_ANGLES), key=lambda t: t[0])
+    if best[0] == 0:
+        return None
+    best = max([best] + [_try(best[1] + d) for d in _MIDLINE_REFINE], key=lambda t: t[0])
+    _total, _angle, m, ys, xs, weights = best
+    line = _fit_line(ys, xs, weights, tol=2.0)
+    if line is None:
+        return None
+    a, b = line
+    # Back from the turned square to the full-size image, through two points.
+    ends = []
+    for y in (0.0, float(side - 1)):
+        r, c = m @ (np.array([y, a + b * y]) - centre) + centre
+        ends.append(((r - py) * step, (c - px) * step))
+    (r0, c0), (r1, c1) = ends
+    if abs(r1 - r0) < 1e-6:
+        return None
+    slope = (c1 - c0) / (r1 - r0)
+    # A midline more than ~30 degrees off vertical is not a coronal section's.
+    if abs(slope) > 0.6:
+        return None
+    return float(c0 - slope * r0), float(slope)
+
+
+def _midline_points(labels: np.ndarray, line: tuple[float, float]) -> list[tuple[float, float]]:
+    """Landmarks on the midline: its dorsal and ventral ends, then each crossing.
+
+    The ends are where the midline meets the brain's surface - the top and the
+    bottom centre of the section - which are among the easiest points to find
+    on tissue. The crossings are where it passes from one region into another
+    (a ventricle's edge, the floor of the aqueduct), ordered by how large the
+    regions either side are, so small slivers come last.
+    """
+    a, b = line
+    h, w = labels.shape
+    ys = np.arange(h, dtype=float)
+    xs = a + b * ys
+    ok = (xs >= 0) & (xs <= w - 1)
+    if not ok.any():
+        return []
+    ys, xs = ys[ok], xs[ok]
+    values = labels[ys.astype(int), np.round(xs).astype(int)]
+    fg = np.nonzero(values > 0)[0]
+    if fg.size < 4:
+        return []
+    top, bottom = fg[0], fg[-1]
+    # A hair inside the surface, so the handle sits on the atlas.
+    inset = max(1, int(0.01 * h))
+    out = [
+        (float(xs[min(top + inset, bottom)]), float(ys[min(top + inset, bottom)])),
+        (float(xs[max(bottom - inset, top)]), float(ys[max(bottom - inset, top)])),
+    ]
+
+    run = values[top:bottom + 1]
+    changes = np.nonzero(run[1:] != run[:-1])[0]
+    if changes.size == 0:
+        return out
+    # The length of the run of one label either side of each change.
+    edges = np.concatenate([[-1], changes, [run.size - 1]])
+    lengths = np.diff(edges)
+    crossings = []
+    for k, c in enumerate(changes):
+        size = min(lengths[k], lengths[k + 1])
+        i = top + c
+        crossings.append((size, (float(xs[i]), float(ys[i]) + 0.5)))
+    crossings.sort(key=lambda item: -item[0])
+    return out + [p for _s, p in crossings]
+
+
 #: Grid the section is divided into for coverage. 3x3 is enough to separate
 #: dorsal / middle / ventral and left / centre / right, which is the distinction
 #: that was being lost, without demanding more points than a TPS needs.
@@ -190,7 +373,9 @@ def salient_landmarks(
 ) -> np.ndarray:
     """Place landmarks on distinctive spots of the atlas overlay, with coverage.
 
-    Candidates are taken in priority order: the four silhouette **tips**, then
+    Candidates are taken in priority order: the dorsal and ventral ends of the
+    **midline** (see :func:`find_midline`), the four silhouette **tips**, the
+    midline's crossings from one region into the next, then
     **junctions** where region outlines meet (skeleton branch points), then
     high-curvature silhouette **corners**, then the geometric
     :func:`auto_landmarks` ring as fill. :func:`_spread_select` keeps every point
@@ -208,8 +393,17 @@ def salient_landmarks(
     min_dist = max(10.0, 0.10 * min(h, w))
 
     ring = [(float(x), float(y)) for x, y in auto_landmarks(extent)]
+    # The midline's ends come first: the top and bottom centre of the section are
+    # the points most easily found on tissue, and the lowest pixel of the
+    # silhouette - the old "bottom tip" - usually lies off to one side of them.
+    line = find_midline(labels)
+    midline = _midline_points(np.asarray(labels), line) if line is not None else []
+    tips = _silhouette_extremes(extent)  # top, bottom, left, right
     cands = (
-        _silhouette_extremes(extent)
+        midline[:2]
+        + tips[2:]
+        + tips[:2]
+        + midline[2:]
         + _region_junctions(labels)
         + _silhouette_corners(extent)
         + ring
