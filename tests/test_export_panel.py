@@ -460,7 +460,7 @@ def test_all_coordinate_files_are_written_at_once(qtbot, monkeypatch, tmp_path):
         monkeypatch.setattr(channels, "export_channel_csv",
                             lambda project, path, atlas=None: written.append(Path(path).name) or 3)
         monkeypatch.setattr(channels, "export_paxinos_csv",
-                            lambda project, path, alignment=None: written.append(Path(path).name) or 3)
+                            lambda project, path, **k: written.append(Path(path).name) or 3)
         viz._write_all_csv(str(tmp_path / "P electrode coordinates.csv"))
         align = viz._paxinos_combo.currentData()
         assert written == ["P electrode coordinates - CCF.csv",
@@ -510,5 +510,17 @@ def test_the_three_views_are_written_with_the_project_name(qtbot, monkeypatch, t
         assert seen["stem"] == "LO_test" and seen["out_dir"] == str(tmp_path)
         assert seen["labels"] is True              # on by default
         assert "Saved 3 views (LO_test - back / top / side)" in viz._status.text()
+    finally:
+        viewer.close()
+
+
+def test_the_paxinos_help_sits_with_the_alignment_when_exporting_all(qtbot):
+    viz, viewer = _panel(qtbot)
+    try:
+        viz._format_combo.setCurrentIndex(viz._format_combo.findData("csv_all"))
+        assert viz._paxinos_row.isHidden()  # no checkbox, and no lone "?" either
+        assert not viz._align_help.isHidden() and viz._paxinos_combo.isEnabled()
+        viz._format_combo.setCurrentIndex(viz._format_combo.findData("csv"))
+        assert not viz._paxinos_row.isHidden() and viz._align_help.isHidden()
     finally:
         viewer.close()

@@ -445,3 +445,26 @@ def test_neuronexus_poly2_layout_matches_the_drawing() -> None:
     assert np.allclose(np.diff(left), 50.0) and np.allclose(np.diff(right), 50.0)
     assert np.allclose(right - left, 25.0)
     assert layout.fiber_offset_above_top_site_um == pytest.approx(100.0)
+
+
+def test_export_paxinos_csv_names_each_channels_region(tmp_path: Path, monkeypatch) -> None:
+    """With an atlas, the Paxinos CSV carries the same region columns as the CCF one,
+    looked up at each channel's atlas position."""
+    from atlastrack.probes import channels
+
+    looked_up = []
+
+    def _regions(atlas, coords):
+        looked_up.append(np.asarray(coords).copy())
+        return [("IRN", 136, "#ff3366")] * len(coords)
+
+    monkeypatch.setattr(channels, "channel_regions", _regions)
+    project = _make_project_with_coords()
+    out = tmp_path / "paxinos.csv"
+    export_paxinos_csv(project, out, atlas=object())
+    rows = list(csv.DictReader(out.read_text(encoding="utf-8").splitlines()))
+    assert {"region", "region_id", "region_color"} <= set(rows[0])
+    assert (rows[0]["region"], rows[0]["region_id"], rows[0]["region_color"]) == (
+        "IRN", "136", "#ff3366")
+    # Looked up in the atlas (CCF µm), not at the converted millimetres.
+    assert np.allclose(looked_up[0], project_channel_coords(project)[("p1", 0)])

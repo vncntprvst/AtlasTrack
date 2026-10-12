@@ -396,8 +396,8 @@ with a file name made from the probes and the project.
 
 | Format | What you get |
 |---|---|
-| Electrode coordinates (CSV) | One row per electrode (recording channel), with its atlas region |
-| All electrode coordinate files (CSV) | In one go: CCF with regions, Paxinos (with the chosen alignment), and CCF with the **Region atlas**'s names when it differs |
+| Electrode coordinates (CSV) | One row per electrode (recording channel), with its atlas region. Ticked **Convert to Paxinos**, millimetres from bregma, with the region named by the **Region atlas** (Chon/Kim gives Franklin-Paxinos names) |
+| All electrode coordinate files (CSV) | In one go: CCF with regions, Paxinos (with the chosen alignment) with regions, and CCF with the **Region atlas**'s names when it differs |
 | Probe tracks for Python / HERBS (pkl) | The tracks, for HERBS or your own Python scripts |
 
 **Figures** - pick a **Figure**, then **Create**. The dialog opens in the same

@@ -516,13 +516,18 @@ def export_paxinos_csv(
     *,
     probe_label: str | None = None,
     alignment: str | None = None,
+    atlas=None,
 ) -> int:
     """Export per-channel coordinates in **Paxinos** stereotaxic mm (bregma origin).
 
     Columns: ``probe, shank, channel, ap_mm, ml_mm, dv_mm`` where AP is
-    anterior-positive, ML 0 at the midline, DV depth below bregma. ``alignment``
-    selects the CCF→stereotaxic transform (5° pitch + scaling); see
-    :data:`atlastrack.io.ccf_coords.PAXINOS_ALIGNMENTS`. Returns the row count.
+    anterior-positive, ML 0 at the midline, DV depth below bregma - plus the
+    :data:`REGION_COLUMNS` when an ``atlas`` is given, as in
+    :func:`export_channel_csv`. The region is looked up at the channel's atlas
+    position, before conversion; the conversion is an estimate and moves nothing
+    within the atlas. ``alignment`` selects the CCF→stereotaxic transform (5° pitch
+    + scaling); see :data:`atlastrack.io.ccf_coords.PAXINOS_ALIGNMENTS`. Returns the
+    row count.
     """
     from atlastrack.io.ccf_coords import (
         DEFAULT_PAXINOS_ALIGNMENT,
@@ -541,7 +546,10 @@ def export_paxinos_csv(
     n_rows = 0
     with out_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["probe", "shank", "channel", "ap_mm", "ml_mm", "dv_mm"])
+        header = ["probe", "shank", "channel", "ap_mm", "ml_mm", "dv_mm"]
+        if atlas is not None:
+            header.extend(REGION_COLUMNS)
+        writer.writerow(header)
         for (label, shank_idx), coords in sorted(coords_map.items()):
             if probe_label is not None and label != probe_label:
                 continue
@@ -549,11 +557,15 @@ def export_paxinos_csv(
                 coords[:, 0], coords[:, 1], coords[:, 2],
                 alignment=align, anchors=anchors,
             )
+            regions = channel_regions(atlas, coords) if atlas is not None else None
             for ch_idx in range(len(coords)):
-                writer.writerow([
+                row = [
                     label, shank_idx, ch_idx,
                     f"{ap_mm[ch_idx]:.3f}", f"{ml_mm[ch_idx]:.3f}", f"{dv_mm[ch_idx]:.3f}",
-                ])
+                ]
+                if regions is not None:
+                    row.extend(regions[ch_idx])
+                writer.writerow(row)
                 n_rows += 1
 
     return n_rows

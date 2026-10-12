@@ -710,7 +710,9 @@ def export_cmd(
     pax_path = out_dir / f"{base} - Paxinos.csv"
     region_atlas = bg_atlas if regions else None
     n_ccf = export_channel_csv(project, ccf_path, atlas=region_atlas)
-    n_pax = export_paxinos_csv(project, pax_path, alignment=paxinos_alignment)
+    n_pax = export_paxinos_csv(
+        project, pax_path, alignment=paxinos_alignment, atlas=region_atlas
+    )
 
     if n_ccf == 0:
         typer.echo(

@@ -368,26 +368,39 @@ class VizExportPanelWidget(QWidget):
         fmt_row.addWidget(self._format_combo, 1)
         export_layout.addLayout(fmt_row)
 
-        pax_row = QHBoxLayout()
+        def _help_button() -> QToolButton:
+            button = QToolButton()
+            button.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxQuestion))
+            button.setAutoRaise(True)
+            button.setToolTip("What Paxinos conversion means, and how much to trust it")
+            button.clicked.connect(self._show_paxinos_help)
+            return button
+
+        # In a widget of its own, so "All" can hide the row whole: hiding only the
+        # checkbox left the "?" alone on an empty line.
+        self._paxinos_row = QWidget()
+        pax_row = QHBoxLayout(self._paxinos_row)
+        pax_row.setContentsMargins(0, 0, 0, 0)
         self._paxinos_check = QCheckBox("Convert to Paxinos stereotaxic coordinates")
         self._paxinos_check.toggled.connect(self._on_paxinos_toggled)
         pax_row.addWidget(self._paxinos_check, 1)
-        help_btn = QToolButton()
-        help_btn.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxQuestion))
-        help_btn.setAutoRaise(True)
-        help_btn.setToolTip("What Paxinos conversion means, and how much to trust it")
-        help_btn.clicked.connect(self._show_paxinos_help)
-        pax_row.addWidget(help_btn)
-        export_layout.addLayout(pax_row)
+        pax_row.addWidget(_help_button())
+        export_layout.addWidget(self._paxinos_row)
 
         align_row = QHBoxLayout()
-        align_row.addSpacing(18)  # indented: it only qualifies the checkbox above
+        # Indented under the checkbox it qualifies; not with "All", which has none.
+        self._align_indent = QWidget()
+        self._align_indent.setFixedWidth(18)
+        align_row.addWidget(self._align_indent)
         self._paxinos_label = QLabel("Alignment:")
         align_row.addWidget(self._paxinos_label)
         self._paxinos_combo = QComboBox()
         for label, key in _PAXINOS_ALIGNMENT_CHOICES:
             self._paxinos_combo.addItem(label, key)
         align_row.addWidget(self._paxinos_combo, 1)
+        # With "All" the "?" moves here, next to the one Paxinos choice left.
+        self._align_help = _help_button()
+        align_row.addWidget(self._align_help)
         export_layout.addLayout(align_row)
 
         # Only meaningful for the section-series format, so shown only for it
@@ -779,7 +792,10 @@ class VizExportPanelWidget(QWidget):
         self._paxinos_check.setEnabled(csv)
         # "All" writes the CCF and the Paxinos files both; only the alignment is a
         # choice there.
-        self._paxinos_check.setVisible(fmt != "csv_all")
+        every = fmt == "csv_all"
+        self._paxinos_row.setVisible(not every)
+        self._align_indent.setVisible(not every)
+        self._align_help.setVisible(every)
         self._paxinos_check.setToolTip(
             ""
             if csv
@@ -906,7 +922,8 @@ class VizExportPanelWidget(QWidget):
                 notes.append("no atlas, so no region columns")
             pax = folder / f"{stem} - Paxinos {align}.csv"
             try:
-                export_paxinos_csv(self._state.project, pax, alignment=align)
+                export_paxinos_csv(self._state.project, pax, alignment=align,
+                                   atlas=self._display_atlas)
                 written.append(pax)
             except Exception as exc:  # noqa: BLE001 - the others are still worth having
                 notes.append(f"no Paxinos file: {exc}")
@@ -1057,7 +1074,9 @@ class VizExportPanelWidget(QWidget):
 
     def _write_channel_csv(self, path: str, *, paxinos: bool) -> None:
         if paxinos:
-            self._do_write_channel_csv(path, paxinos=True)
+            # Region columns from the chosen region atlas (Chon/Kim gives Paxinos
+            # names); the registration atlas when none is chosen.
+            self._ensure_display_atlas(lambda: self._do_write_channel_csv(path, paxinos=True))
             return
         # The CCF CSV carries region columns, which need the atlas. Load it lazily
         # (as the 3D view does) rather than silently writing coordinates only.
@@ -1072,8 +1091,12 @@ class VizExportPanelWidget(QWidget):
 
             if paxinos:
                 align = self._paxinos_combo.currentData()
-                n = export_paxinos_csv(self._state.project, path, alignment=align)
+                atlas = self._display_atlas
+                n = export_paxinos_csv(self._state.project, path, alignment=align,
+                                       atlas=atlas)
                 what = f"Paxinos CSV ({align})"
+                if atlas is None:
+                    what += ", no atlas so no region columns"
             else:
                 atlas = self._state.atlas
                 n = export_channel_csv(self._state.project, path, atlas=atlas)

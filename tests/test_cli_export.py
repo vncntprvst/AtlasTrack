@@ -105,7 +105,9 @@ def test_export_writes_ccf_and_paxinos(tmp_path) -> None:
     assert {r[0] for r in rows} == {"ProbeA"}
 
     pax_header, pax_rows = _read(pax)
-    assert pax_header == ["probe", "shank", "channel", "ap_mm", "ml_mm", "dv_mm"]
+    # The region columns, when the CCF file has them, are appended here too.
+    assert pax_header[:6] == ["probe", "shank", "channel", "ap_mm", "ml_mm", "dv_mm"]
+    assert pax_header[6:] == header[7:]
     assert len(pax_rows) == len(rows)
 
 
